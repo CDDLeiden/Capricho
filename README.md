@@ -15,11 +15,13 @@ from CompoundMapper.unichem import UniChem
 from rdkit import Chem
 import pandas as pd
 
+uchem = UniChem()
+
 smiles = "O=C(NC[C@@H](c1ccc(Cl)cc1)N1CCOCC1)c1sc(-c2ncccn2)nc1C(F)(F)F"
 inchikey = Chem.MolToInchiKey(Chem.MolFromSmiles(smiles))
 inchi = Chem.MolToInchi(Chem.MolFromSmiles(smiles))
 
-res = uchem.get_connectivity(inchikey, id_type="inchikey", source_id=1)
+res = uchem.get_connectivity(inchikey, id_type="inchikey")
 df = pd.DataFrame.from_dict(res)
 # df = df.query("id == 1") # This is the source_id for the ChEMBL database
 comparison_cols = [c for c in df.columns if c.startswith("comparison_")]
