@@ -1,0 +1,64 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "compound-mapper"
+dynamic = ["version"]
+description = "A collection of functionalities for mapping compounds into different IDs and retrieving data"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.7"
+license = { file = "LICENSE" }
+keywords = ["TODO"]
+authors = [{ name = "David Araripe", email = "david.araripe17@gmail.com" }]
+maintainers = [{ name = "David Araripe", email = "david.araripe17@gmail.com" }]
+classifiers = [
+  # "TODO",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+
+dependencies = ["chembl_webresource_client", "pandas", "loguru"]
+
+[project.optional-dependencies]
+dev = ["ruff", "isort", "black"]
+
+[project.urls]
+homepage = "https://github.com/David-Araripe/CompoundMapper"
+repository = "https://github.com/David-Araripe/CompoundMapper"
+# documentation = "https://readthedocs.org" TODO
+
+# [tool.setuptools]
+# include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {attr = "CompoundMapper.__version__"}
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+fix = true
+ignore = ['E501'] # sometimes it goes longer on the docstrings...
+
+[tool.isort]
+profile = "black"
+
+[tool.black]
+target-version = ['py39']
+exclude = '''
+(
+    asv_bench/env
+  | \.egg
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.nox
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+  | setup.py
+)
+'''
