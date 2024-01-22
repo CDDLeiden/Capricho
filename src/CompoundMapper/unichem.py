@@ -165,6 +165,9 @@ class UniChem(BaseUniChem):
         parsed = []
         if res.ok:
             response = res.json()
+            if "sources" not in response.keys():
+                logger.warning(f"No compounds found for {compound}")
+                return
             if len(response["sources"]) == 1:
                 logger.warning(f"No compounds found for {compound}")
                 return
