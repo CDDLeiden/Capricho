@@ -8,6 +8,7 @@ import numpy as np
 # import pubchempy as pcp
 import pandas as pd
 from chembl_webresource_client.new_client import new_client
+from loguru import logger
 
 assays_api = new_client.assay
 activity_api = new_client.activity
@@ -81,6 +82,8 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
     )
     if result:
         for r, mol_id in zip(result, molecule_chembl_id):
+            if r is None:
+                logger.warning(f"No information found for molecule {mol_id}")
             hierarchy_active_id = r.get("molecule_hierarchy", {}).get(
                 "active_chembl_id", None
             )
