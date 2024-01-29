@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from loguru import logger
 from rdkit import Chem
+from requests.exceptions import HTTPError
 from tqdm import tqdm
 
 from CompoundMapper.chembl import molecule_info_from_chembl
@@ -59,11 +60,16 @@ for jumpID, inchikey in tqdm(
     zip(subset[meta_col], subset[inchikey_col]), total=subset.shape[0]
 ):
     counter += 1
-    if counter == 10:
+    if counter == 5:
         time.sleep(1.5)
         counter = 0
+    try:
+        res = unichem.get_connectivity(inchikey)
+    except HTTPError:
+        logger.warning(f"HTTP ERROR FOR ID {jumpID}")
+        results_dict.update({jumpID: None})
+        continue
 
-    res = unichem.get_connectivity(inchikey)
     if res is not None:
         uchem_df = unichem_res_to_df(res)
         if uchem_df.empty:
