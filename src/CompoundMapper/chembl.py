@@ -1,24 +1,33 @@
-# -*- coding: utf-8 -*-
 """Module holding functionalities for the ChEMBL API."""
-
-import re
+from typing import List, Tuple, Union
 
 import numpy as np
 
-# import pubchempy as pcp
 import pandas as pd
 from chembl_webresource_client.new_client import new_client
-from loguru import logger
+from .log_config import logger
 
 assays_api = new_client.assay
 activity_api = new_client.activity
 compounds_api = new_client.molecule
-CAS_N_REGEX = re.compile(r"\d{2,7}-\d{2}-\d")
+
+pd.set_option('future.no_silent_downcasting', True) # temporary; to be removed after pandas 3.0
 
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
 
+def find_dict_in_dataframe(df):
+    cols_w_dicts = []
+    for col in df.columns:
+        if df[col].apply(lambda x: isinstance(x, dict)).any():
+            logger.info(f"Column '{col}' contains dictionaries.")
+            logger.info("Rows with dictionaries: "
+                        ' '.join(df[df[col].apply(lambda x: isinstance(x, dict))].index.astype(str))
+                        )
+            cols_w_dicts.append(col)
+    if cols_w_dicts:
+        return cols_w_dicts
 
 def get_publications_details(assay_chembl_ids: list) -> dict:
     """From a list of ChEMBL assay IDs, get the publication details.
@@ -84,23 +93,35 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
         for r, mol_id in zip(result, molecule_chembl_id):
             if r is None:
                 logger.warning(f"No information found for molecule {mol_id}")
-            hierarchy_active_id = r.get("molecule_hierarchy", {}).get(
-                "active_chembl_id", None
-            )
-            hierarchy_molecule_id = r.get("molecule_hierarchy", {}).get(
-                "molecule_chembl_id", None
-            )
-            hierarchy_parent_id = r.get("molecule_hierarchy", {}).get(
-                "parent_chembl_id", None
-            )
-            canonical_smiles = r.get("molecule_structures", {}).get(
-                "canonical_smiles", None
-            )
-            standard_inchikey = r.get("molecule_structures", {}).get(
-                "standard_inchi_key", None
-            )
-            r.pop("molecule_hierarchy")
-            r.pop("molecule_structures")
+                continue
+            if r['molecule_hierarchy'] is not None:
+                hierarchy_active_id = r.get("molecule_hierarchy", {}).get(
+                    "active_chembl_id", None
+                )
+                hierarchy_molecule_id = r.get("molecule_hierarchy", {}).get(
+                    "molecule_chembl_id", None
+                )
+                hierarchy_parent_id = r.get("molecule_hierarchy", {}).get(
+                    "parent_chembl_id", None
+                )
+                r.pop("molecule_hierarchy")
+            else:
+                logger.warning(f"No hierarchy information found for molecule {mol_id}")
+                hierarchy_active_id = None
+                hierarchy_molecule_id = None
+                hierarchy_parent_id = None
+            if r['molecule_structures'] is not None:
+                canonical_smiles = r.get("molecule_structures", {}).get(
+                    "canonical_smiles", None
+                )
+                standard_inchikey = r.get("molecule_structures", {}).get(
+                    "standard_inchi_key", None
+                )
+                r.pop("molecule_structures")
+            else:
+                logger.warning(f"No structure information found for molecule {mol_id}")
+                canonical_smiles = None
+                standard_inchikey = None
             extracted[mol_id] = {
                 "hierarchy_active_id": hierarchy_active_id,
                 "hierarchy_molecule_id": hierarchy_molecule_id,
@@ -153,8 +174,16 @@ def assay_info_from_chembl(
     )
     if assays:
         assays_df = pd.DataFrame.from_records(assays)
+        if find_dict_in_dataframe(assays_df) is not None:
+            logger.warning('Keeping only mutation info from `variant_sequence`.')
+            assays_df = assays_df.assign(
+                variant_sequence=lambda x: x.variant_sequence.apply(
+                    lambda y: y.get('mutation') if isinstance(y, dict) else y
+                )
+            )
     else:
-        raise ValueError(f"No assays found for the ids: {assay_chembl_ids}")
+        activity_kwargs.pop('assay_chembl_id__in')
+        raise ValueError(f"No assays found for the ids: {assay_chembl_ids} with the parameters: {activity_kwargs}")
     return assays_df
 
 
@@ -257,7 +286,7 @@ def process_bioactivities(bioactivities_df: pd.DataFrame) -> pd.DataFrame:
 
 
 def filtered_data_workflow(
-    molecule_ids: list, confidence_scores: list = [9, 8]  # noqa : B006
+    molecule_ids: list, confidence_scores: Union[List, Tuple] = (9, 8)
 ) -> pd.DataFrame:
     """
     Retrieves and merges data from ChEMBL for given molecule IDs, filtered by specified confidence scores.
@@ -278,7 +307,7 @@ def filtered_data_workflow(
     unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
     # Step 3: Get assay information for these unique assay IDs & merge data
     assays_df = assay_info_from_chembl(
-        unique_assay_ids, confidence_scores=confidence_scores
+        unique_assay_ids, confidence_scores=list(confidence_scores)
     )
     merged_df = pd.merge(
         bioactivities_df,
