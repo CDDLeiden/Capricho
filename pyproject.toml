@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = ["setuptools>=64", "setuptools_scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -18,7 +18,13 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 
-dependencies = ["chembl_webresource_client", "pandas", "loguru"]
+dependencies = [
+  "chem-filters @ git+https://github.com/David-Araripe/chemFilters.git",
+  "chembl_webresource_client",
+  "pandas",
+  "loguru",
+  "scipy"
+  ]
 
 [project.optional-dependencies]
 dev = ["ruff", "isort", "black"]
@@ -28,8 +34,8 @@ homepage = "https://github.com/David-Araripe/CompoundMapper"
 repository = "https://github.com/David-Araripe/CompoundMapper"
 # documentation = "https://readthedocs.org" TODO
 
-# [tool.setuptools]
-# include-package-data = true
+[tool.setuptools_scm]
+write_to = "src/CompoundMapper/_version.py"
 
 [tool.setuptools.dynamic]
 version = {attr = "CompoundMapper.__version__"}
