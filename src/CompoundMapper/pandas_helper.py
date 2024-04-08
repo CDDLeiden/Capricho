@@ -1,0 +1,107 @@
+"""Module containing helper functions for manipulating pandas DataFrames"""
+import functools
+import pandas as pd
+import numpy as np
+from scipy.stats import median_abs_deviation
+from typing import String, Union
+
+def format_value(x) -> String:
+    """Helper function to format a value to a string with 4 decimal places. This function
+    is used to store the original pChEMBL values as strings separated by ";".
+
+    Args:
+        x: Value to be formatted
+
+    Returns:
+        x: Formatted value
+    """    
+    if isinstance(x, float):
+        return f"{x:.4f}"
+    elif isinstance(x, int):
+        return str(x)
+    else:
+        return x
+
+def aggr_val_series(series: pd.Series) -> String:
+    """"Aggregate a pandas Series into a string with values separated by a semicolon."""
+    return ";".join([format_value(x) for x in series])
+
+def get_mad(values) -> Union[float, np.nan]:
+    """Calculate the MAD for a list of numerical values. If only one value, return NaN."""
+    if len(values) > 1:
+        return median_abs_deviation(values)
+    else:
+        return np.nan
+    
+def merge_dataframes(dfs, id_cols) -> pd.DataFrame:
+    """
+    Merge a list of DataFrames based on id_cols. Useful reference for merges:
+    https://stackoverflow.com/questions/53645882/pandas-merging-101
+
+    Args:
+        dfs: List of DataFrames to be merged
+        id_cols: List of columns to be used as keys for merging
+
+    Returns:
+        merged_df: Merged DataFrame
+    """
+    return functools.reduce(
+        lambda left, right: pd.merge(left, right, on=id_cols, how="inner"), dfs
+    )
+
+
+def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataFrame:
+    """Apply a function to a list of columns (*cols) a grouped dataframe and
+    merge the results based on id_cols.
+
+    Args:
+        grpd: grouped dataframe
+        func: callable function to be applied
+        idcols: list of columns to be used as index
+    """
+    results = []
+    for col in cols:
+        results.append(grpd[col].apply(func).reset_index().set_index(idcols).copy())
+    return pd.concat(results, ignore_index=False, axis=1).reset_index()
+
+
+def assign_stats(df: pd.DataFrame, sep=';',  value_col="pchembl_value") -> pd.DataFrame:
+    """Assign statistics to a DataFrame based on a column with multiple values separated by
+    a particular separator, e.g. ';'.
+
+    Args:
+        df: pd.DataFrame to be processed.
+        sep: string separating the values. Defaults to ';'.
+        value_col: column containing the values to be processed. Defaults to "pchembl_value".
+
+    Returns:
+        pd.DataFrame: DataFrame with the statistics assigned. as columns:
+    >>> new_cols = [
+    >>>     f"{value_col}_mean",
+    >>>     f"{value_col}_std",
+    >>>     f"{value_col}_median",
+    >>>     f"{value_col}_mad",
+    >>>     f"{value_col}_counts",
+    >>> ]
+    """    
+    
+    value_series = (
+        df[value_col].astype(str).str.split(sep).apply(lambda x: list(map(float, x)))
+    )
+    new_cols = [
+        f"{value_col}_mean",
+        f"{value_col}_std",
+        f"{value_col}_median",
+        f"{value_col}_mad",
+        f"{value_col}_counts",
+    ]
+    values = [
+        value_series.apply(np.mean),
+        value_series.apply(np.std),
+        value_series.apply(np.median),
+        value_series.apply(get_mad),
+        value_series.apply(lambda x: len(x)),
+    ]
+    for c, v in zip(new_cols, values):
+        df[c] = v
+    return df
