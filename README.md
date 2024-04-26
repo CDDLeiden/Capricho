@@ -1,5 +1,17 @@
 # CompoundMapper
-A collection of functionalities for mapping compounds into different IDs and retrieving data
+TODO: rename the package
+
+Initially we thought about using UniChem for mapping the compounds (hence why the package name and the unichem.py) module, but with time we've realized this was better to do with SmallWorld.
+
+While SmallWorld requires a license for using their service, there's still a [open-source package](https://github.com/matteoferla/Python_SmallWorld_API/tree/main) for interacting with it:
+
+The package I used for interacting with SmallWorld is a modified fork of this open-source package, so you can get the gist of the workflow. However, the added value of my fork is that it makes the requests directly to our dedicated server to SmallWorld, always retrieving the full response from the query. The `Python_SmallWorld_API`, however, often hangs without being able to retrieve the full response from the server, as the open version of it tries to limit requests to the server.
+
+⚠️ This is not a finished version yet ⚠️
+
+There are still a few things I would like to implement, but I just need to take the time (e.g.: being able to identify duplicate mols from fingerprints). The code is mostly in place already, I just need to make some tests and add extra functionalties.
+
+Something else I would like to add is a command-line-interface so one can download a target-specific dataset from the terminal.
 
 ## Installation:
 Clone the repo and then you can install it in your envionment by:
