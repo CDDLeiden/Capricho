@@ -67,7 +67,12 @@ def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataF
     """
     results = []
     for col in cols:
-        results.append(grpd[col].apply(func).reset_index().set_index(idcols).copy())
+        try:
+            results.append(grpd[col].apply(func).reset_index().set_index(idcols).copy())
+        except Exception as e:
+            logger.error(f"Error applying function to column {col}: {e}")
+            logger.error(f"Exception type: {type(e).__name__}")
+            raise e
     return pd.concat(results, ignore_index=False, axis=1).reset_index()
 
 
@@ -118,7 +123,7 @@ def find_dict_in_dataframe(df):
             logger.info(f"Column '{col}' contains dictionaries.")
             logger.info(
                 "Rows with dictionaries: "
-                " ".join(df[df[col].apply(lambda x: isinstance(x, dict))].index.astype(str))
+                + " ".join(df[df[col].apply(lambda x: isinstance(x, dict))].index.astype(str))
             )
             cols_w_dicts.append(col)
     if cols_w_dicts:
