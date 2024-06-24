@@ -1,11 +1,12 @@
 """Module containing helper functions for processing repeated elements in a DataFrame"""
 
-import numpy as np
-import pandas as pd
 from typing import Iterable, List
 
+import numpy as np
+import pandas as pd
+
 from ..logger import logger
-from .pandas_helper import apply_func_grpd, aggr_val_series, assign_stats
+from .pandas_helper import aggr_val_series, apply_func_grpd, assign_stats
 
 
 def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[int]]:
@@ -74,7 +75,10 @@ def repeated_indices_from_array_series(series: Iterable) -> List[List[int]]:
 
 
 def process_repeat_mols(
-    df: pd.DataFrame, repeat_element_idxs: List[List[int]], solve_strat: str = "keep"
+    df: pd.DataFrame,
+    repeat_element_idxs: List[List[int]],
+    solve_strat: str = "keep",
+    extra_id_cols: List[str] = [],
 ) -> pd.DataFrame:
     """Process the dataframe according to repeated elements identified
     with the function `find_repeated_arr_from_series`. The standard criteria here
@@ -91,6 +95,9 @@ def process_repeat_mols(
         solve_strat: strategy to solve the repeated elements. If 'drop', then both the
             points within >= 1 log unit difference will be dropped. If 'keep', then
             no values will be dropped.
+        extra_id_cols: list of extra identification columns you might have for your own
+            compounds that you'd like to use to avoid mixing data & to keep in the final
+            dataframe.
 
     Returns:
         df: dataframe with the repeated elements processed.
@@ -123,7 +130,7 @@ def process_repeat_mols(
     if solve_strat == "drop":
         logger.info(f"{points_dropped} points will be removed from the dataset")
 
-    id_cols = ["JUMP_ID", "repeat_mapping", "target_chembl_id"]
+    id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
     multival_cols = [
         "standard_smiles",
         "pchembl_value",
