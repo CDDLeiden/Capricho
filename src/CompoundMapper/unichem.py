@@ -36,9 +36,7 @@ class BaseUniChem(ABC):
 
     def _check_params(self, endpoint, cpd_id) -> None:
         if endpoint not in self.available_endpoints():
-            raise ValueError(
-                f"Endpoint {endpoint} not in available sources: {self.available_endpoints()}"
-            )
+            raise ValueError(f"Endpoint {endpoint} not in available sources: {self.available_endpoints()}")
         if cpd_id not in self.available_ids():
             raise ValueError(
                 f"Compound identifier {cpd_id} not in available identifiers: {self.available_ids()}"
@@ -81,14 +79,10 @@ class UniChem(BaseUniChem):
         endpoint="compounds",
         cpd_id="inchikey",
     ) -> None:
-        super().__init__(
-            pooling_interval, total_retries, backoff_factor, base_url, endpoint, cpd_id
-        )
+        super().__init__(pooling_interval, total_retries, backoff_factor, base_url, endpoint, cpd_id)
         self.last_request = None  # for debugging purposes
 
-    def get_compound(
-        self, compound, id_type="inchikey", source_id=None
-    ) -> dict:  # TODO
+    def get_compound(self, compound, id_type="inchikey", source_id=None) -> dict:  # TODO
         """Uses the UniChem API to retrieve compounds based on a given compound's
         connectivities. Input can be either any of `self.available_ids()`.
 

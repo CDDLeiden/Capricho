@@ -48,9 +48,9 @@ ignore = ['E501'] # sometimes it goes longer on the docstrings...
 
 [tool.isort]
 profile = "black"
-line-length = 110
 
 [tool.black]
+line-length = 110
 target-version = ['py39']
 exclude = '''
 (

@@ -6,7 +6,9 @@ import numpy as np
 
 import pandas as pd
 from chembl_webresource_client.new_client import new_client
+
 from .logger import logger
+from .core.pandas_helper import find_dict_in_dataframe
 
 assays_api = new_client.assay
 activity_api = new_client.activity
@@ -20,22 +22,6 @@ if pd.__version__ < "3.0.0":
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
-
-
-def find_dict_in_dataframe(df):
-    cols_w_dicts = []
-    for col in df.columns:
-        if df[col].apply(lambda x: isinstance(x, dict)).any():
-            logger.info(f"Column '{col}' contains dictionaries.")
-            logger.info(
-                "Rows with dictionaries: "
-                " ".join(
-                    df[df[col].apply(lambda x: isinstance(x, dict))].index.astype(str)
-                )
-            )
-            cols_w_dicts.append(col)
-    if cols_w_dicts:
-        return cols_w_dicts
 
 
 def get_publications_details(assay_chembl_ids: list) -> dict:
@@ -104,15 +90,9 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
                 logger.warning(f"No information found for molecule {mol_id}")
                 continue
             if r["molecule_hierarchy"] is not None:
-                hierarchy_active_id = r.get("molecule_hierarchy", {}).get(
-                    "active_chembl_id", None
-                )
-                hierarchy_molecule_id = r.get("molecule_hierarchy", {}).get(
-                    "molecule_chembl_id", None
-                )
-                hierarchy_parent_id = r.get("molecule_hierarchy", {}).get(
-                    "parent_chembl_id", None
-                )
+                hierarchy_active_id = r.get("molecule_hierarchy", {}).get("active_chembl_id", None)
+                hierarchy_molecule_id = r.get("molecule_hierarchy", {}).get("molecule_chembl_id", None)
+                hierarchy_parent_id = r.get("molecule_hierarchy", {}).get("parent_chembl_id", None)
                 r.pop("molecule_hierarchy")
             else:
                 logger.warning(f"No hierarchy information found for molecule {mol_id}")
@@ -120,12 +100,8 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
                 hierarchy_molecule_id = None
                 hierarchy_parent_id = None
             if r["molecule_structures"] is not None:
-                canonical_smiles = r.get("molecule_structures", {}).get(
-                    "canonical_smiles", None
-                )
-                standard_inchikey = r.get("molecule_structures", {}).get(
-                    "standard_inchi_key", None
-                )
+                canonical_smiles = r.get("molecule_structures", {}).get("canonical_smiles", None)
+                standard_inchikey = r.get("molecule_structures", {}).get("standard_inchi_key", None)
                 r.pop("molecule_structures")
             else:
                 logger.warning(f"No structure information found for molecule {mol_id}")
@@ -141,9 +117,7 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
             }
     else:
         raise ValueError(f"No information found for {molecule_chembl_id}")
-    return pd.DataFrame.from_dict(extracted, orient="index").reset_index(
-        names="molecule_chembl_id"
-    )
+    return pd.DataFrame.from_dict(extracted, orient="index").reset_index(names="molecule_chembl_id")
 
 
 def assay_info_from_chembl(
@@ -271,9 +245,7 @@ def convert_to_log10(df):
         return pd.concat(final_df, ignore_index=True)
 
 
-def process_bioactivities(
-    bioactivities_df: pd.DataFrame, calculate_pchembl: bool = True
-) -> pd.DataFrame:
+def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: bool = True) -> pd.DataFrame:
     """Processes the bioactivities DataFrame. Will convert the standard_value
     column to pchembl_value column if the standard_units are in nM, µM or uM.
     Args:
@@ -283,9 +255,7 @@ def process_bioactivities(
     """
     without_pchembl = None
     bioactivities_df = (
-        bioactivities_df.astype(
-            {"standard_value": "float32", "pchembl_value": "float32"}
-        )
+        bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
         .replace({None: np.nan})
         .query("data_validity_description.isna()")
         .query("potential_duplicate == 0")
@@ -293,10 +263,8 @@ def process_bioactivities(
     )
     if calculate_pchembl:
         with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
-        without_pchembl = (
-            convert_to_log10(  # if pchembl value not present, calculate it
-                bioactivities_df.query("pchembl_value.isna()")
-            )
+        without_pchembl = convert_to_log10(  # if pchembl value not present, calculate it
+            bioactivities_df.query("pchembl_value.isna()")
         )
     if without_pchembl is not None:
         bioactivities_df = pd.concat([with_pchembl, without_pchembl])
@@ -343,9 +311,7 @@ def fetch_and_filter_workflow(
         calculate_pchembl=calculate_pchembl,
     )
     unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
-    assays_df = assay_info_from_chembl(
-        unique_assay_ids, confidence_scores=list(confidence_scores)
-    )
+    assays_df = assay_info_from_chembl(unique_assay_ids, confidence_scores=list(confidence_scores))
     merged_df = pd.merge(
         bioactivities_df,
         assays_df,

@@ -1,10 +1,13 @@
 """Module containing helper functions for manipulating pandas DataFrames"""
 
 import functools
-import pandas as pd
-import numpy as np
-from scipy.stats import median_abs_deviation
 from typing import String, Union
+
+import numpy as np
+import pandas as pd
+from scipy.stats import median_abs_deviation
+
+from ..logger import logger
 
 
 def format_value(x) -> String:
@@ -50,9 +53,7 @@ def merge_dataframes(dfs, id_cols) -> pd.DataFrame:
     Returns:
         merged_df: Merged DataFrame
     """
-    return functools.reduce(
-        lambda left, right: pd.merge(left, right, on=id_cols, how="inner"), dfs
-    )
+    return functools.reduce(lambda left, right: pd.merge(left, right, on=id_cols, how="inner"), dfs)
 
 
 def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataFrame:
@@ -90,9 +91,7 @@ def assign_stats(df: pd.DataFrame, sep=";", value_col="pchembl_value") -> pd.Dat
     >>> ]
     """
 
-    value_series = (
-        df[value_col].astype(str).str.split(sep).apply(lambda x: list(map(float, x)))
-    )
+    value_series = df[value_col].astype(str).str.split(sep).apply(lambda x: list(map(float, x)))
     new_cols = [
         f"{value_col}_mean",
         f"{value_col}_std",
@@ -110,3 +109,17 @@ def assign_stats(df: pd.DataFrame, sep=";", value_col="pchembl_value") -> pd.Dat
     for c, v in zip(new_cols, values):
         df[c] = v
     return df
+
+
+def find_dict_in_dataframe(df):
+    cols_w_dicts = []
+    for col in df.columns:
+        if df[col].apply(lambda x: isinstance(x, dict)).any():
+            logger.info(f"Column '{col}' contains dictionaries.")
+            logger.info(
+                "Rows with dictionaries: "
+                " ".join(df[df[col].apply(lambda x: isinstance(x, dict))].index.astype(str))
+            )
+            cols_w_dicts.append(col)
+    if cols_w_dicts:
+        return cols_w_dicts

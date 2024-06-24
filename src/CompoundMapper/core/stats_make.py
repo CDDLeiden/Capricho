@@ -33,9 +33,7 @@ def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[i
         sorted_series = series.iloc[sidx]
         sorted_arr = sorted_series.to_numpy()
         # Identify duplicates
-        duplicates_mask = np.concatenate(
-            ([False], sorted_arr[1:] == sorted_arr[:-1], [False])
-        )
+        duplicates_mask = np.concatenate(([False], sorted_arr[1:] == sorted_arr[:-1], [False]))
         idx = np.flatnonzero(duplicates_mask[1:] != duplicates_mask[:-1])
         # Extract original indices for duplicates
         sorted_indices = sorted_series.index.tolist()
@@ -120,12 +118,8 @@ def process_repeat_mols(
     # Will drop the repeats with more than 1 log unit difference
     high_diff_repeats = np.where(distance_series >= 1)[0]
     points_dropped = len(repeat_subset["repeat_mapping"].isin(high_diff_repeats))
-    logger.info(
-        f"Found {len(high_diff_repeats)} repeats with more than 1 log unit difference."
-    )
-    logger.info(
-        f"Maximum difference between min & max values: {np.max(distance_series)}"
-    )
+    logger.info(f"Found {len(high_diff_repeats)} repeats with more than 1 log unit difference.")
+    logger.info(f"Maximum difference between min & max values: {np.max(distance_series)}")
     if solve_strat == "drop":
         logger.info(f"{points_dropped} points will be removed from the dataset")
 
@@ -156,9 +150,7 @@ def process_repeat_mols(
     final_cols = id_cols + multival_cols
     grouped = repeat_subset.groupby(id_cols)
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
-    updated_df = assign_stats(updated_vals, value_col="pchembl_value").merge(
-        df, on=id_cols, how="left"
-    )
+    updated_df = assign_stats(updated_vals, value_col="pchembl_value").merge(df, on=id_cols, how="left")
     rename_cols = {c: c.rstrip("_x") for c in updated_df.columns if c.endswith("_x")}
     todrop_cols = [c for c in updated_df.columns if c.endswith("_y")]
     updated_df = updated_df.drop(columns=todrop_cols).rename(columns=rename_cols)
@@ -168,9 +160,7 @@ def process_repeat_mols(
     # drop the repeats and concatenate with the filtered & updated values
     df = pd.concat(
         [
-            df.drop(index=repeat_subset.index).assign(
-                might_rancemic=lambda x: [False] * len(x)
-            ),
+            df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
             updated_df.assign(might_rancemic=lambda x: [True] * len(x)),
         ],
         ignore_index=True,
