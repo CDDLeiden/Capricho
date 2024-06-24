@@ -5,7 +5,7 @@ import numpy as np
 
 import pandas as pd
 from chembl_webresource_client.new_client import new_client
-from .log_config import logger
+from .logger import logger
 
 assays_api = new_client.assay
 activity_api = new_client.activity

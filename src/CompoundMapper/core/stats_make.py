@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 from typing import Iterable, List
 
-from .log_config import logger
+from ..logger import logger
 from .pandas_helper import apply_func_grpd, aggr_val_series, assign_stats
 
 def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[int]]:
