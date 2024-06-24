@@ -67,6 +67,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "-c",
         "--confidence_scores",
+        dest="confidence_scores",
         nargs="*",
         required=False,
         help=(
@@ -88,6 +89,16 @@ def parse_arguments() -> argparse.Namespace:
         nargs="*",
         type=str,
     )
+    parser.add_argument(
+        "-chiral",
+        "--chirality",
+        dest="chirality",
+        help=(
+            "Consider chirality when calculating the fingerprints. Useful if you want to "
+            "differentiate between enantiomers while aggregating the data. Default is False."
+        ),
+        action="store_true",
+    )
     return parser.parse_args()
 
 
@@ -99,7 +110,7 @@ def main(args: argparse.Namespace) -> None:
 
     # since we work with pchembl values, standard values reported as -pXC50, -Log XC50, etc. will be renamed
     bioactivity_type_rename_dict = {
-        **{f"p{bio}" for bio in args.bioactivity_type},
+        **{f"p{bio}": bio for bio in args.bioactivity_type},
         **{f"Log {bio}": bio for bio in args.bioactivity_type},
         **{f"-Log {bio}": bio for bio in args.bioactivity_type},
     }
@@ -107,7 +118,7 @@ def main(args: argparse.Namespace) -> None:
     chembl_data = fetch_and_filter_workflow(
         molecule_chembl_ids=args.molecule_ids,
         target_chembl_ids=args.target_ids,
-        confidence_scores=args.confidences,
+        confidence_scores=args.confidence_scores,
     )
 
     unique_mol_chembl_ids = chembl_data["molecule_chembl_id"].unique().tolist()
@@ -152,10 +163,16 @@ def main(args: argparse.Namespace) -> None:
     queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
 
     # calculate the fingerprints to identify repeat molecules & aggregate data accordingly
-    mol_fp = calculate_mixed_FPs(queried_df["standard_smiles"].tolist(), n_jobs=4)
-    repeats_idxs = repeated_indices_from_array_series(mol_fp)
+    queried_df = queried_df.assign(
+        fingerprints=calculate_mixed_FPs(
+            queried_df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": args.chirality}
+        )
+    )
+    repeats_idxs = repeated_indices_from_array_series(queried_df["fingerprints"])
     final_data, final_cols = process_repeat_mols(queried_df, repeats_idxs, solve_strat="keep")
-    final_data = final_data[final_cols].drop_duplicates().reset_index(drop=True)
+    final_data = (
+        final_data[final_cols].drop_duplicates().reset_index(drop=True).drop(columns="repeat_mapping")
+    )
     final_data = assign_stats(final_data)
 
     final_data.to_csv(output_path, index=False)
