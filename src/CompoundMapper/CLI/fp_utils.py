@@ -33,7 +33,13 @@ def smi_to_RDKitFP(smi, minPath=1, maxPath=7, nBits=2048, **kwargs) -> np.ndarra
     return numpy_fp.reshape(1, -1)
 
 
-def calculate_mixed_FPs(smiles: list, n_jobs: int = 8, morgan_kwargs: dict = None, rdkit_kwargs: dict = None):
+def calculate_mixed_FPs(
+    smiles: list,
+    n_jobs: int = 8,
+    morgan_kwargs: dict = None,
+    rdkit_kwargs: dict = None,
+    return_stacked: bool = False,
+):
     """Outputs a mixed fingerprint used for compound identification. The motivation for this is
     that either of the fingerprints can fail to identify the same compound, but the combination
     is less prone to failure in this regard.
@@ -43,6 +49,8 @@ def calculate_mixed_FPs(smiles: list, n_jobs: int = 8, morgan_kwargs: dict = Non
         n_jobs (int): number of jobs to run the fp calculation in parallel. Defaults to 1.
         morgan_kwargs (dict): keyword arguments for the morgan fingerprints. Defaults to None.
         rdkit_kwargs (dict): keyword arguments for the rdkit path fingerprints. Defaults to None.
+        return_stacked (bool): if true, will return the stacked fingerprints instead of a list of
+            numpy arrays. Defaults to False.
 
     Returns:
         np.ndarray: a mixed fingerprint for the input smiles
@@ -62,4 +70,7 @@ def calculate_mixed_FPs(smiles: list, n_jobs: int = 8, morgan_kwargs: dict = Non
         rdkit_fps = Parallel()(
             delayed(rdkitfpfunc)(smi) for smi in tqdm(smiles, desc="Calculating RDKit fingerprints")
         )
-    return np.concatenate([np.concatenate(morgan_fps), np.concatenate(rdkit_fps)], axis=1).shape
+    if return_stacked:
+        return np.concatenate([np.concatenate(morgan_fps), np.concatenate(rdkit_fps)], axis=1).shape
+    else:
+        return [np.concatenate([morfp, rdkfp], axis=1) for morfp, rdkfp in zip(morgan_fps, rdkit_fps)]
