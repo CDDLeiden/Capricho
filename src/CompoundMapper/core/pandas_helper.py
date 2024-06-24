@@ -1,7 +1,7 @@
 """Module containing helper functions for manipulating pandas DataFrames"""
 
 import functools
-from typing import String, Union
+from typing import Union
 
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ from scipy.stats import median_abs_deviation
 from ..logger import logger
 
 
-def format_value(x) -> String:
+def format_value(x) -> str:
     """Helper function to format a value to a string with 4 decimal places. This function
     is used to store the original pChEMBL values as strings separated by ";".
 
@@ -28,12 +28,12 @@ def format_value(x) -> String:
         return x
 
 
-def aggr_val_series(series: pd.Series) -> String:
+def aggr_val_series(series: pd.Series) -> str:
     """ "Aggregate a pandas Series into a string with values separated by a semicolon."""
     return ";".join([format_value(x) for x in series])
 
 
-def get_mad(values) -> Union[float, np.nan]:
+def get_mad(values) -> Union[float, np.float64]:
     """Calculate the MAD for a list of numerical values. If only one value, return NaN."""
     if len(values) > 1:
         return median_abs_deviation(values)
