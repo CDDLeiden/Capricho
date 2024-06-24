@@ -44,7 +44,7 @@ def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[i
     return final_repeat_idxs
 
 
-def repeated_indices_from_array_series(series: Iterable) -> List[List[int]]:
+def repeated_indices_from_array_series(series: pd.Series) -> List[List[int]]:
     """Function to find repeated arrays from a list of arrays"""
 
     def find_duplicate_index(series: np.array) -> List[List[int]]:
@@ -155,7 +155,7 @@ def process_repeat_mols(
         "withdrawn_flag",
     ]
     final_cols = id_cols + multival_cols
-    grouped = repeat_subset.groupby(id_cols)
+    grouped = repeat_subset.replace({None: "None"}).groupby(id_cols)  # replace for string values
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
     updated_df = assign_stats(updated_vals, value_col="pchembl_value").merge(df, on=id_cols, how="left")
     rename_cols = {c: c.rstrip("_x") for c in updated_df.columns if c.endswith("_x")}
