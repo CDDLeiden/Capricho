@@ -5,8 +5,9 @@ from typing import Optional
 from urllib.parse import urljoin
 
 import requests
-from .logger import logger
 from requests.adapters import HTTPAdapter, Retry
+
+from .logger import logger
 
 
 class BaseUniChem(ABC):

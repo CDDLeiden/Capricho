@@ -3,12 +3,11 @@
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
-
 import pandas as pd
 from chembl_webresource_client.new_client import new_client
 
-from .logger import logger
 from .core.pandas_helper import find_dict_in_dataframe
+from .logger import logger
 
 assays_api = new_client.assay
 activity_api = new_client.activity

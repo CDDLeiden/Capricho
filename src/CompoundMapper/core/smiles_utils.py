@@ -1,7 +1,8 @@
 """Utility functions for further processing the standardized smiles by removing mixtures and salts."""
 
-import numpy as np
 import re
+
+import numpy as np
 
 MIXTURE_REGEX = re.compile(
     r"^("  # start of the string
