@@ -1,6 +1,6 @@
 """Module holding functionalities for the ChEMBL API."""
 
-from typing import List, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -199,20 +199,23 @@ def assay_info_from_chembl(
 
 
 def bioactivities_from_chembl(
-    molecule_chembl_ids: list,
+    molecule_chembl_ids: Optional[list] = None,
+    target_chembl_ids: Optional[list] = None,
     **kwargs,
 ) -> pd.DataFrame:
     """Take a list of molecule chembl ids and get their respective bioactivities in ChEMBL.
     Args:
-        molecule_chembl_id: list of molecule ChEMBL IDs.
+        molecule_chembl_id: list of molecule ChEMBL IDs to fecth bioactivities. Defaults to None.
+        target_chembl_ids: list of target ChEMBL IDs to fetch bioactivities. Defaults to None.
         kwargs: example -> `standard_relation="=", assay_type__in=["B", "F"]`.
     Returns:
         pd.DataFrame: a DataFrame with the bioactivities.
     """
-    activity_kwargs = {
-        "molecule_chembl_id__in": molecule_chembl_ids,
-        **kwargs,
-    }
+    activity_kwargs = {**kwargs}
+    if molecule_chembl_ids is not None:
+        activity_kwargs.update({"molecule_chembl_id__in": molecule_chembl_ids})
+    if target_chembl_ids is not None:
+        activity_kwargs.update({"target_chembl_id__in": target_chembl_ids})
     bioactivities = activity_api.filter(**activity_kwargs).only(
         "activity_id",
         "assay_chembl_id",
@@ -268,7 +271,9 @@ def convert_to_log10(df):
         return pd.concat(final_df, ignore_index=True)
 
 
-def process_bioactivities(bioactivities_df: pd.DataFrame) -> pd.DataFrame:
+def process_bioactivities(
+    bioactivities_df: pd.DataFrame, calculate_pchembl: bool = True
+) -> pd.DataFrame:
     """Processes the bioactivities DataFrame. Will convert the standard_value
     column to pchembl_value column if the standard_units are in nM, µM or uM.
     Args:
@@ -276,6 +281,7 @@ def process_bioactivities(bioactivities_df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: the processed bioactivities DataFrame.
     """
+    without_pchembl = None
     bioactivities_df = (
         bioactivities_df.astype(
             {"standard_value": "float32", "pchembl_value": "float32"}
@@ -285,10 +291,13 @@ def process_bioactivities(bioactivities_df: pd.DataFrame) -> pd.DataFrame:
         .query("potential_duplicate == 0")
         .drop(columns=["data_validity_description", "potential_duplicate"])
     )
-    with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
-    without_pchembl = convert_to_log10(  # if pchembl value not present, calculate it
-        bioactivities_df.query("pchembl_value.isna()")
-    )
+    if calculate_pchembl:
+        with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
+        without_pchembl = (
+            convert_to_log10(  # if pchembl value not present, calculate it
+                bioactivities_df.query("pchembl_value.isna()")
+            )
+        )
     if without_pchembl is not None:
         bioactivities_df = pd.concat([with_pchembl, without_pchembl])
     else:
@@ -296,27 +305,44 @@ def process_bioactivities(bioactivities_df: pd.DataFrame) -> pd.DataFrame:
     return bioactivities_df
 
 
-def filtered_data_workflow(
-    molecule_ids: list, confidence_scores: Union[List, Tuple] = (9, 8)
+def fetch_and_filter_workflow(
+    molecule_chembl_ids: Optional[list] = None,
+    target_chembl_ids: Optional[list] = None,
+    confidence_scores: Union[List, Tuple] = (9, 8),
+    calculate_pchembl: bool = True,
 ) -> pd.DataFrame:
     """
-    Retrieves and merges data from ChEMBL for given molecule IDs, filtered by specified confidence scores.
+    This function retrieves and merges data from ChEMBL for given molecule or target IDs.
+    The steps taken to filter this data are:
+
+    1. Fetch bioactivities for the given target or molecule IDs, considering designated
+        confidence scores and assay types (binding or functional) using `new_client.activity`
+        from them `chembl_webresource_client` package.
+    2. If the `calculate_pchembl` parameter is true, use obtained bioactivity points with values
+        reported in (standard units) nM, µM or uM to calculate the pChEMBL value.
+    3. Extract unique assay IDs from the bioactivities DataFrame & add this information to the
+        final DataFrame.
+
     Args:
-        molecule_ids: List of molecule ChEMBL IDs.
-        confidence_scores: List of confidence scores to filter the data. Defaults to [9, 8].
+        molecule_chembl_ids: list of ChEMBL molecule IDs to fetch data for. Defaults to None.
+        target_chembl_ids: list of ChEMBL target IDs to fetch data for. Defaults to None.
+        confidence_scores: list of confidence scores to filter the fetched assay data.
+            Defaults to (9, 8).
+        calculate_pchembl: calculate pChEMBL values for the bioactivities when it's not present
+            for bioactivities reported in nM, µM or uM. Defaults to True.
     Returns:
         pd.DataFrame: Merged DataFrame with molecule, bioactivity, and assay information.
     """
-
-    # Step 1: Get bioactivities for given molecule IDs
     bioactivities_df = process_bioactivities(
         bioactivities_from_chembl(
-            molecule_ids, standard_relation="=", assay_type__in=["B", "F"]
-        )
+            molecule_chembl_ids,
+            target_chembl_ids,
+            standard_relation="=",
+            assay_type__in=["B", "F"],
+        ),
+        calculate_pchembl=calculate_pchembl,
     )
-    # Step 2: Extract unique assay IDs from the bioactivities DataFrame
     unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
-    # Step 3: Get assay information for these unique assay IDs & merge data
     assays_df = assay_info_from_chembl(
         unique_assay_ids, confidence_scores=list(confidence_scores)
     )
