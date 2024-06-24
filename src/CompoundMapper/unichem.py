@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import urljoin
 
 import requests
-from .log_config import logger
+from .logger import logger
 from requests.adapters import HTTPAdapter, Retry
 
 

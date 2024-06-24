@@ -41,13 +41,14 @@ write_to = "src/CompoundMapper/_version.py"
 version = {attr = "CompoundMapper.__version__"}
 
 [tool.ruff]
-line-length = 88
+line-length = 110
 target-version = "py39"
 fix = true
 ignore = ['E501'] # sometimes it goes longer on the docstrings...
 
 [tool.isort]
 profile = "black"
+line-length = 110
 
 [tool.black]
 target-version = ['py39']

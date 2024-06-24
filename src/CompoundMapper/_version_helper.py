@@ -1,4 +1,5 @@
 """module to get the correct version information from setuptols_scm generated file"""
+
 from pathlib import Path
 
 

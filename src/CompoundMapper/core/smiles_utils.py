@@ -1,4 +1,5 @@
 """Utility functions for further processing the standardized smiles by removing mixtures and salts."""
+
 import numpy as np
 import re
 
@@ -18,6 +19,7 @@ MIXTURE_REGEX = re.compile(
     r")$"  # end of the string
 )
 
+
 def clean_mixtures(smi):
     """Removes mixtures/salts from a SMILES tring that aren't captured by the
     `chembl_structure_pipeline` using MIXTURE_REGEX.
@@ -27,7 +29,7 @@ def clean_mixtures(smi):
 
     Returns:
         str: smiles string without mixture.
-    """    
+    """
     smiles = np.unique(smi.split(".")).tolist()
     if len(smiles) == 1:
         return smiles[0]

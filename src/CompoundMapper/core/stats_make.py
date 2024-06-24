@@ -1,10 +1,12 @@
 """Module containing helper functions for processing repeated elements in a DataFrame"""
+
 import numpy as np
 import pandas as pd
 from typing import Iterable, List
 
 from ..logger import logger
 from .pandas_helper import apply_func_grpd, aggr_val_series, assign_stats
+
 
 def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[int]]:
     """Find repeated indices for given columns in a DataFrame.
@@ -42,6 +44,7 @@ def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[i
     final_repeat_idxs = find_duplicate_index(concatenated_series)
     return final_repeat_idxs
 
+
 def repeated_indices_from_array_series(series: Iterable) -> List[List[int]]:
     """Function to find repeated arrays from a list of arrays"""
 
@@ -70,6 +73,7 @@ def repeated_indices_from_array_series(series: Iterable) -> List[List[int]]:
 
     final_repeat_idxs = find_duplicate_index(series)
     return final_repeat_idxs
+
 
 def process_repeat_mols(
     df: pd.DataFrame, repeat_element_idxs: List[List[int]], solve_strat: str = "keep"

@@ -1,4 +1,5 @@
 """Module holding functionalities for the ChEMBL API."""
+
 from typing import List, Tuple, Union
 
 import numpy as np
@@ -11,23 +12,31 @@ assays_api = new_client.assay
 activity_api = new_client.activity
 compounds_api = new_client.molecule
 
-pd.set_option('future.no_silent_downcasting', True) # temporary; to be removed after pandas 3.0
+# temporary; to be removed after pandas 3.0
+# check for pandas' version. If lower than 3.0, set the option to avoid silent downcasting
+if pd.__version__ < "3.0.0":
+    pd.set_option("future.no_silent_downcasting", True)
 
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
+
 
 def find_dict_in_dataframe(df):
     cols_w_dicts = []
     for col in df.columns:
         if df[col].apply(lambda x: isinstance(x, dict)).any():
             logger.info(f"Column '{col}' contains dictionaries.")
-            logger.info("Rows with dictionaries: "
-                        ' '.join(df[df[col].apply(lambda x: isinstance(x, dict))].index.astype(str))
-                        )
+            logger.info(
+                "Rows with dictionaries: "
+                " ".join(
+                    df[df[col].apply(lambda x: isinstance(x, dict))].index.astype(str)
+                )
+            )
             cols_w_dicts.append(col)
     if cols_w_dicts:
         return cols_w_dicts
+
 
 def get_publications_details(assay_chembl_ids: list) -> dict:
     """From a list of ChEMBL assay IDs, get the publication details.
@@ -94,7 +103,7 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
             if r is None:
                 logger.warning(f"No information found for molecule {mol_id}")
                 continue
-            if r['molecule_hierarchy'] is not None:
+            if r["molecule_hierarchy"] is not None:
                 hierarchy_active_id = r.get("molecule_hierarchy", {}).get(
                     "active_chembl_id", None
                 )
@@ -110,7 +119,7 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
                 hierarchy_active_id = None
                 hierarchy_molecule_id = None
                 hierarchy_parent_id = None
-            if r['molecule_structures'] is not None:
+            if r["molecule_structures"] is not None:
                 canonical_smiles = r.get("molecule_structures", {}).get(
                     "canonical_smiles", None
                 )
@@ -175,15 +184,17 @@ def assay_info_from_chembl(
     if assays:
         assays_df = pd.DataFrame.from_records(assays)
         if find_dict_in_dataframe(assays_df) is not None:
-            logger.warning('Keeping only mutation info from `variant_sequence`.')
+            logger.warning("Keeping only mutation info from `variant_sequence`.")
             assays_df = assays_df.assign(
                 variant_sequence=lambda x: x.variant_sequence.apply(
-                    lambda y: y.get('mutation') if isinstance(y, dict) else y
+                    lambda y: y.get("mutation") if isinstance(y, dict) else y
                 )
             )
     else:
-        activity_kwargs.pop('assay_chembl_id__in')
-        raise ValueError(f"No assays found for the ids: {assay_chembl_ids} with the parameters: {activity_kwargs}")
+        activity_kwargs.pop("assay_chembl_id__in")
+        raise ValueError(
+            f"No assays found for the ids: {assay_chembl_ids} with the parameters: {activity_kwargs}"
+        )
     return assays_df
 
 
