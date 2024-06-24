@@ -20,10 +20,14 @@ classifiers = [
 
 dependencies = [
   "chem-filters @ git+https://github.com/David-Araripe/chemFilters.git",
+  "uniprot-id-mapper",
   "chembl_webresource_client",
   "pandas",
+  "numpy",
   "loguru",
-  "scipy"
+  "scipy",
+  "tqdm",
+  "joblib",
   ]
 
 [project.optional-dependencies]
@@ -33,6 +37,9 @@ dev = ["ruff", "isort", "black"]
 homepage = "https://github.com/David-Araripe/CompoundMapper"
 repository = "https://github.com/David-Araripe/CompoundMapper"
 # documentation = "https://readthedocs.org" TODO
+
+[project.scripts]
+getchembl = "CompoundMapper.CLI.fetch_from_chembl:main_exe"
 
 [tool.setuptools_scm]
 write_to = "src/CompoundMapper/_version.py"
