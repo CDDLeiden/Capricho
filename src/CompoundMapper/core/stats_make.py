@@ -1,6 +1,6 @@
 """Module containing helper functions for processing repeated elements in a DataFrame"""
 
-from typing import Iterable, List
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -155,7 +155,8 @@ def process_repeat_mols(
         "withdrawn_flag",
     ]
     final_cols = id_cols + multival_cols
-    grouped = repeat_subset.replace({None: "None"}).groupby(id_cols)  # replace for string values
+    repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
+    grouped = repeat_subset.groupby(id_cols)
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
     updated_df = assign_stats(updated_vals, value_col="pchembl_value").merge(df, on=id_cols, how="left")
     rename_cols = {c: c.rstrip("_x") for c in updated_df.columns if c.endswith("_x")}
@@ -165,12 +166,23 @@ def process_repeat_mols(
     if solve_strat == "drop":
         updated_df = updated_df.drop(index=todrop_processed)
     # drop the repeats and concatenate with the filtered & updated values
-    df = pd.concat(
-        [
-            df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
-            updated_df.assign(might_rancemic=lambda x: [True] * len(x)),
-        ],
-        ignore_index=True,
-    )
+    todrop_cols = [c for c in df.columns if c in ["repeat_mapping", "fps", "fingerprints"]]
+    if len(todrop_cols) < 2:
+        logger.warning(
+            "If your dataframe has a column with the fingerprints of the molecules "
+            "and that isn't named 'fps' or 'fingerprints', then you're likely to find "
+            "duplicates in your data. Please drop those and run `df.drop_duplicates()`."
+        )
+    df = (
+        pd.concat(
+            [
+                df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
+                updated_df.assign(might_rancemic=lambda x: [True] * len(x)),
+            ],
+            ignore_index=True,
+        )
+        .drop(columns=[todrop_cols])
+        .drop_duplicates()
+    )  # TODO: incorporate a single SMILES to represent the data point. If chiral is false, remove chirality
     logger.info(f"Final number of points: {len(df)}")
     return df, final_cols
