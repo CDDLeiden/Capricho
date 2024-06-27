@@ -7,12 +7,10 @@ import numpy as np
 from chemFilters.chem.standardizers import ChemStandardizer
 from UniProtMapper import ProtMapper
 
-from CompoundMapper.core.pandas_helper import assign_stats
-
-from ..chembl import fetch_and_filter_workflow, molecule_info_from_chembl
+from ..chembl import fetch_and_filter_workflow
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
-from ..logger import logger
+from ..logger import logger, setup_logger
 from .fp_utils import calculate_mixed_FPs
 
 
@@ -99,11 +97,24 @@ def parse_arguments() -> argparse.Namespace:
         ),
         action="store_true",
     )
+    parser.add_argument(
+        "-log",
+        "--log-level",
+        dest="log_level",
+        default="info",
+        choices=["info", "debug", "warning", "error", "critical"],
+        help=(
+            "Set the logging level. Defaults to info. "
+            "Choose between: info, debug, warning, error, critical."
+        ),
+        type=str,
+    )
     return parser.parse_args()
 
 
 def main(args: argparse.Namespace) -> None:
 
+    setup_logger(level=args.log_level.upper())
     output_path = Path(args.output_path)
     if not output_path.parent.exists():
         output_path.mkdir()
@@ -115,23 +126,19 @@ def main(args: argparse.Namespace) -> None:
         **{f"-Log {bio}": bio for bio in args.bioactivity_type},
     }
 
-    chembl_data = fetch_and_filter_workflow(
+    full_df = fetch_and_filter_workflow(
         molecule_chembl_ids=args.molecule_ids,
         target_chembl_ids=args.target_ids,
         confidence_scores=args.confidence_scores,
+        calculate_pchembl=args.calculate_pchembl,
     )
-
-    unique_mol_chembl_ids = chembl_data["molecule_chembl_id"].unique().tolist()
-    mol_data = molecule_info_from_chembl(unique_mol_chembl_ids)
-    full_df = chembl_data.merge(mol_data, on="molecule_chembl_id", how="inner")
-    # reorder the columns...
-    full_df = full_df[["molecule_chembl_id"] + [col for col in full_df if col != "molecule_chembl_id"]]
+    # full_df.to_csv(output_path.with_suffix(".begin.csv"), index=False)
 
     stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
-
     queried_df = (
-        full_df.copy()  # rename bioactivities & filter by preferred bioactivity type
-        .assign(standard_type=lambda x: x["standard_type"].replace(bioactivity_type_rename_dict))
+        full_df.assign(  # rename bioactivities & filter by preferred bioactivity type
+            standard_type=lambda x: x["standard_type"].replace(bioactivity_type_rename_dict)
+        )
         .query("standard_type.isin(@args.bioactivity_type)")
         .assign(  # standardize the smiles & clean possible solvents & salts from the string
             standard_smiles=lambda x: stdzer(x["canonical_smiles"]),
@@ -151,31 +158,33 @@ def main(args: argparse.Namespace) -> None:
                 # "description",
             ]
         )
+        .reset_index(drop=True)
+        .copy()
     )
     # drop rows with missing pchembl values
     no_pchembl_idxs = queried_df.query("pchembl_value.isna()").index
     logger.info(f"Dropping {len(no_pchembl_idxs)} rows missing pchembl values.")
     queried_df = queried_df.drop(index=no_pchembl_idxs).reset_index(drop=True)
 
+    # find remaining mixtures in the data
     mask = queried_df["standard_smiles"].str.contains(".", regex=False)
-    logger.info(f"Number of mixtures: {mask.sum()}")
-    mixture_idxs = np.where(mask)[0]  # drop data points where smiles are mixtures
-    queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
+    n_mixtures = mask.sum()
+    if n_mixtures > 0:
+        logger.info(f"Number of mixtures: {mask.sum()}")
+        mixture_idxs = np.where(mask)[0]  # drop data points where smiles are mixtures
+        queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
 
     # calculate the fingerprints to identify repeat molecules & aggregate data accordingly
-    queried_df = queried_df.assign(
-        fingerprints=calculate_mixed_FPs(
-            queried_df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": args.chirality}
-        )
+    fps = calculate_mixed_FPs(
+        queried_df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": args.chirality}
     )
-    repeats_idxs = repeated_indices_from_array_series(queried_df["fingerprints"])
+    # queried_df.to_csv(output_path.with_suffix(".midway.csv"), index=False)
+    queried_df = queried_df.assign(fps=fps)
+    repeats_idxs = repeated_indices_from_array_series(queried_df["fps"])
     final_data, final_cols = process_repeat_mols(queried_df, repeats_idxs, solve_strat="keep")
-    final_data = (
-        final_data[final_cols].drop_duplicates().reset_index(drop=True).drop(columns="repeat_mapping")
-    )
-    final_data = assign_stats(final_data)
-
+    final_data = final_data[final_cols].reset_index(drop=True)
     final_data.to_csv(output_path, index=False)
+    return final_data  # could be used as a function
 
 
 def main_exe() -> None:

@@ -63,15 +63,16 @@ def get_publications_details(assay_chembl_ids: list) -> dict:
     return publications_details
 
 
-def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
+def molecule_info_from_chembl(molecule_chembl_ids: list) -> dict:
     """Get information on a molecule from ChEMBL.
     Args:
-        molecule_chembl_id: a list of molecule ChEMBL IDs.
+        molecule_chembl_ids: a list of molecule ChEMBL IDs.
     Returns:
         pd.DataFrame: a DataFrame with the molecule information.
     """
     extracted = {}
-    result = compounds_api.filter(molecule_chembl_id__in=molecule_chembl_id).only(
+    result = compounds_api.filter(molecule_chembl_id__in=molecule_chembl_ids).only(
+        "molecule_chembl_id",
         "molecule_hierarchy",
         "molecule_structures",
         "chemical_probes",
@@ -84,7 +85,8 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
         "indication_class",
     )
     if result:
-        for r, mol_id in zip(result, molecule_chembl_id):
+        for idx, r in enumerate(result):
+            mol_id = r.get("molecule_chembl_id")
             if r is None:
                 logger.warning(f"No information found for molecule {mol_id}")
                 continue
@@ -106,7 +108,7 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
                 logger.warning(f"No structure information found for molecule {mol_id}")
                 canonical_smiles = None
                 standard_inchikey = None
-            extracted[mol_id] = {
+            extracted[idx] = {
                 "hierarchy_active_id": hierarchy_active_id,
                 "hierarchy_molecule_id": hierarchy_molecule_id,
                 "hierarchy_parent_id": hierarchy_parent_id,
@@ -115,8 +117,12 @@ def molecule_info_from_chembl(molecule_chembl_id: list) -> dict:
                 **r,
             }
     else:
-        raise ValueError(f"No information found for {molecule_chembl_id}")
-    return pd.DataFrame.from_dict(extracted, orient="index").reset_index(names="molecule_chembl_id")
+        raise ValueError(f"No information found for {molecule_chembl_ids}")
+    return (
+        pd.DataFrame.from_dict(extracted, orient="index")
+        .sort_values(by="molecule_chembl_id", key=lambda col: col.map(lambda e: molecule_chembl_ids.index(e)))
+        .reset_index(drop=True)
+    )
 
 
 def assay_info_from_chembl(
@@ -260,16 +266,16 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
         .query("potential_duplicate == 0")
         .drop(columns=["data_validity_description", "potential_duplicate"])
     )
+    with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
     if calculate_pchembl:
-        with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
         without_pchembl = convert_to_log10(  # if pchembl value not present, calculate it
             bioactivities_df.query("pchembl_value.isna()")
         )
-    if without_pchembl is not None:
-        bioactivities_df = pd.concat([with_pchembl, without_pchembl])
+        if without_pchembl is not None:
+            bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
     else:
         bioactivities_df = with_pchembl
-    return bioactivities_df
+    return bioactivities_df.reset_index(drop=True)
 
 
 def fetch_and_filter_workflow(
@@ -310,11 +316,28 @@ def fetch_and_filter_workflow(
         calculate_pchembl=calculate_pchembl,
     )
     unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
+
+    logger.debug(f"Fetching assays with confidence scores: {list(confidence_scores)}")
     assays_df = assay_info_from_chembl(unique_assay_ids, confidence_scores=list(confidence_scores))
+
     merged_df = pd.merge(
         bioactivities_df,
         assays_df,
         on=["assay_chembl_id", "target_chembl_id", "assay_type"],
         how="inner",
     ).drop_duplicates()
-    return merged_df
+    logger.debug(f"Columns in the merged DataFrame: {merged_df.columns}")
+
+    # Get the molecule structures & merge to the dataset
+    unique_mol_chembl_ids = merged_df["molecule_chembl_id"].unique().tolist()
+    logger.debug(f"Fetching structural information for {len(unique_mol_chembl_ids)} molecule ChEMBL IDs.")
+    mol_data = molecule_info_from_chembl(unique_mol_chembl_ids)
+
+    # Merge using molecule_chembl_id
+    full_df = merged_df.merge(mol_data, on="molecule_chembl_id", how="inner")
+    full_df = full_df[  # reorder columns with molecule_chembl_id and canonical_smiles first
+        ["molecule_chembl_id", "canonical_smiles"]
+        + [col for col in full_df.columns if col not in ["molecule_chembl_id", "canonical_smiles"]]
+    ]
+    logger.debug(f"Columns in the DataFrame with molecular structures: {full_df.columns}")
+    return full_df
