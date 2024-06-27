@@ -155,6 +155,7 @@ def process_repeat_mols(
         "withdrawn_flag",
     ]
     final_cols = id_cols + multival_cols
+    final_cols.pop(final_cols.index("repeat_mapping"))  # remove repeat_mapping from final_cols
     repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
     grouped = repeat_subset.groupby(id_cols)
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
@@ -180,6 +181,6 @@ def process_repeat_mols(
         ],
         ignore_index=True,
     )  # TODO: incorporate a single SMILES to represent the data point. If chiral is false, remove chirality
-    df = df[final_cols.pop(final_cols.index("repeat_mapping"))].reset_index(drop=True).drop_duplicates()
+    df = df[final_cols].reset_index(drop=True).drop_duplicates()
     logger.info(f"Final number of points: {len(df)}")
     return df
