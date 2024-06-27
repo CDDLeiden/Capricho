@@ -57,7 +57,7 @@ def merge_dataframes(dfs, id_cols) -> pd.DataFrame:
 
 
 def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataFrame:
-    """Apply a function to a list of columns (*cols) a grouped dataframe and
+    """Apply a function to a list of columns (*cols) of a grouped dataframe and
     merge the results based on id_cols.
 
     Args:
