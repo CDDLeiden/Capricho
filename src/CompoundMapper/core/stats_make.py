@@ -173,16 +173,13 @@ def process_repeat_mols(
             "and that isn't named 'fps' or 'fingerprints', then you're likely to find "
             "duplicates in your data. Please drop those and run `df.drop_duplicates()`."
         )
-    df = (
-        pd.concat(
-            [
-                df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
-                updated_df.assign(might_rancemic=lambda x: [True] * len(x)),
-            ],
-            ignore_index=True,
-        )
-        .drop(columns=[todrop_cols])
-        .drop_duplicates()
+    df = pd.concat(
+        [
+            df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
+            updated_df.assign(might_rancemic=lambda x: [True] * len(x)),
+        ],
+        ignore_index=True,
     )  # TODO: incorporate a single SMILES to represent the data point. If chiral is false, remove chirality
+    df = df[final_cols.pop(final_cols.index("repeat_mapping"))].reset_index(drop=True).drop_duplicates()
     logger.info(f"Final number of points: {len(df)}")
-    return df, final_cols
+    return df
