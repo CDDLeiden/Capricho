@@ -166,16 +166,9 @@ def process_repeat_mols(
     todrop_processed = updated_df["repeat_mapping"].isin(high_diff_repeats).index
     if solve_strat == "drop":
         updated_df = updated_df.drop(index=todrop_processed)
-    # drop the repeats and concatenate with the filtered & updated values
-    todrop_cols = [c for c in df.columns if c in ["repeat_mapping", "fps", "fingerprints"]]
-    if len(todrop_cols) < 2:
-        logger.warning(
-            "If your dataframe has a column with the fingerprints of the molecules "
-            "and that isn't named 'fps' or 'fingerprints', then you're likely to find "
-            "duplicates in your data. Please drop those and run `df.drop_duplicates()`."
-        )
     df = pd.concat(
         [
+            # TODO: this `might_rancemic` flag needs to be sensitive to the type of fingerprint used in CLI
             df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
             updated_df.assign(might_rancemic=lambda x: [True] * len(x)),
         ],
