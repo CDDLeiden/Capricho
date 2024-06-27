@@ -282,6 +282,7 @@ def fetch_and_filter_workflow(
     molecule_chembl_ids: Optional[list] = None,
     target_chembl_ids: Optional[list] = None,
     confidence_scores: Union[List, Tuple] = (9, 8),
+    assay_types: Union[List, Tuple] = ("B", "F"),
     calculate_pchembl: bool = True,
 ) -> pd.DataFrame:
     """
@@ -301,6 +302,8 @@ def fetch_and_filter_workflow(
         target_chembl_ids: list of ChEMBL target IDs to fetch data for. Defaults to None.
         confidence_scores: list of confidence scores to filter the fetched assay data.
             Defaults to (9, 8).
+        assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
+            functional (F) data.
         calculate_pchembl: calculate pChEMBL values for the bioactivities when it's not present
             for bioactivities reported in nM, µM or uM. Defaults to True.
     Returns:
@@ -311,20 +314,22 @@ def fetch_and_filter_workflow(
             molecule_chembl_ids,
             target_chembl_ids,
             standard_relation="=",
-            assay_type__in=["B", "F"],
+            assay_type__in=assay_types,
         ),
         calculate_pchembl=calculate_pchembl,
     )
     unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
 
-    logger.debug(f"Fetching assays with confidence scores: {list(confidence_scores)}")
-    assays_df = assay_info_from_chembl(unique_assay_ids, confidence_scores=list(confidence_scores))
+    logger.debug(f"Fetching assays of type {assay_types} with confidence scores: {list(confidence_scores)}")
+    assays_df = assay_info_from_chembl(
+        unique_assay_ids, confidence_scores=list(confidence_scores), assay_type__in=assay_types
+    )
 
     merged_df = pd.merge(
         bioactivities_df,
         assays_df,
         on=["assay_chembl_id", "target_chembl_id", "assay_type"],
-        how="inner",
+        how="right",  # keep only the bioactivities with respective assays
     ).drop_duplicates()
     logger.debug(f"Columns in the merged DataFrame: {merged_df.columns}")
 

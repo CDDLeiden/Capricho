@@ -98,6 +98,25 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
     )
     parser.add_argument(
+        "-rel",
+        "--standard_relation",
+        nargs="*",
+        default=["="],
+        help=("Filter only bioactivities with the specified relation. Not implemented yet."),
+        type=str,
+    )
+    parser.add_argument(
+        "-at",
+        "--assay_types",
+        nargs="*",
+        default=["B", "F"],
+        help=(
+            "Assay types to filter. Defaults to both functional (F) and binding assays (B). "
+            "Other assay types: ADME (A), Toxicity (T) and Physichochemical (P)."
+        ),
+        type=str,
+    )
+    parser.add_argument(
         "-log",
         "--log-level",
         dest="log_level",
@@ -113,6 +132,9 @@ def parse_arguments() -> argparse.Namespace:
 
 
 def main(args: argparse.Namespace) -> None:
+
+    if args.standard_relation != ["="]:
+        raise NotImplementedError("Fetching data using different relation types isn't implemented yet.")
 
     setup_logger(level=args.log_level.upper())
     output_path = Path(args.output_path)
@@ -130,6 +152,7 @@ def main(args: argparse.Namespace) -> None:
         molecule_chembl_ids=args.molecule_ids,
         target_chembl_ids=args.target_ids,
         confidence_scores=args.confidence_scores,
+        assay_types=args.assay_types,
         calculate_pchembl=args.calculate_pchembl,
     )
     # full_df.to_csv(output_path.with_suffix(".begin.csv"), index=False)
