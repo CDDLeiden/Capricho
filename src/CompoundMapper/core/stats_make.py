@@ -4,6 +4,7 @@ from typing import List
 
 import numpy as np
 import pandas as pd
+from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..logger import logger
 from .pandas_helper import aggr_val_series, apply_func_grpd, assign_stats
@@ -79,6 +80,7 @@ def process_repeat_mols(
     repeat_element_idxs: List[List[int]],
     solve_strat: str = "keep",
     extra_id_cols: List[str] = [],
+    chirality: bool = False,
 ) -> pd.DataFrame:
     """Process the dataframe according to repeated elements identified
     with the function `find_repeated_arr_from_series`. The standard criteria here
@@ -98,6 +100,8 @@ def process_repeat_mols(
         extra_id_cols: list of extra identification columns you might have for your own
             compounds that you'd like to use to avoid mixing data & to keep in the final
             dataframe.
+        chirality: boolean flag to indicate whether the fingerprints used to check for
+            identical compounds is chirality-sensitive or not. Defaults to False
 
     Returns:
         df: dataframe with the repeated elements processed.
@@ -154,8 +158,6 @@ def process_repeat_mols(
         "prodrug",
         "withdrawn_flag",
     ]
-    final_cols = id_cols + multival_cols
-    final_cols.pop(final_cols.index("repeat_mapping"))  # remove repeat_mapping from final_cols
     repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
     grouped = repeat_subset.groupby(id_cols)
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
@@ -164,16 +166,31 @@ def process_repeat_mols(
     todrop_cols = [c for c in updated_df.columns if c.endswith("_y")]
     updated_df = updated_df.drop(columns=todrop_cols).rename(columns=rename_cols)
     todrop_processed = updated_df["repeat_mapping"].isin(high_diff_repeats).index
+    smiles_canonizer = ChemStandardizer(
+        method="canon", from_smi=True, n_jobs=4, progress=True, isomeric=chirality
+    )
     if solve_strat == "drop":
         updated_df = updated_df.drop(index=todrop_processed)
     df = pd.concat(
         [
-            # TODO: this `might_rancemic` flag needs to be sensitive to the type of fingerprint used in CLI
             df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
-            updated_df.assign(might_rancemic=lambda x: [True] * len(x)),
+            updated_df.assign(might_rancemic=lambda x: [True if not chirality else False] * len(x)),
         ],
         ignore_index=True,
-    )  # TODO: incorporate a single SMILES to represent the data point. If chiral is false, remove chirality
-    df = df[final_cols].reset_index(drop=True).drop_duplicates()
+    )
+    # the `smiles` column will be the final smiles column; to be used for modeling
+    smiles = df["standard_smiles"].apply(lambda smi: smi if ";" not in smi else smi.split(";")[0])
+    logger.info("Canonicalizing smiles...")
+    df = df.assign(smiles=smiles_canonizer(smiles))
+
+    stats_cols = [f"pchembl_value{suffix}" for suffix in ["_mean", "_std", "_median", "_mad", "_counts"]]
+    final_cols = [*id_cols, "smiles", *multival_cols, "might_rancemic", *stats_cols]
+    final_cols.pop(final_cols.index("repeat_mapping"))  # remove repeat_mapping from final_cols
+    df = (
+        df[final_cols]
+        .rename(columns={"standard_smiles": "original_smiles"})
+        .reset_index(drop=True)
+        .drop_duplicates()
+    )
     logger.info(f"Final number of points: {len(df)}")
     return df
