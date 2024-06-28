@@ -163,14 +163,16 @@ def main(args: argparse.Namespace) -> None:
             standard_type=lambda x: x["standard_type"].replace(bioactivity_type_rename_dict)
         )
         .query("standard_type.isin(@args.bioactivity_type)")
-        .assign(  # standardize the smiles & clean possible solvents & salts from the string
-            standard_smiles=lambda x: stdzer(x["canonical_smiles"]),
-            final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures),
-        )
+        # standardize the smiles & clean possible solvents & salts from the string
+        .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
+        .dropna(subset=["standard_smiles"])  # drop if no structure is found
+        .query("standard_smiles.notna()")
+        .assign(final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures))
         .drop(columns="standard_smiles")
         .rename(columns={"final_smiles": "standard_smiles"})
+        # Drop cols that won't be used; we'll use `standard_<colname>` instead
         .drop(
-            columns=[  # columns that won't be used; we'll use `standard_<colname>` instead
+            columns=[
                 "type",
                 "relation",
                 "units",
