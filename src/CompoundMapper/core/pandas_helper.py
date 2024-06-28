@@ -97,13 +97,7 @@ def assign_stats(df: pd.DataFrame, sep=";", value_col="pchembl_value") -> pd.Dat
     """
 
     value_series = df[value_col].astype(str).str.split(sep).apply(lambda x: list(map(float, x)))
-    new_cols = [
-        f"{value_col}_mean",
-        f"{value_col}_std",
-        f"{value_col}_median",
-        f"{value_col}_mad",
-        f"{value_col}_counts",
-    ]
+    new_cols = [f"{value_col}{suffix}" for suffix in ["_mean", "_std", "_median", "_mad", "_counts"]]
     values = [
         value_series.apply(np.mean),
         value_series.apply(np.std),

@@ -206,7 +206,7 @@ def main(args: argparse.Namespace) -> None:
     # queried_df.to_csv(output_path.with_suffix(".midway.csv"), index=False)
     queried_df = queried_df.assign(fps=fps)
     repeats_idxs = repeated_indices_from_array_series(queried_df["fps"])
-    final_data = process_repeat_mols(queried_df, repeats_idxs, solve_strat="keep")
+    final_data = process_repeat_mols(queried_df, repeats_idxs, solve_strat="keep", chirality=args.chirality)
     final_data.to_csv(output_path, index=False)
     return final_data  # could be used as a function
 
