@@ -113,7 +113,7 @@ def process_repeat_mols(
             repeat_mapping[i] = idx
     df = df.assign(repeat_mapping=lambda x: x.index.map(repeat_mapping))
     repeat_subset = df.query("~repeat_mapping.isna()").assign(
-        pchembl_value=lambda x: x.pchembl_value.round(3).astype(str)
+        pchembl_value=lambda df: df.pchembl_value.apply(lambda val: f"{round(val, 3):.3f}")
     )
     numeric_activity = (
         # concatenate grouped values and convert to numeric arrays
