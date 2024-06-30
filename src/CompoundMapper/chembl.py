@@ -245,8 +245,16 @@ def convert_to_log10(df):
             tmp_df = tmp_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
             pchembl_inf_or_nan = tmp_df.replace([np.inf, -np.inf], np.nan).query("pchembl_value.isna()")
             if not pchembl_inf_or_nan.empty:
-                _info = pchembl_inf_or_nan[["molecule_chembl_id", "standard_value", "standard_units"]]
-                logger.warning(
+                debug_cols = [
+                    "target_chembl_id",
+                    "assay_chembl_id",
+                    "assay_type",
+                    "molecule_chembl_id",
+                    "standard_units",
+                    "standard_value",
+                ]
+                _info = pchembl_inf_or_nan[debug_cols]
+                logger.info(
                     f"Found infinite or NaN values upon calculating pchembl values. Dropping:\n{_info}"
                 )
                 tmp_df = tmp_df.drop(pchembl_inf_or_nan.index)
