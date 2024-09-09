@@ -193,4 +193,7 @@ def process_repeat_mols(
         .drop_duplicates()
     )
     logger.info(f"Final number of points: {len(df)}")
+    # Also add the single-read points to the mean / median values
+    df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"]).astype(float)
+    df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"]).astype(float)
     return df
