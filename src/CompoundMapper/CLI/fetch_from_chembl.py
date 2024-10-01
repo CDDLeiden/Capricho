@@ -7,7 +7,7 @@ import numpy as np
 from chemFilters.chem.standardizers import ChemStandardizer
 from UniProtMapper import ProtMapper
 
-from ..chembl import fetch_and_filter_workflow
+from ..chembl.processing import fetch_and_filter_workflow
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
 from ..logger import logger, setup_logger
@@ -154,8 +154,16 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument(
-        "-save_not_aggregated",
-        "--noaggr",
+        "-mcols",
+        "--metadata_cols",
+        nargs="*",
+        default=[],
+        help="Extra metadata columns to keep in the final dataframe, aggregated by ';'. Defaults to [].",
+        type=str,
+    )
+    parser.add_argument(
+        "-noaggr",
+        "--save_not_aggregated",
         action="store_true",
         help="Save the data before aggregating the repeated molecules.",
     )
@@ -232,8 +240,13 @@ def main(args: argparse.Namespace) -> None:
         mixture_idxs = np.where(mask)[0]  # drop where smiles contain mixtures
         queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
 
+    df_size = queried_df.shape[0]
+    queried_df.drop_duplicates(inplace=True)
+    if df_size != queried_df.shape[0]:
+        logger.info(f"Dropped {df_size - queried_df.shape[0]} duplicates.")
+
     if args.save_not_aggregated:
-        full_df.to_csv(output_path.with_name(f"{output_path.name}_not_aggregated.csv"), index=False)
+        queried_df.to_csv(output_path.with_stem(f"{output_path.stem}_not_aggregated"), index=False)
 
     # calculate fingerprints; aggregate repeated molecules
     fps = calculate_mixed_FPs(
@@ -241,10 +254,18 @@ def main(args: argparse.Namespace) -> None:
     )
     queried_df = queried_df.assign(fps=fps)
     repeats_idxs = repeated_indices_from_array_series(queried_df["fps"])
+
     if args.chembl_version is not None:
-        extra_id_cols = ["document_chembl_id", "doc_type", "doi", "journal", "year", "chembl_release"]
+        include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *args.metadata_cols]
+    else:
+        include_metadata = args.metadata_cols
+
     final_data = process_repeat_mols(
-        queried_df, repeats_idxs, solve_strat="keep", chirality=args.chirality, extra_id_cols=extra_id_cols
+        queried_df,
+        repeats_idxs,
+        solve_strat="keep",
+        chirality=args.chirality,
+        extra_multival_cols=include_metadata,
     )
     final_data.to_csv(output_path, index=False)
     return final_data
