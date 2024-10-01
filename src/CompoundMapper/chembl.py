@@ -12,58 +12,76 @@ from .logger import logger
 assays_api = new_client.assay
 activity_api = new_client.activity
 compounds_api = new_client.molecule
+document_api = new_client.document
 
 # temporary; to be removed after pandas 3.0
 # check for pandas' version. If lower than 3.0, set the option to avoid silent downcasting
-if pd.__version__ < "3.0.0":
-    pd.set_option("future.no_silent_downcasting", True)
+# if pd.__version__ < "3.0.0":
+#     pd.set_option("future.no_silent_downcasting", True)
 
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
 
 
-def get_publications_details(assay_chembl_ids: list) -> dict:
+def get_publications_details(document_chembl_ids: list, chembl_version: Optional[int]) -> pd.DataFrame:
     """From a list of ChEMBL assay IDs, get the publication details.
     Args:
         assay_chembl_ids: list of ChEMBL assay IDs.
     Returns:
         dict: a dictionary with assay IDs as keys and publication details as values.
     """
-    assay = new_client.assay
-    document = new_client.document
+    query_kwargs = {}
+    if document_chembl_ids is not None:
+        query_kwargs.update({"document_chembl_ids__in": document_chembl_ids})
+    if chembl_version is not None:
+        chembl_versions = [f"CHEMBL_{i}" for i in range(chembl_version + 1)]
+        query_kwargs.update({"chembl_release__in": chembl_versions})
 
+    documents = document_api.filter(**query_kwargs).only(
+        "document_chembl_id",
+        "doc_type",
+        "authors",
+        "doi",
+        "journal",
+        "volume",
+        "year",
+        "title",
+        "chembl_release",
+    )
     publications_details = {}
-    for assay_id in assay_chembl_ids:
-        assay_data = assay.get(assay_id)
+    for doc_data in documents:
         authors, doi, journal, volume, year, title = None, None, None, None, None, None
         chembl_release = None
-        if assay_data and "document_chembl_id" in assay_data:
-            doc_data = document.get(assay_data["document_chembl_id"])
-            if doc_data:
-                authors = doc_data.get("authors")
-                doi = doc_data.get("doi")
-                journal = doc_data.get("journal")
-                volume = doc_data.get("volume")
-                year = doc_data.get("year")
-                title = doc_data.get("title")
-                chembl_release = doc_data.get("chembl_release")
-                if isinstance(chembl_release, dict):
-                    chembl_release = chembl_release.get("chembl_release")
+        if doc_data:
+            document_id = doc_data.get("document_chembl_id")
+            doc_type = doc_data.get("doc_type")
+            authors = doc_data.get("authors")
+            doi = doc_data.get("doi")
+            journal = doc_data.get("journal")
+            volume = doc_data.get("volume")
+            year = doc_data.get("year")
+            title = doc_data.get("title")
+            chembl_release = doc_data.get("chembl_release")
+            if isinstance(chembl_release, dict):
+                chembl_release = chembl_release.get("chembl_release")
 
-        publications_details[assay_id] = {
-            "Authors": authors,
-            "DOI": doi,
-            "Journal": journal,
-            "Volume": volume,
-            "Year": year,
-            "Title": title,
-            "ChEMBL_Release": chembl_release,
+        publications_details[document_id] = {
+            "doc_type": doc_type,
+            "authors": authors,
+            "doi": doi,
+            "journal": journal,
+            "volume": volume,
+            "year": year,
+            "title": title,
+            "chembl_release": chembl_release,
         }
-    return publications_details
+    return pd.DataFrame.from_dict(publications_details, orient="index").reset_index(
+        names=["document_chembl_id"]
+    )
 
 
-def molecule_info_from_chembl(molecule_chembl_ids: list) -> dict:
+def molecule_info_from_chembl(molecule_chembl_ids: list) -> pd.DataFrame:
     """Get information on a molecule from ChEMBL.
     Args:
         molecule_chembl_ids: a list of molecule ChEMBL IDs.
@@ -180,12 +198,16 @@ def assay_info_from_chembl(
 def bioactivities_from_chembl(
     molecule_chembl_ids: Optional[list] = None,
     target_chembl_ids: Optional[list] = None,
+    assay_chembl_ids: Optional[list] = None,
+    document_chembl_ids: Optional[list] = None,
     **kwargs,
 ) -> pd.DataFrame:
     """Take a list of molecule chembl ids and get their respective bioactivities in ChEMBL.
     Args:
         molecule_chembl_id: list of molecule ChEMBL IDs to fecth bioactivities. Defaults to None.
         target_chembl_ids: list of target ChEMBL IDs to fetch bioactivities. Defaults to None.
+        assay_chembl_ids: list of assay ChEMBL IDs to fetch bioactivities. Defaults to None.
+        document_chembl_ids: list of document ChEMBL IDs to fetch bioactivities. Defaults to None.
         kwargs: example -> `standard_relation="=", assay_type__in=["B", "F"]`.
     Returns:
         pd.DataFrame: a DataFrame with the bioactivities.
@@ -195,6 +217,10 @@ def bioactivities_from_chembl(
         activity_kwargs.update({"molecule_chembl_id__in": molecule_chembl_ids})
     if target_chembl_ids is not None:
         activity_kwargs.update({"target_chembl_id__in": target_chembl_ids})
+    if assay_chembl_ids is not None:
+        activity_kwargs.update({"assay_chembl_id__in": assay_chembl_ids})
+    if document_chembl_ids is not None:
+        activity_kwargs.update({"document_chembl_id__in": document_chembl_ids})
     bioactivities = activity_api.filter(**activity_kwargs).only(
         "activity_id",
         "assay_chembl_id",
@@ -298,9 +324,12 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
 def fetch_and_filter_workflow(
     molecule_chembl_ids: Optional[list] = None,
     target_chembl_ids: Optional[list] = None,
+    assay_chembl_ids: Optional[list] = None,
+    document_chembl_ids: Optional[list] = None,
     confidence_scores: Union[List, Tuple] = (9, 8),
     assay_types: Union[List, Tuple] = ("B", "F"),
     calculate_pchembl: bool = True,
+    chembl_version: Optional[int] = None,
 ) -> pd.DataFrame:
     """
     This function retrieves and merges data from ChEMBL for given molecule or target IDs.
@@ -317,19 +346,24 @@ def fetch_and_filter_workflow(
     Args:
         molecule_chembl_ids: list of ChEMBL molecule IDs to fetch data for. Defaults to None.
         target_chembl_ids: list of ChEMBL target IDs to fetch data for. Defaults to None.
+        assay_chembl_ids: list of ChEMBL assay IDs to fetch data for. Defaults to None.
+        document_chembl_ids: list of ChEMBL document IDs to fetch data for. Defaults to None.
         confidence_scores: list of confidence scores to filter the fetched assay data.
             Defaults to (9, 8).
         assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
             functional (F) data.
         calculate_pchembl: calculate pChEMBL values for the bioactivities when it's not present
             for bioactivities reported in nM, µM or uM. Defaults to True.
+        chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.
     Returns:
         pd.DataFrame: Merged DataFrame with molecule, bioactivity, and assay information.
     """
     bioactivities_df = process_bioactivities(
         bioactivities_from_chembl(
-            molecule_chembl_ids,
-            target_chembl_ids,
+            molecule_chembl_ids=molecule_chembl_ids,
+            target_chembl_ids=target_chembl_ids,
+            assay_chembl_ids=assay_chembl_ids,
+            document_chembl_ids=document_chembl_ids,
             standard_relation="=",
             assay_type__in=assay_types,
         ),
@@ -362,4 +396,9 @@ def fetch_and_filter_workflow(
         + [col for col in full_df.columns if col not in ["molecule_chembl_id", "canonical_smiles"]]
     ]
     logger.debug(f"Columns in the DataFrame with molecular structures: {full_df.columns}")
+    if chembl_version is not None:
+        document_ids = full_df["document_chembl_id"].unique().tolist()
+        publications_df = get_publications_details(document_ids, chembl_version)
+        full_df = pd.merge(full_df, publications_df, on="document_chembl_id", how="right")
+
     return full_df

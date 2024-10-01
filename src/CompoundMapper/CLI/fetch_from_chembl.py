@@ -31,7 +31,7 @@ def parse_arguments() -> argparse.Namespace:
         dest="molecule_ids",
         nargs="*",
         required=False,
-        help="Chembl molecule IDs to download data from.",
+        help="ChEMBL molecule IDs to download data from.",
         type=str,
     )
     parser.add_argument(
@@ -40,7 +40,25 @@ def parse_arguments() -> argparse.Namespace:
         dest="target_ids",
         nargs="*",
         required=False,
-        help="UniProt target IDs to download data from.",
+        help="ChEMBL target IDs to retrieve data from.",
+        type=str,
+    )
+    parser.add_argument(
+        "-asids",
+        "--assay_ids",
+        dest="assay_ids",
+        nargs="*",
+        required=False,
+        help="ChEMBL assay IDs to retrieve data from.",
+        type=str,
+    )
+    parser.add_argument(
+        "-dids",
+        "--document_ids",
+        dest="document_ids",
+        nargs="*",
+        required=False,
+        help="ChEMBL document IDs to download data from.",
         type=str,
     )
     parser.add_argument(
@@ -128,6 +146,19 @@ def parse_arguments() -> argparse.Namespace:
         ),
         type=str,
     )
+    parser.add_argument(
+        "-v",
+        "--chembl_version",
+        type=int,
+        help="chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.",
+        default=None,
+    )
+    parser.add_argument(
+        "-save_not_aggregated",
+        "--noaggr",
+        action="store_true",
+        help="Save the data before aggregating the repeated molecules.",
+    )
     return parser.parse_args()
 
 
@@ -151,11 +182,13 @@ def main(args: argparse.Namespace) -> None:
     full_df = fetch_and_filter_workflow(
         molecule_chembl_ids=args.molecule_ids,
         target_chembl_ids=args.target_ids,
+        assay_chembl_ids=args.assay_ids,
+        document_chembl_ids=args.document_ids,
         confidence_scores=args.confidence_scores,
         assay_types=args.assay_types,
         calculate_pchembl=args.calculate_pchembl,
+        chembl_version=args.chembl_version,
     )
-    # full_df.to_csv(output_path.with_suffix(".begin.csv"), index=False)
 
     stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
     queried_df = (
@@ -198,6 +231,9 @@ def main(args: argparse.Namespace) -> None:
         logger.info(f"Number of mixtures: {mask.sum()}")
         mixture_idxs = np.where(mask)[0]  # drop data points where smiles are mixtures
         queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
+
+    if args.save_not_aggregated:
+        full_df.to_csv(output_path.with_name(f"{output_path.name}_not_aggregated.csv"), index=False)
 
     # calculate the fingerprints to identify repeat molecules & aggregate data accordingly
     fps = calculate_mixed_FPs(
