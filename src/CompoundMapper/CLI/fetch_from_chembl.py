@@ -229,22 +229,25 @@ def main(args: argparse.Namespace) -> None:
     n_mixtures = mask.sum()
     if n_mixtures > 0:
         logger.info(f"Number of mixtures: {mask.sum()}")
-        mixture_idxs = np.where(mask)[0]  # drop data points where smiles are mixtures
+        mixture_idxs = np.where(mask)[0]  # drop where smiles contain mixtures
         queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
 
     if args.save_not_aggregated:
         full_df.to_csv(output_path.with_name(f"{output_path.name}_not_aggregated.csv"), index=False)
 
-    # calculate the fingerprints to identify repeat molecules & aggregate data accordingly
+    # calculate fingerprints; aggregate repeated molecules
     fps = calculate_mixed_FPs(
         queried_df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": args.chirality}
     )
-    # queried_df.to_csv(output_path.with_suffix(".midway.csv"), index=False)
     queried_df = queried_df.assign(fps=fps)
     repeats_idxs = repeated_indices_from_array_series(queried_df["fps"])
-    final_data = process_repeat_mols(queried_df, repeats_idxs, solve_strat="keep", chirality=args.chirality)
+    if args.chembl_version is not None:
+        extra_id_cols = ["document_chembl_id", "doc_type", "doi", "journal", "year", "chembl_release"]
+    final_data = process_repeat_mols(
+        queried_df, repeats_idxs, solve_strat="keep", chirality=args.chirality, extra_id_cols=extra_id_cols
+    )
     final_data.to_csv(output_path, index=False)
-    return final_data  # could be used as a function
+    return final_data
 
 
 def main_exe() -> None:
