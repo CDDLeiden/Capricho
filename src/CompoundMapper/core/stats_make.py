@@ -80,6 +80,7 @@ def process_repeat_mols(
     repeat_element_idxs: List[List[int]],
     solve_strat: str = "keep",
     extra_id_cols: List[str] = [],
+    extra_multival_cols: List[str] = [],
     chirality: bool = False,
 ) -> pd.DataFrame:
     """Process the dataframe according to repeated elements identified
@@ -99,7 +100,10 @@ def process_repeat_mols(
             no values will be dropped.
         extra_id_cols: list of extra identification columns you might have for your own
             compounds that you'd like to use to avoid mixing data & to keep in the final
-            dataframe.
+            dataframe. Defaults to [].
+        extra_multival_cols: list of extra columns that you'd like to keep as aggregated
+            values in the final dataframe. Caveat: these columns will be displayes as (str)
+            separated by `;` in the final dataframe. Defaults to [].
         chirality: boolean flag to indicate whether the fingerprints used to check for
             identical compounds is chirality-sensitive or not. Defaults to False
 
@@ -157,6 +161,7 @@ def process_repeat_mols(
         "oral",
         "prodrug",
         "withdrawn_flag",
+        *extra_multival_cols,
     ]
     repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
     grouped = repeat_subset.groupby(id_cols)
