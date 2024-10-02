@@ -5,7 +5,7 @@ import sys
 from loguru import logger
 
 
-def setup_logger(level="INFO"):
+def setup_logger(level="INFO", out_file=None):
     """Initialize the logger with a default log level and format"""
     colorful_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | "
@@ -14,6 +14,8 @@ def setup_logger(level="INFO"):
     )
     logger.remove()
     logger.add(sys.stderr, format=colorful_format, level=level, colorize=True)
+    if out_file:
+        logger.add(out_file, format=colorful_format, level=level)
 
 
 def set_log_level(level):
