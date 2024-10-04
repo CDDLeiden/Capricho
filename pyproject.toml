@@ -39,7 +39,7 @@ repository = "https://github.com/David-Araripe/CompoundMapper"
 # documentation = "https://readthedocs.org" TODO
 
 [project.scripts]
-getchembl = "CompoundMapper.CLI.fetch_from_chembl:main_exe"
+getchembl = "CompoundMapper.cli.main:main_exe"
 
 [tool.setuptools_scm]
 write_to = "src/CompoundMapper/_version.py"
