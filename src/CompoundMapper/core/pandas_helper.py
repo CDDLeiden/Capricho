@@ -23,7 +23,7 @@ def format_value(x) -> str:
     if isinstance(x, float):
         if x.is_integer() and 1000 <= x <= 9999:
             return f"{int(x)}"  # Return as integer string if it's a year
-        return f"{x:.4f}"
+        return f"{x:.2f}"
     elif isinstance(x, int):
         return str(x)
     else:

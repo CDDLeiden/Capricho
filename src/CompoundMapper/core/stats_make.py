@@ -7,7 +7,7 @@ import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..logger import logger
-from .pandas_helper import aggr_val_series, apply_func_grpd, assign_stats
+from .pandas_helper import aggr_val_series, apply_func_grpd, assign_stats, format_value
 
 
 def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[int]]:
@@ -117,7 +117,7 @@ def process_repeat_mols(
             repeat_mapping[i] = idx
     df = df.assign(repeat_mapping=lambda x: x.index.map(repeat_mapping))
     repeat_subset = df.query("~repeat_mapping.isna()").assign(
-        pchembl_value=lambda df: df.pchembl_value.apply(lambda val: f"{round(val, 3):.3f}")
+        pchembl_value=lambda df: df.pchembl_value.apply(lambda val: format_value(val))
     )
     numeric_activity = (
         # concatenate grouped values and convert to numeric arrays
@@ -178,7 +178,10 @@ def process_repeat_mols(
         updated_df = updated_df.drop(index=todrop_processed)
     df = pd.concat(
         [
-            df.drop(index=repeat_subset.index).assign(might_rancemic=lambda x: [False] * len(x)),
+            df.drop(index=repeat_subset.index).assign(
+                might_rancemic=lambda x: [False] * len(x),
+                pchembl_value=lambda x: x["pchembl_value"].apply(format_value),
+            ),
             updated_df.assign(might_rancemic=lambda x: [True if not chirality else False] * len(x)),
         ],
         ignore_index=True,
@@ -199,6 +202,6 @@ def process_repeat_mols(
     )
     logger.info(f"Final number of points: {len(df)}")
     # Also add the single-read points to the mean / median values
-    df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"]).astype(float)
-    df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"]).astype(float)
+    df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"])
+    df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"])
     return df
