@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Union
+from typing import Optional, Union
 
 import numpy as np
 from chemFilters.chem.standardizers import ChemStandardizer
@@ -17,7 +17,7 @@ def fetch_standardize_and_clean_workflow(
     assay_ids: list[str],
     document_ids: list[str],
     calculate_pchembl: bool,
-    output_path: Union[str, Path],
+    output_path: Optional[Union[str, Path]],
     confidence_scores: list[str],
     bioactivity_type: list[str],
     standard_relation: list[str],  # TODO: later support data with  >, <, >=, <=...
@@ -51,8 +51,9 @@ def fetch_standardize_and_clean_workflow(
         pd.DataFrame: the filtered, standardized, and cleaned data
     """
 
-    if isinstance(output_path, str):
-        output_path = Path(output_path)
+    if output_path is not None:
+        if isinstance(output_path, str):
+            output_path = Path(output_path)
 
     # since we work with pchembl values, standard values reported as -pXC50, -Log XC50, etc. will be renamed
     bioactivity_type_rename_dict = {
@@ -131,7 +132,7 @@ def fetch_standardize_and_clean_workflow(
             keep="first",
             inplace=True,
         )
-        if save_duplicated:
+        if save_duplicated and output_path is not None:
             queried_df[duplicated].to_csv(
                 output_path.with_stem(f"{output_path.stem}_duplicated"), index=False
             )
@@ -145,7 +146,7 @@ def fetch_standardize_and_clean_workflow(
     # assays from the same document that have the same readout and are measured against
     # the same target, we can be pretty sure tha they are *not* equivalent;
 
-    if save_not_aggregated:
+    if save_not_aggregated and output_path is not None:
         queried_df.to_csv(output_path.with_stem(f"{output_path.stem}_not_aggregated"), index=False)
 
     return queried_df
@@ -156,7 +157,7 @@ def aggregate_data(
     chirality: bool,
     chembl_version: int,
     metadata_cols: list[str],
-    output_path: Union[str, Path],
+    output_path: Optional[Union[str, Path]],
 ):
     """Aggregate the data obtained from ChEMBL by:
         1) Calculate fingerprints and use those to identify same-structure compounds;
@@ -194,5 +195,8 @@ def aggregate_data(
         chirality=chirality,
         extra_multival_cols=include_metadata,
     )
-    final_data.to_csv(output_path, index=False)
+
+    if output_path is not None:
+        final_data.to_csv(output_path, index=False)
+
     return final_data
