@@ -24,6 +24,7 @@ def fetch_standardize_and_clean_workflow(
     assay_types: list[str],
     chembl_version: int,
     save_not_aggregated: bool,
+    save_duplicated: bool = False,
 ) -> None:
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -44,6 +45,7 @@ def fetch_standardize_and_clean_workflow(
             Defaults to "=".
         chembl_version: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
+        save_duplicated: whether to save the duplicated data (if any) to a separate csv file
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -129,7 +131,10 @@ def fetch_standardize_and_clean_workflow(
             keep="first",
             inplace=True,
         )
-        queried_df[duplicated].to_csv(output_path.with_stem(f"{output_path.stem}_duplicated"), index=False)
+        if save_duplicated:
+            queried_df[duplicated].to_csv(
+                output_path.with_stem(f"{output_path.stem}_duplicated"), index=False
+            )
         if df_size != queried_df.shape[0]:
             logger.info(f"Dropped {df_size - queried_df.shape[0]} duplicates.")
 
