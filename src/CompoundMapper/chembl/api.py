@@ -10,11 +10,6 @@ from ..core.pandas_helper import find_dict_in_dataframe
 from ..logger import logger
 from .rate_limit import rate_limit
 
-assays_api = new_client.assay
-activity_api = new_client.activity
-compounds_api = new_client.molecule
-document_api = new_client.document
-
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
@@ -31,6 +26,7 @@ def get_publications_details(document_chembl_ids: list, chembl_version: Optional
     if document_chembl_ids is not None:
         query_kwargs.update({"document_chembl_ids__in": document_chembl_ids})
 
+    document_api = new_client.document
     documents = document_api.filter(**query_kwargs).only(
         "document_chembl_id",
         "doc_type",
@@ -86,6 +82,7 @@ def molecule_info_from_chembl(molecule_chembl_ids: list) -> pd.DataFrame:
         pd.DataFrame: a DataFrame with the molecule information.
     """
     extracted = {}
+    compounds_api = new_client.molecule
     result = compounds_api.filter(molecule_chembl_id__in=molecule_chembl_ids).only(
         "molecule_chembl_id",
         "molecule_hierarchy",
@@ -235,6 +232,7 @@ def assay_info_from_chembl(
         "confidence_score__in": confidence_scores,
         **kwargs,
     }
+    assays_api = new_client.assay
     assays = assays_api.filter(**activity_kwargs).only(
         "assay_cell_type",
         "assay_chembl_id",
@@ -294,6 +292,7 @@ def bioactivities_from_chembl(
         activity_kwargs.update({"assay_chembl_id__in": assay_chembl_ids})
     if document_chembl_ids is not None:
         activity_kwargs.update({"document_chembl_id__in": document_chembl_ids})
+    activity_api = new_client.activity
     bioactivities = activity_api.filter(**activity_kwargs).only(
         "activity_id",
         "assay_chembl_id",

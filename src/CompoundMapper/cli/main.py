@@ -3,15 +3,9 @@
 import argparse
 from pathlib import Path
 
-import numpy as np
-from chemFilters.chem.standardizers import ChemStandardizer
 from UniProtMapper import ProtMapper
 
-from ..chembl.processing import fetch_and_filter_workflow
-from ..core.smiles_utils import clean_mixtures
-from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
-from ..logger import logger, setup_logger
-from .fp_utils import calculate_mixed_FPs
+from ..logger import setup_logger
 from .workflow import aggregate_data, fetch_standardize_and_clean_workflow
 
 
