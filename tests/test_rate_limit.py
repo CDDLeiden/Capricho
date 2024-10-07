@@ -18,7 +18,7 @@ class TestRateLimitDecorator(unittest.TestCase):
         return f"Executed {i}"
 
     def test_rate_limit_decorator(self):
-        num_calls = 20
+        num_calls = 40
         start_time = time.perf_counter()
 
         with redirect_stderr(StringIO()):  # Redirect stderr to avoid cluttering the test output
