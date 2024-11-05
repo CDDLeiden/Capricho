@@ -150,7 +150,7 @@ def parse_molecule_response(r: dict, compound_id: str) -> dict:
     }
 
 
-def get_similar_compounds(smi: list, similarity: float) -> pd.DataFrame:
+def get_similar_compounds(smi: str, similarity: float) -> pd.DataFrame:
     """Fetch similar compounds from ChEMBL using the similarity API.
 
     Args:
