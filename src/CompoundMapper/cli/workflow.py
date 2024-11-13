@@ -73,6 +73,13 @@ def fetch_standardize_and_clean_workflow(
         chembl_version=chembl_version,
     )
 
+    # drop rows without chemical structures
+    no_smiles_mask = full_df.canonical_smiles.isna()
+    if no_smiles_mask.any():
+        _info = full_df[no_smiles_mask].iloc[:, :6]
+        logger.info(f"Dropping rows with missing canonical smiles:\n{_info}")
+        full_df = full_df.drop(index=_info.index).reset_index(drop=True)
+
     stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
     queried_df = (
         full_df.assign(  # rename bioactivities & filter by preferred bioactivity type
@@ -95,7 +102,6 @@ def fetch_standardize_and_clean_workflow(
                 "value",
                 "standard_value",  # we'll use pchembl instead
                 "type",
-                "canonical_smiles",
                 # "description",
             ]
         )
@@ -120,6 +126,7 @@ def fetch_standardize_and_clean_workflow(
     col_subset = [  # Drop different assays that have the same exact pchembl value - probably duplicate
         "molecule_chembl_id",
         "standard_smiles",
+        "canonical_smiles",
         "pchembl_value",
         "standard_relation",
         "target_chembl_id",
@@ -157,21 +164,30 @@ def aggregate_data(
     chirality: bool,
     chembl_version: int,
     metadata_cols: list[str],
-    output_path: Optional[Union[str, Path]],
+    extra_id_cols: list[str],
+    aggregate_mutants: bool = False,
+    output_path: Optional[Union[str, Path]] = None,
 ):
     """Aggregate the data obtained from ChEMBL by:
-        1) Calculate fingerprints and use those to identify same-structure compounds;
-        2) Identify identical arrays from fingerprints and aggregate the data;
+    1) Calculate fingerprints and use those to identify same-structure compounds;
+    2) Identify identical arrays from fingerprints and aggregate the data;
 
     Aggregated data will contain the original data separated by a semicolon and calculate
     the mean, median, standard deviation, median absolute deviation, and value counts
     for the pchembl values.
 
     Args:
-        df: dataframe output from `fetch_standardize_and_clean_workflow`
+
+        df: dataframe output from `CompoundMapper.cli.workflow.fetch_standardize_and_clean_workflow`
         chirality: toggle chiral-sensitive fingerprints for identifying same molecules
         chembl_version: latest ChEMBL release to retrieve data from
-        metadata_cols: additional metadata columns to keep in the final dataframe
+        metadata_cols: additional metadata columns to keep in the final dataframe. Metadata will
+            be saved separated by a semicolon whenever aggregation is performed.
+        extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
+            `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
+            if the compound is the same and the assay is the same.
+        aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
+            regardless of the variant_sequence flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data
 
     Returns:
@@ -192,8 +208,10 @@ def aggregate_data(
         df,
         repeats_idxs,
         solve_strat="keep",
+        extra_id_cols=extra_id_cols,
         chirality=chirality,
         extra_multival_cols=include_metadata,
+        aggregate_mutants=aggregate_mutants,
     )
 
     if output_path is not None:

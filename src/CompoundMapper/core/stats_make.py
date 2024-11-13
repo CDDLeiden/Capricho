@@ -82,6 +82,7 @@ def process_repeat_mols(
     extra_id_cols: List[str] = [],
     extra_multival_cols: List[str] = [],
     chirality: bool = False,
+    aggregate_mutants: bool = False,
 ) -> pd.DataFrame:
     """Process the dataframe according to repeated elements identified
     with the function `find_repeated_arr_from_series`. The standard criteria here
@@ -141,6 +142,7 @@ def process_repeat_mols(
     id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
     multival_cols = [
         "standard_smiles",
+        "canonical_smiles",
         "pchembl_value",
         "assay_chembl_id",
         "assay_description",
@@ -155,7 +157,6 @@ def process_repeat_mols(
         "assay_tissue",
         "assay_cell_type",
         "relationship_description",
-        "variant_sequence",
         "indication_class",
         "max_phase",
         "oral",
@@ -163,6 +164,10 @@ def process_repeat_mols(
         "withdrawn_flag",
         *extra_multival_cols,
     ]
+    if aggregate_mutants:
+        multival_cols = [*multival_cols, "variant_sequence"]
+    else:
+        id_cols = [*id_cols, "variant_sequence"]
     repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
     grouped = repeat_subset.groupby(id_cols)
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)

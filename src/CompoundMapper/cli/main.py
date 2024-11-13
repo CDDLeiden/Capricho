@@ -73,7 +73,7 @@ def parse_arguments() -> argparse.Namespace:
             "Path to save the output files. If not provided, "
             "will create a folder named 'chembl_data' in the current directory."
         ),
-        default="chembl_data",
+        default="chembl_data.csv",
     )
     parser.add_argument(
         "-c",
@@ -150,10 +150,22 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-mcols",
-        "--metadata_cols",
+        "--metadata_columns",
         nargs="*",
         default=[],
         help="Extra metadata columns to keep in the final dataframe, aggregated by ';'. Defaults to [].",
+        type=str,
+    )
+    parser.add_argument(
+        "-idcols",
+        "--id_columns",
+        nargs="*",
+        default=[],
+        help=(
+            "Extra columns to use as identifiers for the aggregation. Passing `assay_chembl_id` to this "
+            "argument, for example, will only aggregate the data if the compound is the same and the assay "
+            "is the same. Saved data will still contain the original data separated by ';'. Defaults to []."
+        ),
         type=str,
     )
     parser.add_argument(
@@ -161,6 +173,16 @@ def parse_arguments() -> argparse.Namespace:
         "--save_not_aggregated",
         action="store_true",
         help="Save the data before aggregating the repeated molecules.",
+    )
+    parser.add_argument(
+        "-mutagg",
+        "--aggregate_mutants",
+        action="store_true",
+        help=(
+            "Aggregate data on targets regardless of the variant_sequence flag in ChEMBL, treating "
+            "mutants as the same target. Regardless of the configuration, mutation data will be "
+            "stored under `variant_sequence`. Default is False."
+        ),
     )
     return parser.parse_args()
 
@@ -194,7 +216,9 @@ def main(args: argparse.Namespace) -> None:
         df=df,
         chirality=args.chirality,
         chembl_version=args.chembl_version,
-        metadata_cols=args.metadata_cols,
+        metadata_cols=args.metadata_columns,
+        extra_id_cols=args.id_columns,
+        aggregate_mutants=args.aggregate_mutants,
         output_path=args.output_path,
     )
     return df
