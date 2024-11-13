@@ -120,13 +120,25 @@ def process_repeat_mols(
     repeat_subset = df.query("~repeat_mapping.isna()").assign(
         pchembl_value=lambda df: df.pchembl_value.apply(lambda val: format_value(val))
     )
-    numeric_activity = (
-        # concatenate grouped values and convert to numeric arrays
-        repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
-        .apply(lambda x: ";".join(x))
-        .str.split(";")
-        .apply(lambda x: np.array(x).astype(float))
-    )
+    if not repeat_subset.empty:
+        numeric_activity = (
+            # concatenate grouped values and convert to numeric arrays
+            repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
+            .apply(lambda x: ";".join(x))
+            .str.split(";")
+            .apply(lambda x: np.array(x).astype(float))
+        )
+    else:
+        logger.info(
+            "Multiple readouts on the same compound not found within the dataset. Statistics "
+            "columns (counts, mean, median) will be calculated solely for the sake of consistency."
+        )
+        numeric_activity = (
+            repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
+            .apply(lambda x: ";".join(x))
+            .apply(lambda x: np.array(x).astype(float))
+        )
+
     max_series = numeric_activity.apply(lambda x: np.max(x))
     min_series = numeric_activity.apply(lambda x: np.min(x))
     distance_series = max_series - min_series
