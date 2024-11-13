@@ -257,7 +257,7 @@ def assay_info_from_chembl(
                 variant_sequence=lambda x: x.variant_sequence.apply(
                     lambda y: y.get("mutation") if isinstance(y, dict) else y
                 )
-            )
+            ).assign(variant_sequence=lambda x: x.variant_sequence.replace({None: "WT"}))
     else:
         activity_kwargs.pop("assay_chembl_id__in")
         raise ValueError(
