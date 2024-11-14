@@ -5,7 +5,7 @@ from functools import partial
 import numpy as np
 from joblib import Parallel, delayed, parallel_config
 from rdkit import Chem
-from rdkit.Chem import AllChem, DataStructs, rdmolops
+from rdkit.Chem import rdFingerprintGenerator
 from tqdm import tqdm
 
 
@@ -14,12 +14,10 @@ def smi_to_morganFP(smi, radius: int = 2, nBits=2048, useChirality=False, **kwar
     if mol is None:
         print(f"Invalid SMILES detected: {smi}")
         return None
-    numpy_fp = np.zeros((1, nBits), dtype=bool)
-    morgan_fp = AllChem.GetMorganFingerprintAsBitVect(
-        mol, radius, nBits=nBits, useChirality=useChirality, **kwargs
+    morgan_gen = rdFingerprintGenerator.GetMorganGenerator(
+        radius=radius, fpSize=nBits, includeChirality=useChirality, **kwargs
     )
-    DataStructs.ConvertToNumpyArray(morgan_fp, numpy_fp)
-    return numpy_fp.reshape(1, -1)
+    return morgan_gen.GetFingerprintAsNumPy(mol).reshape(1, -1)
 
 
 def smi_to_RDKitFP(smi, minPath=1, maxPath=7, nBits=2048, **kwargs) -> np.ndarray:
@@ -27,10 +25,10 @@ def smi_to_RDKitFP(smi, minPath=1, maxPath=7, nBits=2048, **kwargs) -> np.ndarra
     if mol is None:
         print(f"Invalid SMILES detected: {smi}")
         return None
-    numpy_fp = np.zeros((1, nBits), dtype=bool)
-    morgan_fp = rdmolops.RDKFingerprint(mol, minPath=minPath, maxPath=maxPath, fpSize=nBits, **kwargs)
-    DataStructs.ConvertToNumpyArray(morgan_fp, numpy_fp)
-    return numpy_fp.reshape(1, -1)
+    rdkit_gen = rdFingerprintGenerator.GetRDKitFPGenerator(
+        minPath=minPath, maxPath=maxPath, fpSize=nBits, **kwargs
+    )
+    return rdkit_gen.GetFingerprintAsNumPy(mol).reshape(1, -1)
 
 
 def calculate_mixed_FPs(

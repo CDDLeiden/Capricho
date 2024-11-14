@@ -28,6 +28,7 @@ dependencies = [
   "scipy",
   "tqdm",
   "joblib",
+  "rdkit >= 2022.09.1",
   ]
 
 [project.optional-dependencies]
