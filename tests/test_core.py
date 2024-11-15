@@ -39,13 +39,13 @@ class TestPandasHelper(unittest.TestCase):
         self.assertIn("value_counts", result.columns)
 
         self.assertEqual(result["value_mean"].iloc[0], 2.0)
-        self.assertEqual(result["value_std"].iloc[0], 0.816497)
+        self.assertAlmostEquals(result["value_std"].iloc[0], 0.816497, 6)
         self.assertEqual(result["value_median"].iloc[0], 2.0)
         self.assertEqual(result["value_mad"].iloc[0], 1.0)
         self.assertEqual(result["value_counts"].iloc[0], 3)
 
         self.assertEqual(result["value_mean"].iloc[1], 5.0)
-        self.assertEqual(result["value_std"].iloc[1], 0.816497)
+        self.assertAlmostEquals(result["value_std"].iloc[1], 0.816497, 6)
         self.assertEqual(result["value_median"].iloc[1], 5.0)
         self.assertEqual(result["value_mad"].iloc[1], 1.0)
         self.assertEqual(result["value_counts"].iloc[1], 3)
