@@ -1,9 +1,11 @@
+from inspect import signature
 from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
 from chemFilters.chem.standardizers import ChemStandardizer
 
+from ..chembl.exceptions import BioactivitiesNotFoundError
 from ..chembl.processing import fetch_and_filter_workflow
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
@@ -50,7 +52,6 @@ def fetch_standardize_and_clean_workflow(
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
     """
-
     if output_path is not None:
         if isinstance(output_path, str):
             output_path = Path(output_path)
@@ -112,6 +113,12 @@ def fetch_standardize_and_clean_workflow(
     no_pchembl_idxs = queried_df.query("pchembl_value.isna()").index
     logger.info(f"Dropping {len(no_pchembl_idxs)} rows missing pchembl values.")
     queried_df = queried_df.drop(index=no_pchembl_idxs).reset_index(drop=True)
+
+    if queried_df.empty:
+        func_params = signature(fetch_standardize_and_clean_workflow).parameters
+        local_vars = locals()
+        parameters = {name: local_vars[name] for name in func_params}
+        raise BioactivitiesNotFoundError(parameters=parameters)
 
     # find remaining mixtures in the data
     mask = queried_df["standard_smiles"].str.contains(".", regex=False)
