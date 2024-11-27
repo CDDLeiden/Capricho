@@ -27,6 +27,7 @@ def fetch_standardize_and_clean_workflow(
     chembl_version: int,
     save_not_aggregated: bool,
     save_duplicated: bool = False,
+    add_document_info: bool = True,
 ) -> None:
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -48,6 +49,9 @@ def fetch_standardize_and_clean_workflow(
         chembl_version: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
         save_duplicated: whether to save the duplicated data (if any) to a separate csv file
+        add_document_info: whether to add publication-related fields to the final DataFrame. Setting
+            to True, will require one less query to be made to ChEMBL, but fields like `year` will be
+            lacking. Defaults to True.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -72,6 +76,7 @@ def fetch_standardize_and_clean_workflow(
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
         chembl_version=chembl_version,
+        add_document_info=add_document_info,
     )
 
     # drop rows without chemical structures

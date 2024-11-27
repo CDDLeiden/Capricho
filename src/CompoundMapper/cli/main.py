@@ -149,6 +149,17 @@ def parse_arguments() -> argparse.Namespace:
         default=None,
     )
     parser.add_argument(
+        "-no_doc",
+        "--no_document_info",
+        action="store_false",
+        type=bool,
+        help=(
+            "Whether to fetch the document information or not. Data sets fetched with this option won't "
+            "have the year information, for example, but will require one less API call. Defaults to False."
+        ),
+    )
+
+    parser.add_argument(
         "-mcols",
         "--metadata_columns",
         nargs="*",
@@ -210,6 +221,7 @@ def main(args: argparse.Namespace) -> None:
         assay_types=args.assay_types,
         chembl_version=args.chembl_version,
         save_not_aggregated=args.save_not_aggregated,
+        add_document_info=(not args.no_document_info),
     )
 
     df = aggregate_data(

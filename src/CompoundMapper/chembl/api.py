@@ -15,7 +15,7 @@ from .rate_limit import rate_limit
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
 
 
-def get_publications_details(document_chembl_ids: list, chembl_version: Optional[int]) -> pd.DataFrame:
+def get_document_details(document_chembl_ids: list, chembl_version: Optional[int] = None) -> pd.DataFrame:
     """From a list of ChEMBL assay IDs, get the publication details.
     Args:
         assay_chembl_ids: list of ChEMBL assay IDs.

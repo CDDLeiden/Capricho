@@ -9,7 +9,7 @@ from ..logger import logger
 from .api import (
     assay_info_from_chembl,
     bioactivities_from_chembl,
-    get_publications_details,
+    get_document_details,
     molecule_info_from_chembl,
 )
 
@@ -99,6 +99,7 @@ def fetch_and_filter_workflow(
     assay_types: Union[list, Tuple] = ("B", "F"),
     calculate_pchembl: bool = True,
     chembl_version: Optional[int] = None,
+    add_document_info: bool = True,
 ) -> pd.DataFrame:
     """
     This function retrieves and merges data from ChEMBL for given molecule or target IDs.
@@ -124,6 +125,9 @@ def fetch_and_filter_workflow(
         calculate_pchembl: calculate pChEMBL values for the bioactivities when it's not present
             for bioactivities reported in nM, µM or uM. Defaults to True.
         chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.
+        add_document_info: whether to add publication-related fields to the final DataFrame. Setting
+            to True, will require one less query to be made to ChEMBL, but fields like `year` will be
+            lacking. Defaults to True.
     Returns:
         pd.DataFrame: Merged DataFrame with molecule, bioactivity, and assay information.
     """
@@ -165,10 +169,10 @@ def fetch_and_filter_workflow(
         + [col for col in full_df.columns if col not in ["molecule_chembl_id", "canonical_smiles"]]
     ]
     logger.debug(f"Columns in the DataFrame with molecular structures: {full_df.columns}")
-    if chembl_version is not None:
+    if any([chembl_version is not None, add_document_info]):
         document_ids = full_df["document_chembl_id"].unique().tolist()
         logger.info("Fetching publication details for the documents.")
-        publications_df = get_publications_details(document_ids, chembl_version)
+        publications_df = get_document_details(document_ids, chembl_version)
         full_df = pd.merge(full_df, publications_df, on="document_chembl_id", how="right")
 
     return full_df
