@@ -293,6 +293,7 @@ def bioactivities_from_chembl(
     if document_chembl_ids is not None:
         activity_kwargs.update({"document_chembl_id__in": document_chembl_ids})
     activity_api = new_client.activity
+    logger.debug(f"Fetching bioactivities with the parameters: {activity_kwargs}")
     bioactivities = activity_api.filter(**activity_kwargs).only(
         "activity_id",
         "assay_chembl_id",
