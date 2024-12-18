@@ -1,17 +1,78 @@
 # CompoundMapper
-TODO: rename the package
 
-Initially we thought about using UniChem for mapping the compounds (hence why the package name and the unichem.py) module, but with time we've realized this was better to do with SmallWorld.
+A Python Package for efficiently curating bioactivity data from the ChEMBL database.
 
-While SmallWorld requires a license for using their service, there's still a [open-source package](https://github.com/matteoferla/Python_SmallWorld_API/tree/main) for interacting with it:
+Simplify fetching, standardizing, and aggregating bioactivity data, outputting a machine learning-ready dataset for drug discovery that can be shared, reproduced, and updated at any ChEMBL release.
 
-The package I used for interacting with SmallWorld is a modified fork of this open-source package, so you can get the gist of the workflow. However, the added value of my fork is that it makes the requests directly to our dedicated server to SmallWorld, always retrieving the full response from the query. The `Python_SmallWorld_API`, however, often hangs without being able to retrieve the full response from the server, as the open version of it tries to limit requests to the server.
+## Features:
 
-⚠️ This is not a finished version yet ⚠️
+- Flexible data retrieval by molecule IDs, target IDs, assay IDs, or document IDs
+- Automated pChEMBL (pXC50) value calculation for bioactivities if not provided through ChEMBL
+- Customizable filtering options (see below):
+    - Confidence score filtering
+    - Bioactivity type selection (Potency, Kd, Ki, IC50, AC50, EC50)
+    - Assay type filtering (Functional, Binding, ADME, Toxicity, Physicochemical)
+    - Standard relation filtering
+- Configurable data aggregation options (see below)
+- Support for multiple ChEMBL versions
+- Recipe saving for reproducibility
 
-There are still a few things I would like to implement, but I just need to take the time (e.g.: being able to identify duplicate mols from fingerprints). The code is mostly in place already, I just need to make some tests and add extra functionalties.
+Further, the package also methods for:
+- Multithreaded compound structure curation through pubchempy
+- Multithreaded compound ChEMBL similarity search
 
-Something else I would like to add is a command-line-interface so one can download a target-specific dataset from the terminal.
+## ⚙️ Configuration Options
+
+Retrieving data from ChEMBL is supported by any of the starting points:
+- `molecule_ids`
+- `target_ids`
+- `assay_ids`
+- `document_ids`
+
+### 🔍 Filtering Options
+
+Once you have the starting point, additional parameters can be passed to filter the data:
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `confidence_scores` | Confidence scores for filtering bioactivities | [`7`, `8`, `9`] |
+| `bioactivity_type` | Types of bioactivity to include | [`Potency`, `Kd`, `Ki`, `IC50`, `AC50`, `EC50`] |
+| `assay_types` | Types of assays to include | [`B`, `F`] |
+| `chembl_version` | Specific ChEMBL version to use | `None` |
+| `standard_relation` | ChEMBL standard relations to use | [`=`] |
+
+### 🔨 Processing Options
+
+Once the data is retrieved, CompoundMapper executes the following processing steps:
+- Merge all the retrieved data into a single DataFrame
+- Standardize the SMILES strings using the [ChEMBL_Structure_Pipeline](https://github.com/chembl/ChEMBL_Structure_Pipeline) package
+- Drop entries with missing SMILES strings
+- Remove salts and solvent molecules from the SMILES strings using a regex pattern defined in `CompoundMapper.core.smiles_utils.MIXTURE_REGEX`
+
+The other operations are performed based on the following configuration options:
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `id_columns` | Additional columns to use as identifiers during aggregation. For example, using `assay_chembl_id` will only aggregate data if both the compound and assay are identical | `[]` |
+| `chirality` | Consider chirality when calculating molecular fingerprints. Important for differentiating between enantiomers during data aggregation | `False` |
+| `aggregate_mutants` | Aggregate data on targets regardless of their variant sequence, treating mutants as the same target. Mutation data is still stored under `variant_sequence` in ChEMBL | `False` |
+| `save_not_aggregated` | Save the raw data before performing any aggregation of repeated molecules | `False` |
+| `calculate_pchembl` | Calculate pChEMBL (pXC50) values for bioactivities reported in nM, µM or uM when not available | `False` |
+| `no_document_info` | Skip retrieving document information (like publication year) to reduce API calls. Passing this has the drawback that informations such as `year` and `chembl_release` will be missing  | `False` |
+
+
+### Output Options
+
+
+## Output Format
+
+The fetcher returns a pandas DataFrame with the following key columns:
+- `molecule_chembl_id`: ChEMBL ID for the compound
+- `target_chembl_id`: ChEMBL ID for the target
+- `standard_value`: Bioactivity measurement
+- `standard_units`: Units of measurement
+- `pchembl_value`: Calculated or reported pChEMBL value
+- Additional metadata columns as specified
 
 ## Installation:
 Clone the repo and then you can install it in your envionment by:
@@ -19,28 +80,5 @@ Clone the repo and then you can install it in your envionment by:
 python -m pip install -e .
 ```
 
-Disclaimer; the development of this package is still ongoing...
-
-Usage:
-```python
-from CompoundMapper.unichem import UniChem
-from rdkit import Chem
-import pandas as pd
-
-uchem = UniChem()
-
-smiles = "O=C(NC[C@@H](c1ccc(Cl)cc1)N1CCOCC1)c1sc(-c2ncccn2)nc1C(F)(F)F"
-inchikey = Chem.MolToInchiKey(Chem.MolFromSmiles(smiles))
-inchi = Chem.MolToInchi(Chem.MolFromSmiles(smiles))
-
-res = uchem.get_connectivity(inchikey, id_type="inchikey")
-df = pd.DataFrame.from_dict(res)
-# df = df.query("id == 1") # This is the source_id for the ChEMBL database
-comparison_cols = [c for c in df.columns if c.startswith("comparison_")]
-
-df.assign(exact_match=df[comparison_cols].apply(lambda x: x.all(), axis=1))
-```
-
-Upcoming:
-- Still to add data aggregation and filtering functions for the ChEMBL data;
-- Add functions to search compounds in ChEMBL by similarity;
+## License
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
