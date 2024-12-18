@@ -20,7 +20,27 @@ def get_and_curate_multiple_compounds_result(
     For the list of compounds fetched, it will standardize the SMILES, remove mixtures,
     and calculate fingerprints to identify repeated compounds.
 
-    Same compounds will have the same compound identifier in the "repeats" column.
+    Same compounds (checked on the `smiles` column) will have the same compound identifier
+    in the "repeats" column.
+
+    Returned fields (from the function):
+    - <input_type> -> the original input used to fetch the compound. E.g. if input_type is `name`,
+        then this column will be named `name` and will contain the name used in the query.
+    - smiles -> the standardized SMILES of the compound (chembl standardizer + solvent/salt-removal)
+
+    Returned fields (from pubchempy):
+    - pubchem_cid -> the PubChem CID of the compound
+    - inchi -> the InChI of the compound
+    - inchikey -> the InChIKey of the compound
+    - isomeric_smiles -> the isomeric SMILES of the compound
+    - canonical_smiles -> the canonical SMILES of the compound
+    - iupac_name -> the IUPAC name of the compound
+    - synonyms -> the synonyms of the compound
+
+    Usage:
+    >>> from CompoundMapper.pubchem.api import get_and_curate_multiple_compounds_result
+    >>> cpd_list = ["aspirin", "ibuprofen"]
+    >>> df = get_and_curate_multiple_compounds_result(cpd_list, input_type="name")
 
     Args:
         cpd_list: List of compound identifiers to fetch from PubChem
@@ -100,9 +120,12 @@ def get_and_curate_multiple_compounds_result(
 
         curated.append(df)
 
-    curated = (
-        pd.concat(curated, ignore_index=True)
-        .drop(columns=["fps"])
-        .assign(repeats=lambda x: x["repeats"].fillna(False))
-    )
+    if any("fps" in df.columns for df in curated):
+        curated = (
+            pd.concat(curated, ignore_index=True)
+            .drop(columns=["fps"])
+            .assign(repeats=lambda x: x["repeats"].fillna(False))
+        )
+    else:
+        curated = pd.concat(curated, ignore_index=True)
     return curated

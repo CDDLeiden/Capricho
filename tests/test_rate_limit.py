@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import redirect_stderr
 from io import StringIO
 
-from CompoundMapper.chembl.rate_limit import rate_limit
+from CompoundMapper.core.rate_limit import rate_limit
 from CompoundMapper.logger import setup_logger
 
 

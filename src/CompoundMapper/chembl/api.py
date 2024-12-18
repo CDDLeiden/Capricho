@@ -6,9 +6,9 @@ import pandas as pd
 from chembl_webresource_client.new_client import new_client
 
 from ..core.pandas_helper import find_dict_in_dataframe
+from ..core.rate_limit import rate_limit
 from ..logger import logger
 from .parsing import parse_compound_response
-from .rate_limit import rate_limit
 
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.

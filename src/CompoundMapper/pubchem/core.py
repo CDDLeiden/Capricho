@@ -6,7 +6,7 @@ try:
 except ImportError:
     raise ImportError("pubchempy is required for this module. To install: pip install pubchempy")
 
-from ..chembl.rate_limit import rate_limit
+from ..core.rate_limit import rate_limit
 
 
 @rate_limit(4)  # 4 calls per second not to exceed the PubChem API rate limit (5/sec)
