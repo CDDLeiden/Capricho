@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from ..logger import setup_logger
-from .workflow import aggregate_data, fetch_standardize_and_clean_workflow
+from .chembl_data_pipeline import aggregate_data, fetch_standardize_and_clean_workflow
 
 DEFAULTS = {
     "molecule_ids": [],

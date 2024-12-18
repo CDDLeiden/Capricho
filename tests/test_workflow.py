@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from CompoundMapper.cli.workflow import aggregate_data
+from CompoundMapper.cli.chembl_data_pipeline import aggregate_data
 
 
 class TestFetchFromChEMBL(unittest.TestCase):

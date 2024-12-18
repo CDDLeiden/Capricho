@@ -13,7 +13,7 @@ from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_s
 from ..logger import logger
 
 
-def fetch_standardize_and_clean_workflow(
+def get_standardize_and_clean_workflow(
     molecule_ids: list[str],
     target_ids: list[str],
     assay_ids: list[str],
@@ -120,7 +120,7 @@ def fetch_standardize_and_clean_workflow(
     queried_df = queried_df.drop(index=no_pchembl_idxs).reset_index(drop=True)
 
     if queried_df.empty:
-        func_params = signature(fetch_standardize_and_clean_workflow).parameters
+        func_params = signature(get_standardize_and_clean_workflow).parameters
         local_vars = locals()
         parameters = {name: local_vars[name] for name in func_params}
         raise BioactivitiesNotFoundError(parameters=parameters)

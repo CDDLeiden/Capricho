@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from CompoundMapper.cli import fp_utils
+from CompoundMapper.core import fp_utils
 
 
 class TestFPUtils(unittest.TestCase):

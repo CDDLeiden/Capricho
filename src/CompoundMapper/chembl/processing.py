@@ -90,7 +90,7 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
     return bioactivities_df.reset_index(drop=True)
 
 
-def fetch_and_filter_workflow(
+def get_and_filter_bioactivity_workflow(
     molecule_chembl_ids: Optional[list] = None,
     target_chembl_ids: Optional[list] = None,
     assay_chembl_ids: Optional[list] = None,
