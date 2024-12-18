@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer
 
-from ..cli.fp_utils import calculate_mixed_FPs
+from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import repeated_indices_from_array_series
 from .core import get_multiple_compounds

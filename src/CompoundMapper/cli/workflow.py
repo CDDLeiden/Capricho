@@ -7,10 +7,10 @@ from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..chembl.exceptions import BioactivitiesNotFoundError
 from ..chembl.processing import fetch_and_filter_workflow
+from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
 from ..logger import logger
-from .fp_utils import calculate_mixed_FPs
 
 
 def fetch_standardize_and_clean_workflow(
