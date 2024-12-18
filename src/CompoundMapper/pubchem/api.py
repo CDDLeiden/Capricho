@@ -16,7 +16,7 @@ def get_and_curate_multiple_compounds_result(
     n_threads: int = 4,
 ) -> pd.DataFrame:
     """
-    Will fetch a list of inputs from PubChem, treating them as the input type specified.
+    Fetch a list of inputs from PubChem, treating them as the input type specified.
     For the list of compounds fetched, it will standardize the SMILES, remove mixtures,
     and calculate fingerprints to identify repeated compounds.
 
