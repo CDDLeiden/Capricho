@@ -8,6 +8,7 @@ from chembl_webresource_client.new_client import new_client
 from ..core.pandas_helper import find_dict_in_dataframe
 from ..logger import logger
 from .parsing import parse_compound_response
+from .rate_limit import rate_limit
 
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.
@@ -111,16 +112,24 @@ def get_compound_table(molecule_chembl_ids: list) -> pd.DataFrame:
     )
 
 
+@rate_limit(max_per_second=5)
 def get_similarity_compound_table(smi: str, similarity: float) -> pd.DataFrame:
     """Fetch similar compounds from ChEMBL using the similarity API.
 
     Args:
         smiles: single smiles string to find similar molecules to.
-        similarity: similarity threshold to use for the search.
+        similarity: similarity threshold to use for the search. Value should be between 40 and 100.
+
+    Raises:
+        ValueError: If the similarity is not between 40 and 100, or if no similar molecules are found.
 
     Returns:
         pd.DataFrame: a DataFrame with the similar molecules.
     """
+
+    if not (40 <= similarity <= 100):
+        raise ValueError("Similarity must be between 40 and 100")
+
     similarity_api = new_client.similarity
     extracted = {}
     result = similarity_api.filter(smiles=smi, similarity=similarity).only(
