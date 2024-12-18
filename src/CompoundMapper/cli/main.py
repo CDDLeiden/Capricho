@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from ..logger import setup_logger
-from .chembl_data_pipeline import aggregate_data, fetch_standardize_and_clean_workflow
+from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
 DEFAULTS = {
     "molecule_ids": [],
@@ -241,7 +241,7 @@ def main(args: argparse.Namespace) -> None:
     if not output_path.parent.exists():
         output_path.mkdir()
 
-    df = fetch_standardize_and_clean_workflow(
+    df = get_standardize_and_clean_workflow(
         molecule_ids=args.molecule_ids,
         target_ids=args.target_ids,
         assay_ids=args.assay_ids,
