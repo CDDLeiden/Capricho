@@ -12,6 +12,7 @@ from .api import (
     get_compound_table,
     get_document_table,
 )
+from .exceptions import BioactivitiesNotFoundError
 
 
 def convert_to_log10(df):
@@ -131,18 +132,21 @@ def get_and_filter_bioactivity_workflow(
     Returns:
         pd.DataFrame: Merged DataFrame with molecule, bioactivity, and assay information.
     """
+    activity_df, parameters = get_activity_table(
+        molecule_chembl_ids=molecule_chembl_ids,
+        target_chembl_ids=target_chembl_ids,
+        assay_chembl_ids=assay_chembl_ids,
+        document_chembl_ids=document_chembl_ids,
+        standard_relation__in=["="],
+        assay_type__in=assay_types,
+    )
     bioactivities_df = process_bioactivities(
-        get_activity_table(
-            molecule_chembl_ids=molecule_chembl_ids,
-            target_chembl_ids=target_chembl_ids,
-            assay_chembl_ids=assay_chembl_ids,
-            document_chembl_ids=document_chembl_ids,
-            standard_relation="=",
-            assay_type__in=assay_types,
-        ),
+        activity_df,
         calculate_pchembl=calculate_pchembl,
     )
     unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
+    if not unique_assay_ids:
+        raise BioactivitiesNotFoundError(parameters=parameters)
 
     logger.debug(f"Fetching assays of type {assay_types} with confidence scores: {list(confidence_scores)}")
     assays_df = get_assay_table(

@@ -1,6 +1,6 @@
 """Module holding functionalities for the ChEMBL API."""
 
-from typing import Optional
+from typing import Optional, Tuple
 
 import pandas as pd
 from chembl_webresource_client.new_client import new_client
@@ -8,6 +8,7 @@ from chembl_webresource_client.new_client import new_client
 from ..core.pandas_helper import find_dict_in_dataframe
 from ..core.rate_limit import rate_limit
 from ..logger import logger
+from .exceptions import BioactivitiesNotFoundError
 from .parsing import parse_compound_response
 
 # Info on Chirality:
@@ -216,16 +217,16 @@ def get_activity_table(
     assay_chembl_ids: Optional[list] = None,
     document_chembl_ids: Optional[list] = None,
     **kwargs,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, dict]:
     """Take a list of molecule chembl ids and get their respective bioactivities in ChEMBL.
     Args:
         molecule_chembl_id: list of molecule ChEMBL IDs to fecth bioactivities. Defaults to None.
         target_chembl_ids: list of target ChEMBL IDs to fetch bioactivities. Defaults to None.
         assay_chembl_ids: list of assay ChEMBL IDs to fetch bioactivities. Defaults to None.
         document_chembl_ids: list of document ChEMBL IDs to fetch bioactivities. Defaults to None.
-        kwargs: example -> `standard_relation="=", assay_type__in=["B", "F"]`.
+        kwargs: example -> `standard_relation=["="], assay_type__in=["B", "F"]`.
     Returns:
-        pd.DataFrame: a DataFrame with the bioactivities.
+        Tuple[pd.DataFrame, dict]: a DataFrame with the bioactivities and the parameters used to fetch them.
     """
     activity_kwargs = {**kwargs}
     if molecule_chembl_ids is not None:
@@ -259,4 +260,6 @@ def get_activity_table(
         assays_df = pd.DataFrame.from_records(bioactivities)
     else:
         raise ValueError(f"No bioactivities found for the ids: {molecule_chembl_ids}")
-    return assays_df
+    if assays_df.empty:
+        raise BioactivitiesNotFoundError(parameters=activity_kwargs)
+    return assays_df, activity_kwargs
