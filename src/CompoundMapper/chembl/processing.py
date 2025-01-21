@@ -7,10 +7,10 @@ import pandas as pd
 
 from ..logger import logger
 from .api import (
-    assay_info_from_chembl,
-    bioactivities_from_chembl,
-    get_document_details,
-    molecule_info_from_chembl,
+    get_activity_table,
+    get_assay_table,
+    get_compound_table,
+    get_document_table,
 )
 
 
@@ -18,7 +18,7 @@ def convert_to_log10(df):
     """Function to be applied to the whole DataFrame. Will convert the standard_value
     column to pchembl_value column, if the standard_units are in nM, µM or uM.
     Args:
-        df: a bioactivity DataFrame. e.g.: output from `bioactivities_from_chembl`.
+        df: a bioactivity DataFrame. e.g.: output from `get_activity_table`.
     """
 
     def compute_log(row):
@@ -66,7 +66,7 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
     """Processes the bioactivities DataFrame. Will convert the standard_value
     column to pchembl_value column if the standard_units are in nM, µM or uM.
     Args:
-        bioactivities_df: bioactivity dataframe, e.g.: output from `bioactivities_from_chembl`.
+        bioactivities_df: bioactivity dataframe, e.g.: output from `get_activity_table`.
     Returns:
         pd.DataFrame: the processed bioactivities DataFrame.
     """
@@ -132,7 +132,7 @@ def get_and_filter_bioactivity_workflow(
         pd.DataFrame: Merged DataFrame with molecule, bioactivity, and assay information.
     """
     bioactivities_df = process_bioactivities(
-        bioactivities_from_chembl(
+        get_activity_table(
             molecule_chembl_ids=molecule_chembl_ids,
             target_chembl_ids=target_chembl_ids,
             assay_chembl_ids=assay_chembl_ids,
@@ -145,7 +145,7 @@ def get_and_filter_bioactivity_workflow(
     unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
 
     logger.debug(f"Fetching assays of type {assay_types} with confidence scores: {list(confidence_scores)}")
-    assays_df = assay_info_from_chembl(
+    assays_df = get_assay_table(
         unique_assay_ids, confidence_scores=list(confidence_scores), assay_type__in=assay_types
     )
 
@@ -160,7 +160,7 @@ def get_and_filter_bioactivity_workflow(
     # Get the molecule structures & merge to the dataset
     unique_mol_chembl_ids = merged_df["molecule_chembl_id"].unique().tolist()
     logger.debug(f"Fetching structural information for {len(unique_mol_chembl_ids)} molecule ChEMBL IDs.")
-    mol_data = molecule_info_from_chembl(unique_mol_chembl_ids)
+    mol_data = get_compound_table(unique_mol_chembl_ids)
 
     # Merge using molecule_chembl_id
     full_df = merged_df.merge(mol_data, on="molecule_chembl_id", how="inner")
@@ -172,7 +172,7 @@ def get_and_filter_bioactivity_workflow(
     if any([chembl_version is not None, add_document_info]):
         document_ids = full_df["document_chembl_id"].unique().tolist()
         logger.info("Fetching publication details for the documents.")
-        publications_df = get_document_details(document_ids, chembl_version)
+        publications_df = get_document_table(document_ids, chembl_version)
         full_df = pd.merge(full_df, publications_df, on="document_chembl_id", how="right")
 
     return full_df
