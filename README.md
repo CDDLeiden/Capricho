@@ -10,7 +10,7 @@ Simplify fetching, standardizing, and aggregating bioactivity data, outputting a
 - Automated pChEMBL (pXC50) value calculation for bioactivities if not provided through ChEMBL
 - Customizable filtering options (see below):
     - Confidence score filtering
-    - Bioactivity type selection (Potency, Kd, Ki, IC50, AC50, EC50)
+    - Bioactivity type selection (e.g.: Potency, Kd, Ki, IC50, AC50, EC50)
     - Assay type filtering (Functional, Binding, ADME, Toxicity, Physicochemical)
     - Standard relation filtering
 - Configurable data aggregation options (see below)
@@ -48,15 +48,16 @@ Once the data is retrieved, CompoundMapper executes the following processing ste
 - Standardize the SMILES strings using the [ChEMBL_Structure_Pipeline](https://github.com/chembl/ChEMBL_Structure_Pipeline) package
 - Drop entries with missing SMILES strings
 - Remove salts and solvent molecules from the SMILES strings using a regex pattern defined in `CompoundMapper.core.smiles_utils.MIXTURE_REGEX`
+- Drop any remaining mixtures (e.g., multiple compounds in a single SMILES string separated by a dot)
 
-The other operations are performed based on the following configuration options:
+The other operations performed to aggregate the fetched dataset and produce the ML-ready dataset are configurable based on the following options:
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `id_columns` | Additional columns to use as identifiers during aggregation. For example, using `assay_chembl_id` will only aggregate data if both the compound and assay are identical | `[]` |
-| `chirality` | Consider chirality when calculating molecular fingerprints. Important for differentiating between enantiomers during data aggregation | `False` |
+| `id_columns` | Additional columns to use as identifiers during aggregation. For example, using `assay_chembl_id` will **only** aggregate readouts if the assay reporting them is the same | `[]` |
+| `chirality` | Consider whether molecules have the same stereochemistry when aggregating repeated bioactivity measurements | `False` |
 | `aggregate_mutants` | Aggregate data on targets regardless of their variant sequence, treating mutants as the same target. Mutation data is still stored under `variant_sequence` in ChEMBL | `False` |
-| `save_not_aggregated` | Save the raw data before performing any aggregation of repeated molecules | `False` |
+| `skip_not_aggregated` | Skip saving the raw data before any aggregation of repeated molecules is applied. Not-aggregated data is saved with the `_not_aggregated.csv` suffix | `False` |
 | `calculate_pchembl` | Calculate pChEMBL (pXC50) values for bioactivities reported in nM, µM or uM when not available | `False` |
 | `no_document_info` | Skip retrieving document information (like publication year) to reduce API calls. Passing this has the drawback that informations such as `year` and `chembl_release` will be missing  | `False` |
 

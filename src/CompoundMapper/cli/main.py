@@ -4,6 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
+from .. import __version__
 from ..logger import setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
@@ -24,8 +25,8 @@ DEFAULTS = {
     "no_document_info": False,  # store_true, default=True
     "metadata_columns": [],
     "id_columns": [],
-    "save_not_aggregated": False,  # store_true, default=True
-    "aggregate_mutants": False,  # store_true, default=True
+    "skip_not_aggregated": False,  # not(store_true), default=False
+    "aggregate_mutants": False,  # not(store_true), default=False
     "save_recipe": True,
 }
 
@@ -202,10 +203,10 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
     )
     parser.add_argument(
-        "-noaggr",
-        "--save_not_aggregated",
+        "-skip_not_agg",
+        "--skip_not_aggregated",
         action="store_true",
-        help="Save the data before aggregating the repeated molecules.",
+        help="Skips saving the data before aggregation of same-molecule datapoint takes place.",
     )
     parser.add_argument(
         "-mutagg",
@@ -218,11 +219,12 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "-save",
+        "-rec",
         "--save_recipe",
         help=(
             "Saves a json file with the parameters used to fetch the data. Useful for reproducibility. "
             "The file will be saved with the asme output path, but with the `_recipe.json` suffix."
+            "Defaults to True."
         ),
         default=True,
         type=bool,
@@ -253,7 +255,7 @@ def main(args: argparse.Namespace) -> None:
         standard_relation=args.standard_relation,
         assay_types=args.assay_types,
         chembl_version=args.chembl_version,
-        save_not_aggregated=args.save_not_aggregated,
+        save_not_aggregated=(not args.skip_not_aggregated),
         add_document_info=(not args.no_document_info),
     )
 
@@ -286,6 +288,7 @@ def main(args: argparse.Namespace) -> None:
                     command_vals.append(f"--{k} {v}")
 
         command = "getchembl " + " ".join(command_vals)
+        configs.update({"CompoundMapper version": __version__})
         configs.update({"command": command})
 
         with open(recipe_path, "w") as f:
