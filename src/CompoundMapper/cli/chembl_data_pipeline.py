@@ -175,8 +175,8 @@ def aggregate_data(
     df,
     chirality: bool,
     chembl_version: int,
-    metadata_cols: list[str],
-    extra_id_cols: list[str],
+    metadata_cols: list[str] = [],
+    extra_id_cols: list[str] = [],
     aggregate_mutants: bool = False,
     output_path: Optional[Union[str, Path]] = None,
 ):
