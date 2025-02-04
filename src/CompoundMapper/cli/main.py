@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from .. import __version__
-from ..logger import setup_logger
+from ..logger import logger, setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
 DEFAULTS = {
@@ -13,29 +13,31 @@ DEFAULTS = {
     "target_ids": [],
     "assay_ids": [],
     "document_ids": [],
-    "calculate_pchembl": False,  # store_true, default=False
+    "calculate_pchembl": False,
     "output_path": "chembl_data.csv",
     "confidence_scores": [7, 8, 9],
     "bioactivity_type": ["Potency", "Kd", "Ki", "IC50", "AC50", "EC50"],
-    "chirality": False,  # store_true, default=False
+    "chirality": False,
     "standard_relation": ["="],
     "assay_types": ["B", "F"],
     "log_level": "info",
     "chembl_version": None,
-    "no_document_info": False,  # store_true, default=True
+    "no_document_info": False,
     "metadata_columns": [],
     "id_columns": [],
-    "skip_not_aggregated": False,  # not(store_true), default=False
-    "aggregate_mutants": False,  # not(store_true), default=False
+    "skip_not_aggregated": False,
+    "aggregate_mutants": False,
     "save_recipe": True,
+    "drop_unassigned_chiral": False,
 }
 
 STORE_TRUE_ARGS = [
     "calculate_pchembl",
     "chirality",
     "no_document_info",
-    "save_not_aggregated",
+    "skip_not_aggregated",
     "aggregate_mutants",
+    "drop_unassigned_chiral",
 ]
 
 
@@ -135,6 +137,17 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
     )
     parser.add_argument(
+        "-duchi",
+        "--drop-unassigned-chiral",
+        dest="drop_unassigned_chiral",
+        help=(
+            "Define the behavior for dealing with entries that have unassigned chiral centers. When passed, "
+            "entries with unassigned chiral center will be dropped as part of the dataset curation. We recommend "
+            "passing this flag if you're also passing the `chirality` flag. Default is False."
+        ),
+        action="store_true",
+    )
+    parser.add_argument(
         "-rel",
         "--standard_relation",
         nargs="*",
@@ -158,7 +171,7 @@ def parse_arguments() -> argparse.Namespace:
         "--log-level",
         dest="log_level",
         default=DEFAULTS["log_level"],
-        choices=["info", "debug", "warning", "error", "critical"],
+        choices=["trace", "debug", "info", "warning", "error", "critical"],
         help=(
             "Set the logging level. Defaults to info. "
             "Choose between: info, debug, warning, error, critical."
@@ -173,7 +186,7 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULTS["chembl_version"],
     )
     parser.add_argument(
-        "-no_doc",
+        "-nodoc",
         "--no_document_info",
         action="store_true",
         help=(
@@ -203,7 +216,7 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
     )
     parser.add_argument(
-        "-skip_not_agg",
+        "-skip_agg",
         "--skip_not_aggregated",
         action="store_true",
         help="Skips saving the data before aggregation of same-molecule datapoint takes place.",
@@ -243,6 +256,14 @@ def main(args: argparse.Namespace) -> None:
     if not output_path.parent.exists():
         output_path.mkdir()
 
+    if args.chirality and not args.drop_unassigned_chiral:
+        logger.warning(
+            "Consider passing the `--drop_unassigned_chiral` flag when using the `--chirality` flag. "
+            "For more information on why this could be problematic, see the link:\n"
+            "https://jcheminf.biomedcentral.com/articles/10.1186/s13321-024-00934-w#:~:text="
+            "Some%20duplicates%20were,for%20kinetic%20solubility."
+        )
+
     df = get_standardize_and_clean_workflow(
         molecule_ids=args.molecule_ids,
         target_ids=args.target_ids,
@@ -257,6 +278,7 @@ def main(args: argparse.Namespace) -> None:
         chembl_version=args.chembl_version,
         save_not_aggregated=(not args.skip_not_aggregated),
         add_document_info=(not args.no_document_info),
+        drop_unassigned_chiral=args.drop_unassigned_chiral,
     )
 
     df = aggregate_data(

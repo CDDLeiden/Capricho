@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
+import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..chembl.exceptions import BioactivitiesNotFoundError
@@ -10,6 +11,7 @@ from ..chembl.processing import get_and_filter_bioactivity_workflow
 from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
+from ..core.stereo import find_undefined_stereocenters
 from ..logger import logger
 
 
@@ -28,6 +30,7 @@ def get_standardize_and_clean_workflow(
     save_not_aggregated: bool,
     save_duplicated: bool = False,
     add_document_info: bool = True,
+    drop_unassigned_chiral=False,
 ) -> None:
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -52,6 +55,7 @@ def get_standardize_and_clean_workflow(
         add_document_info: whether to add publication-related fields to the final DataFrame. Setting
             to True, will require one less query to be made to ChEMBL, but fields like `year` will be
             lacking. Defaults to True.
+        drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -78,6 +82,9 @@ def get_standardize_and_clean_workflow(
         chembl_version=chembl_version,
         add_document_info=add_document_info,
     )
+
+    logger.debug(f"All fetched bioactivity types: {full_df.standard_type.unique().tolist()}")
+    logger.debug(f"Keeping only: {bioactivity_type_rename_dict.keys()}")
 
     # drop rows without chemical structures
     no_smiles_mask = full_df.canonical_smiles.isna()
@@ -132,6 +139,21 @@ def get_standardize_and_clean_workflow(
         logger.info(f"Number of mixtures: {mask.sum()}")
         mixture_idxs = np.where(mask)[0]  # drop where smiles contain mixtures
         queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
+
+    # Search for undefined stereocenters within the remaining data
+    if drop_unassigned_chiral:
+        queried_df["undefined_stereocenters"] = (
+            queried_df["standard_smiles"].apply(find_undefined_stereocenters).apply(len)
+        )
+        logger.trace(f'Unassigned stereocenters: {queried_df["undefined_stereocenters"].unique().tolist()}')
+        undefined_stereo_mask = queried_df["undefined_stereocenters"] > 0
+        if undefined_stereo_mask.any():
+            logger.info(f"Dropping {undefined_stereo_mask.sum()} rows with undefined stereocenters.")
+            logger.debug(queried_df[undefined_stereo_mask].iloc[:, :5])
+            queried_df = queried_df.drop(index=queried_df[undefined_stereo_mask].index).reset_index(drop=True)
+        if queried_df.empty:
+            logger.warning("All data points have been dropped due to undefined stereocenters!!")
+            return pd.DataFrame()
 
     # Handle duplicated data
     df_size = queried_df.shape[0]

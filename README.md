@@ -59,8 +59,10 @@ The other operations performed to aggregate the fetched dataset and produce the 
 | `aggregate_mutants` | Aggregate data on targets regardless of their variant sequence, treating mutants as the same target. Mutation data is still stored under `variant_sequence` in ChEMBL | `False` |
 | `skip_not_aggregated` | Skip saving the raw data before any aggregation of repeated molecules is applied. Not-aggregated data is saved with the `_not_aggregated.csv` suffix | `False` |
 | `calculate_pchembl` | Calculate pChEMBL (pXC50) values for bioactivities reported in nM, µM or uM when not available | `False` |
-| `no_document_info` | Skip retrieving document information (like publication year) to reduce API calls. Passing this has the drawback that informations such as `year` and `chembl_release` will be missing  | `False` |
+| `no_document_info` | Skip retrieving ChEMBL document info to reduce API calls. Passing this has the drawback that information such as `year` and `chembl_release` will be missing  | `False` |
+| `drop_unassigned_chiral` | Drop ChEMBL compounds with one or more undefined stereocenters. Advised when passing the `-chiral` flag | `False` |
 
+<!-- TODO: add the link to the `drop_unassigned_chiral` option: https://jcheminf.biomedcentral.com/articles/10.1186/s13321-024-00934-w#:~:text=Some%20duplicates%20were,for%20kinetic%20solubility. -->
 
 ### Output Options
 
