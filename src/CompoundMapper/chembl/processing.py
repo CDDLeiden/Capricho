@@ -177,6 +177,6 @@ def get_and_filter_bioactivity_workflow(
         document_ids = full_df["document_chembl_id"].unique().tolist()
         logger.info("Fetching publication details for the documents.")
         publications_df = get_document_table(document_ids, chembl_version)
-        full_df = pd.merge(full_df, publications_df, on="document_chembl_id", how="right")
+        full_df = pd.merge(full_df, publications_df, on="document_chembl_id", how="left")
 
     return full_df
