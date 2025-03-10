@@ -22,8 +22,8 @@ class TestFetchFromChEMBL(unittest.TestCase):
     def test_aggregate_data(self):
         aggr_df = aggregate_data(
             self.not_aggr_df,
-            chirality=True,
-            chembl_version=28,
+            chirality=False,
+            chembl_version=31,
             metadata_cols=[],
             output_path=None,
         )
