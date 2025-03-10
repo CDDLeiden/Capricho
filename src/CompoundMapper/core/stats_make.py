@@ -7,6 +7,7 @@ import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..logger import logger
+from .default_fields import multiple_value_cols
 from .pandas_helper import aggr_val_series, apply_func_grpd, assign_stats, format_value
 
 
@@ -79,6 +80,7 @@ def process_repeat_mols(
     df: pd.DataFrame,
     repeat_element_idxs: List[List[int]],
     solve_strat: str = "keep",
+    multiple_value_cols: List[str] = multiple_value_cols,
     extra_id_cols: List[str] = [],
     extra_multival_cols: List[str] = [],
     chirality: bool = False,
@@ -153,27 +155,7 @@ def process_repeat_mols(
 
     id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
     multival_cols = [
-        "standard_smiles",
-        "canonical_smiles",
-        "pchembl_value",
-        "assay_chembl_id",
-        "assay_description",
-        "activity_id",
-        "assay_type",
-        "standard_type",
-        "confidence_score",
-        "standard_relation",
-        "target_organism",
-        "molecule_chembl_id",
-        "document_chembl_id",
-        "assay_tissue",
-        "assay_cell_type",
-        "relationship_description",
-        "indication_class",
-        "max_phase",
-        "oral",
-        "prodrug",
-        "withdrawn_flag",
+        *multiple_value_cols,
         *extra_multival_cols,
     ]
     if aggregate_mutants:
