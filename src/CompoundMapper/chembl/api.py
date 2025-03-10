@@ -179,13 +179,17 @@ def get_assay_table(
     }
     assays_api = new_client.assay
     assays = assays_api.filter(**activity_kwargs).only(
-        "assay_cell_type",
         "assay_chembl_id",
+        "assay_category",
         "assay_organism",
-        "assay_subcellular_fraction",
         "assay_tissue",
+        "assay_cell_type",
+        "assay_subcellular_fraction",
+        "assay_tax_id",
         "assay_type",
+        "assay_strain",
         "assay_type_description",
+        "bao_label",
         "confidence_score",
         "description",
         "document_chembl_id",
