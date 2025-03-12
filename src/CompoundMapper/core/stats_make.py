@@ -82,6 +82,7 @@ def process_repeat_mols(
     extra_id_cols: List[str] = [],
     extra_multival_cols: List[str] = [],
     chirality: bool = False,
+    aggregate_mutants: bool = False,
 ) -> pd.DataFrame:
     """Process the dataframe according to repeated elements identified
     with the function `find_repeated_arr_from_series`. The standard criteria here
@@ -119,13 +120,25 @@ def process_repeat_mols(
     repeat_subset = df.query("~repeat_mapping.isna()").assign(
         pchembl_value=lambda df: df.pchembl_value.apply(lambda val: format_value(val))
     )
-    numeric_activity = (
-        # concatenate grouped values and convert to numeric arrays
-        repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
-        .apply(lambda x: ";".join(x))
-        .str.split(";")
-        .apply(lambda x: np.array(x).astype(float))
-    )
+    if not repeat_subset.empty:
+        numeric_activity = (
+            # concatenate grouped values and convert to numeric arrays
+            repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
+            .apply(lambda x: ";".join(x))
+            .str.split(";")
+            .apply(lambda x: np.array(x).astype(float))
+        )
+    else:
+        logger.info(
+            "Multiple readouts on the same compound not found within the dataset. Statistics "
+            "columns (counts, mean, median) will be calculated solely for the sake of consistency."
+        )
+        numeric_activity = (
+            repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
+            .apply(lambda x: ";".join(x))
+            .apply(lambda x: np.array(x).astype(float))
+        )
+
     max_series = numeric_activity.apply(lambda x: np.max(x))
     min_series = numeric_activity.apply(lambda x: np.min(x))
     distance_series = max_series - min_series
@@ -141,6 +154,7 @@ def process_repeat_mols(
     id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
     multival_cols = [
         "standard_smiles",
+        "canonical_smiles",
         "pchembl_value",
         "assay_chembl_id",
         "assay_description",
@@ -155,7 +169,6 @@ def process_repeat_mols(
         "assay_tissue",
         "assay_cell_type",
         "relationship_description",
-        "variant_sequence",
         "indication_class",
         "max_phase",
         "oral",
@@ -163,6 +176,10 @@ def process_repeat_mols(
         "withdrawn_flag",
         *extra_multival_cols,
     ]
+    if aggregate_mutants:
+        multival_cols = [*multival_cols, "variant_sequence"]
+    else:
+        id_cols = [*id_cols, "variant_sequence"]
     repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
     grouped = repeat_subset.groupby(id_cols)
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)

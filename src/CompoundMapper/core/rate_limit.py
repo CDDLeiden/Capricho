@@ -8,6 +8,16 @@ from ..logger import logger
 
 
 def rate_limit(max_per_second=5):
+    """Decorator to rate limit function calls.
+
+    Args:
+        max_per_second: max amount of API calls to be done within a second. Setting this
+            parameter will cause the coming function call to sleep in case the previous
+            call was done less than 1/max_per_second seconds ago. Defaults to 5.
+
+    Returns:
+        Decorator: Function decorator that will rate limit the decorated function
+    """
     min_interval = 1.0 / max_per_second
     lock = threading.Lock()
     last_called = 0

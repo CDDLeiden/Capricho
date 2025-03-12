@@ -1,24 +1,41 @@
 """Module containing the command line interface to get data from ChEMBL"""
 
 import argparse
+import json
 from pathlib import Path
 
-import numpy as np
-from chemFilters.chem.standardizers import ChemStandardizer
-from UniProtMapper import ProtMapper
+from ..logger import setup_logger
+from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
-from ..chembl.processing import fetch_and_filter_workflow
-from ..core.smiles_utils import clean_mixtures
-from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
-from ..logger import logger, setup_logger
-from .fp_utils import calculate_mixed_FPs
-from .workflow import aggregate_data, fetch_standardize_and_clean_workflow
+DEFAULTS = {
+    "molecule_ids": [],
+    "target_ids": [],
+    "assay_ids": [],
+    "document_ids": [],
+    "calculate_pchembl": False,  # store_true, default=False
+    "output_path": "chembl_data.csv",
+    "confidence_scores": [7, 8, 9],
+    "bioactivity_type": ["Potency", "Kd", "Ki", "IC50", "AC50", "EC50"],
+    "chirality": False,  # store_true, default=False
+    "standard_relation": ["="],
+    "assay_types": ["B", "F"],
+    "log_level": "info",
+    "chembl_version": None,
+    "no_document_info": False,  # store_true, default=True
+    "metadata_columns": [],
+    "id_columns": [],
+    "save_not_aggregated": False,  # store_true, default=True
+    "aggregate_mutants": False,  # store_true, default=True
+    "save_recipe": True,
+}
 
-
-def fetch_names(chembl_ids: str):
-    retriever = ProtMapper()
-    results, failed = retriever(chembl_ids, from_db="ChEMBL", fields=["protein_name", "organism_name"])
-    return results, failed
+STORE_TRUE_ARGS = [
+    "calculate_pchembl",
+    "chirality",
+    "no_document_info",
+    "save_not_aggregated",
+    "aggregate_mutants",
+]
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -79,7 +96,7 @@ def parse_arguments() -> argparse.Namespace:
             "Path to save the output files. If not provided, "
             "will create a folder named 'chembl_data' in the current directory."
         ),
-        default="chembl_data",
+        default=DEFAULTS["output_path"],
     )
     parser.add_argument(
         "-c",
@@ -91,7 +108,7 @@ def parse_arguments() -> argparse.Namespace:
             "Confidence scores to filter the bioactivities. "
             "If not provided, will fetch only score 9 bioactivities."
         ),
-        default=[8, 9],
+        default=DEFAULTS["confidence_scores"],
         type=int,
     )
     parser.add_argument(
@@ -102,7 +119,7 @@ def parse_arguments() -> argparse.Namespace:
             "Type of bioactivity to filter. If left empty, will fetch for all types. "
             "Examples of bioactivity types: `Potency`, `Kd`, `Ki`, `IC50`, `AC50`, `EC50`."
         ),
-        default=["Potency", "Kd", "Ki", "IC50", "AC50", "EC50"],
+        default=DEFAULTS["bioactivity_type"],
         nargs="*",
         type=str,
     )
@@ -120,7 +137,7 @@ def parse_arguments() -> argparse.Namespace:
         "-rel",
         "--standard_relation",
         nargs="*",
-        default=["="],
+        default=DEFAULTS["standard_relation"],
         help=("Filter only bioactivities with the specified relation. Not implemented yet."),
         type=str,
     )
@@ -128,7 +145,7 @@ def parse_arguments() -> argparse.Namespace:
         "-at",
         "--assay_types",
         nargs="*",
-        default=["B", "F"],
+        default=DEFAULTS["assay_types"],
         help=(
             "Assay types to filter. Defaults to both functional (F) and binding assays (B). "
             "Other assay types: ADME (A), Toxicity (T) and Physichochemical (P)."
@@ -139,7 +156,7 @@ def parse_arguments() -> argparse.Namespace:
         "-log",
         "--log-level",
         dest="log_level",
-        default="info",
+        default=DEFAULTS["log_level"],
         choices=["info", "debug", "warning", "error", "critical"],
         help=(
             "Set the logging level. Defaults to info. "
@@ -152,14 +169,36 @@ def parse_arguments() -> argparse.Namespace:
         "--chembl_version",
         type=int,
         help="chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.",
-        default=None,
+        default=DEFAULTS["chembl_version"],
     )
     parser.add_argument(
+        "-no_doc",
+        "--no_document_info",
+        action="store_true",
+        help=(
+            "If passed, document information won't be included in the retrieved dataset. For example, "
+            "year metadata will be missing, but requires one less API call. Defaults to False."
+        ),
+    )
+
+    parser.add_argument(
         "-mcols",
-        "--metadata_cols",
+        "--metadata_columns",
         nargs="*",
-        default=[],
+        default=DEFAULTS["metadata_columns"],
         help="Extra metadata columns to keep in the final dataframe, aggregated by ';'. Defaults to [].",
+        type=str,
+    )
+    parser.add_argument(
+        "-idcols",
+        "--id_columns",
+        nargs="*",
+        default=DEFAULTS["id_columns"],
+        help=(
+            "Extra columns to use as identifiers for the aggregation. Passing `assay_chembl_id` to this "
+            "argument, for example, will only aggregate the data if the compound is the same and the assay "
+            "is the same. Saved data will still contain the original data separated by ';'. Defaults to []."
+        ),
         type=str,
     )
     parser.add_argument(
@@ -168,6 +207,27 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Save the data before aggregating the repeated molecules.",
     )
+    parser.add_argument(
+        "-mutagg",
+        "--aggregate_mutants",
+        action="store_true",
+        help=(
+            "Aggregate data on targets regardless of the variant_sequence flag in ChEMBL, treating "
+            "mutants as the same target. Regardless of the configuration, mutation data will be "
+            "stored under `variant_sequence`. Default is False."
+        ),
+    )
+    parser.add_argument(
+        "-save",
+        "--save_recipe",
+        help=(
+            "Saves a json file with the parameters used to fetch the data. Useful for reproducibility. "
+            "The file will be saved with the asme output path, but with the `_recipe.json` suffix."
+        ),
+        default=True,
+        type=bool,
+    )
+
     return parser.parse_args()
 
 
@@ -181,7 +241,7 @@ def main(args: argparse.Namespace) -> None:
     if not output_path.parent.exists():
         output_path.mkdir()
 
-    df = fetch_standardize_and_clean_workflow(
+    df = get_standardize_and_clean_workflow(
         molecule_ids=args.molecule_ids,
         target_ids=args.target_ids,
         assay_ids=args.assay_ids,
@@ -194,15 +254,43 @@ def main(args: argparse.Namespace) -> None:
         assay_types=args.assay_types,
         chembl_version=args.chembl_version,
         save_not_aggregated=args.save_not_aggregated,
+        add_document_info=(not args.no_document_info),
     )
 
     df = aggregate_data(
         df=df,
         chirality=args.chirality,
         chembl_version=args.chembl_version,
-        metadata_cols=args.metadata_cols,
+        metadata_cols=args.metadata_columns,
+        extra_id_cols=args.id_columns,
+        aggregate_mutants=args.aggregate_mutants,
         output_path=args.output_path,
     )
+
+    # Save the recipe
+    if args.save_recipe:
+        output_name = output_path.stem
+        recipe_path = output_path.parent / f"{output_name}_recipe.json"
+
+        configs = vars(args)
+        command_vals = []
+        for k, v in configs.items():
+            if isinstance(v, bool):
+                if DEFAULTS[k] != v:
+                    command_vals.append((f"--{k}" if k in STORE_TRUE_ARGS else f"--{k} {v}"))
+            elif isinstance(v, list):
+                if DEFAULTS[k] != v:
+                    command_vals.append(f"--{k} {' '.join([str(i) for i in v])}")
+            elif isinstance(v, str):
+                if DEFAULTS[k] != v:
+                    command_vals.append(f"--{k} {v}")
+
+        command = "getchembl " + " ".join(command_vals)
+        configs.update({"command": command})
+
+        with open(recipe_path, "w") as f:
+            json.dump(configs, f, indent=2)
+
     return df
 
 

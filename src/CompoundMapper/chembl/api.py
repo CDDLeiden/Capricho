@@ -1,26 +1,22 @@
 """Module holding functionalities for the ChEMBL API."""
 
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Optional, Tuple
 
 import pandas as pd
 from chembl_webresource_client.new_client import new_client
 
 from ..core.pandas_helper import find_dict_in_dataframe
+from ..core.rate_limit import rate_limit
 from ..logger import logger
-from .rate_limit import rate_limit
-
-assays_api = new_client.assay
-activity_api = new_client.activity
-compounds_api = new_client.molecule
-document_api = new_client.document
+from .exceptions import BioactivitiesNotFoundError
+from .parsing import parse_compound_response
 
 # Info on Chirality:
 # The chirality flag shows whether a drug is dosed as a racemic mixture (0), single stereoisomer (1) or as an achiral molecule (2), for unchecked compounds the chirality flag = -1.
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
 
 
-def get_publications_details(document_chembl_ids: list, chembl_version: Optional[int]) -> pd.DataFrame:
+def get_document_table(document_chembl_ids: list, chembl_version: Optional[int] = None) -> pd.DataFrame:
     """From a list of ChEMBL assay IDs, get the publication details.
     Args:
         assay_chembl_ids: list of ChEMBL assay IDs.
@@ -31,6 +27,7 @@ def get_publications_details(document_chembl_ids: list, chembl_version: Optional
     if document_chembl_ids is not None:
         query_kwargs.update({"document_chembl_ids__in": document_chembl_ids})
 
+    document_api = new_client.document
     documents = document_api.filter(**query_kwargs).only(
         "document_chembl_id",
         "doc_type",
@@ -78,7 +75,7 @@ def get_publications_details(document_chembl_ids: list, chembl_version: Optional
     )
 
 
-def molecule_info_from_chembl(molecule_chembl_ids: list) -> pd.DataFrame:
+def get_compound_table(molecule_chembl_ids: list) -> pd.DataFrame:
     """Get information on a molecule from ChEMBL.
     Args:
         molecule_chembl_ids: a list of molecule ChEMBL IDs.
@@ -86,6 +83,7 @@ def molecule_info_from_chembl(molecule_chembl_ids: list) -> pd.DataFrame:
         pd.DataFrame: a DataFrame with the molecule information.
     """
     extracted = {}
+    compounds_api = new_client.molecule
     result = compounds_api.filter(molecule_chembl_id__in=molecule_chembl_ids).only(
         "molecule_chembl_id",
         "molecule_hierarchy",
@@ -105,7 +103,7 @@ def molecule_info_from_chembl(molecule_chembl_ids: list) -> pd.DataFrame:
             if r is None:
                 logger.warning(f"No information found for molecule {mol_id}")
                 continue
-            extracted[idx] = parse_molecule_response(r, mol_id)
+            extracted[idx] = parse_compound_response(r, mol_id)
     else:
         raise ValueError(f"No information found for {molecule_chembl_ids}")
     return (
@@ -115,54 +113,24 @@ def molecule_info_from_chembl(molecule_chembl_ids: list) -> pd.DataFrame:
     )
 
 
-def parse_molecule_response(r: dict, compound_id: str) -> dict:
-    """Parse the response from the ChEMBL API for a molecule.
-
-    Args:
-        r: response, a dictionary with the information on the compound.
-        compound_id: identifier to log warnings for the compound when no information is found.
-
-    Returns:
-        dict: a dictionary with the parsed information.
-    """
-    if r["molecule_hierarchy"] is not None:
-        hierarchy_active_id = r.get("molecule_hierarchy", {}).get("active_chembl_id", None)
-        hierarchy_molecule_id = r.get("molecule_hierarchy", {}).get("molecule_chembl_id", None)
-        hierarchy_parent_id = r.get("molecule_hierarchy", {}).get("parent_chembl_id", None)
-        r.pop("molecule_hierarchy")
-    else:
-        logger.warning(f"No hierarchy information found for compound {compound_id}")
-        hierarchy_active_id = None
-        hierarchy_molecule_id = None
-        hierarchy_parent_id = None
-    if r["molecule_structures"] is not None:
-        canonical_smiles = r.get("molecule_structures", {}).get("canonical_smiles", None)
-        standard_inchikey = r.get("molecule_structures", {}).get("standard_inchi_key", None)
-        r.pop("molecule_structures")
-    else:
-        logger.warning(f"No structure information found for compound {compound_id}")
-        canonical_smiles = None
-        standard_inchikey = None
-    return {
-        "hierarchy_active_id": hierarchy_active_id,
-        "hierarchy_molecule_id": hierarchy_molecule_id,
-        "hierarchy_parent_id": hierarchy_parent_id,
-        "canonical_smiles": canonical_smiles,
-        "standard_inchikey": standard_inchikey,
-        **r,
-    }
-
-
-def get_similar_compounds(smi: list, similarity: float) -> pd.DataFrame:
+@rate_limit(max_per_second=5)
+def get_similarity_compound_table(smi: str, similarity: float) -> pd.DataFrame:
     """Fetch similar compounds from ChEMBL using the similarity API.
 
     Args:
         smiles: single smiles string to find similar molecules to.
-        similarity: similarity threshold to use for the search.
+        similarity: similarity threshold to use for the search. Value should be between 40 and 100.
+
+    Raises:
+        ValueError: If the similarity is not between 40 and 100, or if no similar molecules are found.
 
     Returns:
         pd.DataFrame: a DataFrame with the similar molecules.
     """
+
+    if not (40 <= similarity <= 100):
+        raise ValueError("Similarity must be between 40 and 100")
+
     similarity_api = new_client.similarity
     extracted = {}
     result = similarity_api.filter(smiles=smi, similarity=similarity).only(
@@ -184,39 +152,13 @@ def get_similar_compounds(smi: list, similarity: float) -> pd.DataFrame:
             if r is None:
                 logger.warning(f"No similar molecules were found for reponse {idx}")
             else:
-                extracted[idx] = {"querySmiles": smi, **parse_molecule_response(r, smi)}
+                extracted[idx] = {"querySmiles": smi, **parse_compound_response(r, smi)}
     else:
         logger.warning(f"No similar molecules were found to {smi}")
     return pd.DataFrame.from_dict(extracted, orient="index")
 
 
-@rate_limit(max_per_second=5)
-def get_similars_from_smiles(smiles: list[str], similarity: float, n_threads: int = 1) -> pd.DataFrame:
-    """Use the ChEMBL API to get similar compounds to a list of SMILES. Though multiple threads
-    can be used, the rate limit is set to 5 calls per second not to overload the API.
-
-    Args:
-        smiles: list of SMILES strings to find similar molecules to.
-        similarity: similarity threshold to use for the search. Value should be between 40 and 100. Defaults to 80.
-        n_threads: Number of threads to use for searching the similar compounds. Defaults to 1.
-
-    Returns:
-        pd.DataFrame: a DataFrame with the similar molecules.
-    """
-
-    extracted = []
-
-    with ThreadPoolExecutor(max_workers=n_threads) as executor:
-        futures = []
-        for smi in smiles:
-            futures.append(executor.submit(get_similar_compounds, smi, similarity))
-        for future in as_completed(futures):
-            extracted.append(future.result())
-
-    return pd.concat(extracted, ignore_index=True)
-
-
-def assay_info_from_chembl(
+def get_assay_table(
     assay_chembl_ids: list,
     confidence_scores: list | None = None,
     **kwargs,
@@ -235,6 +177,7 @@ def assay_info_from_chembl(
         "confidence_score__in": confidence_scores,
         **kwargs,
     }
+    assays_api = new_client.assay
     assays = assays_api.filter(**activity_kwargs).only(
         "assay_cell_type",
         "assay_chembl_id",
@@ -259,7 +202,7 @@ def assay_info_from_chembl(
                 variant_sequence=lambda x: x.variant_sequence.apply(
                     lambda y: y.get("mutation") if isinstance(y, dict) else y
                 )
-            )
+            ).assign(variant_sequence=lambda x: x.variant_sequence.replace({None: "WT"}))
     else:
         activity_kwargs.pop("assay_chembl_id__in")
         raise ValueError(
@@ -268,22 +211,22 @@ def assay_info_from_chembl(
     return assays_df
 
 
-def bioactivities_from_chembl(
+def get_activity_table(
     molecule_chembl_ids: Optional[list] = None,
     target_chembl_ids: Optional[list] = None,
     assay_chembl_ids: Optional[list] = None,
     document_chembl_ids: Optional[list] = None,
     **kwargs,
-) -> pd.DataFrame:
+) -> Tuple[pd.DataFrame, dict]:
     """Take a list of molecule chembl ids and get their respective bioactivities in ChEMBL.
     Args:
         molecule_chembl_id: list of molecule ChEMBL IDs to fecth bioactivities. Defaults to None.
         target_chembl_ids: list of target ChEMBL IDs to fetch bioactivities. Defaults to None.
         assay_chembl_ids: list of assay ChEMBL IDs to fetch bioactivities. Defaults to None.
         document_chembl_ids: list of document ChEMBL IDs to fetch bioactivities. Defaults to None.
-        kwargs: example -> `standard_relation="=", assay_type__in=["B", "F"]`.
+        kwargs: example -> `standard_relation=["="], assay_type__in=["B", "F"]`.
     Returns:
-        pd.DataFrame: a DataFrame with the bioactivities.
+        Tuple[pd.DataFrame, dict]: a DataFrame with the bioactivities and the parameters used to fetch them.
     """
     activity_kwargs = {**kwargs}
     if molecule_chembl_ids is not None:
@@ -294,6 +237,8 @@ def bioactivities_from_chembl(
         activity_kwargs.update({"assay_chembl_id__in": assay_chembl_ids})
     if document_chembl_ids is not None:
         activity_kwargs.update({"document_chembl_id__in": document_chembl_ids})
+    activity_api = new_client.activity
+    logger.debug(f"Fetching bioactivities with the parameters: {activity_kwargs}")
     bioactivities = activity_api.filter(**activity_kwargs).only(
         "activity_id",
         "assay_chembl_id",
@@ -315,4 +260,6 @@ def bioactivities_from_chembl(
         assays_df = pd.DataFrame.from_records(bioactivities)
     else:
         raise ValueError(f"No bioactivities found for the ids: {molecule_chembl_ids}")
-    return assays_df
+    if assays_df.empty:
+        raise BioactivitiesNotFoundError(parameters=activity_kwargs)
+    return assays_df, activity_kwargs

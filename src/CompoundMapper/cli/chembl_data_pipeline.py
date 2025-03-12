@@ -1,17 +1,19 @@
+from inspect import signature
 from pathlib import Path
 from typing import Optional, Union
 
 import numpy as np
 from chemFilters.chem.standardizers import ChemStandardizer
 
-from ..chembl.processing import fetch_and_filter_workflow
+from ..chembl.exceptions import BioactivitiesNotFoundError
+from ..chembl.processing import get_and_filter_bioactivity_workflow
+from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
 from ..logger import logger
-from .fp_utils import calculate_mixed_FPs
 
 
-def fetch_standardize_and_clean_workflow(
+def get_standardize_and_clean_workflow(
     molecule_ids: list[str],
     target_ids: list[str],
     assay_ids: list[str],
@@ -25,6 +27,7 @@ def fetch_standardize_and_clean_workflow(
     chembl_version: int,
     save_not_aggregated: bool,
     save_duplicated: bool = False,
+    add_document_info: bool = True,
 ) -> None:
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -46,11 +49,13 @@ def fetch_standardize_and_clean_workflow(
         chembl_version: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
         save_duplicated: whether to save the duplicated data (if any) to a separate csv file
+        add_document_info: whether to add publication-related fields to the final DataFrame. Setting
+            to True, will require one less query to be made to ChEMBL, but fields like `year` will be
+            lacking. Defaults to True.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
     """
-
     if output_path is not None:
         if isinstance(output_path, str):
             output_path = Path(output_path)
@@ -62,7 +67,7 @@ def fetch_standardize_and_clean_workflow(
         **{f"-Log {bio}": bio for bio in bioactivity_type},
     }
 
-    full_df = fetch_and_filter_workflow(
+    full_df = get_and_filter_bioactivity_workflow(
         molecule_chembl_ids=molecule_ids,
         target_chembl_ids=target_ids,
         assay_chembl_ids=assay_ids,
@@ -71,7 +76,15 @@ def fetch_standardize_and_clean_workflow(
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
         chembl_version=chembl_version,
+        add_document_info=add_document_info,
     )
+
+    # drop rows without chemical structures
+    no_smiles_mask = full_df.canonical_smiles.isna()
+    if no_smiles_mask.any():
+        _info = full_df[no_smiles_mask].iloc[:, :6]
+        logger.info(f"Dropping rows with missing canonical smiles:\n{_info}")
+        full_df = full_df.drop(index=_info.index).reset_index(drop=True)
 
     stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
     queried_df = (
@@ -95,7 +108,6 @@ def fetch_standardize_and_clean_workflow(
                 "value",
                 "standard_value",  # we'll use pchembl instead
                 "type",
-                "canonical_smiles",
                 # "description",
             ]
         )
@@ -106,6 +118,12 @@ def fetch_standardize_and_clean_workflow(
     no_pchembl_idxs = queried_df.query("pchembl_value.isna()").index
     logger.info(f"Dropping {len(no_pchembl_idxs)} rows missing pchembl values.")
     queried_df = queried_df.drop(index=no_pchembl_idxs).reset_index(drop=True)
+
+    if queried_df.empty:
+        func_params = signature(get_standardize_and_clean_workflow).parameters
+        local_vars = locals()
+        parameters = {name: local_vars[name] for name in func_params}
+        raise BioactivitiesNotFoundError(parameters=parameters)
 
     # find remaining mixtures in the data
     mask = queried_df["standard_smiles"].str.contains(".", regex=False)
@@ -120,6 +138,7 @@ def fetch_standardize_and_clean_workflow(
     col_subset = [  # Drop different assays that have the same exact pchembl value - probably duplicate
         "molecule_chembl_id",
         "standard_smiles",
+        "canonical_smiles",
         "pchembl_value",
         "standard_relation",
         "target_chembl_id",
@@ -157,21 +176,30 @@ def aggregate_data(
     chirality: bool,
     chembl_version: int,
     metadata_cols: list[str],
-    output_path: Optional[Union[str, Path]],
+    extra_id_cols: list[str],
+    aggregate_mutants: bool = False,
+    output_path: Optional[Union[str, Path]] = None,
 ):
     """Aggregate the data obtained from ChEMBL by:
-        1) Calculate fingerprints and use those to identify same-structure compounds;
-        2) Identify identical arrays from fingerprints and aggregate the data;
+    1) Calculate fingerprints and use those to identify same-structure compounds;
+    2) Identify identical arrays from fingerprints and aggregate the data;
 
     Aggregated data will contain the original data separated by a semicolon and calculate
     the mean, median, standard deviation, median absolute deviation, and value counts
     for the pchembl values.
 
     Args:
-        df: dataframe output from `fetch_standardize_and_clean_workflow`
+
+        df: dataframe output from `CompoundMapper.cli.workflow.fetch_standardize_and_clean_workflow`
         chirality: toggle chiral-sensitive fingerprints for identifying same molecules
         chembl_version: latest ChEMBL release to retrieve data from
-        metadata_cols: additional metadata columns to keep in the final dataframe
+        metadata_cols: additional metadata columns to keep in the final dataframe. Metadata will
+            be saved separated by a semicolon whenever aggregation is performed.
+        extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
+            `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
+            if the compound is the same and the assay is the same.
+        aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
+            regardless of the variant_sequence flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data
 
     Returns:
@@ -192,8 +220,10 @@ def aggregate_data(
         df,
         repeats_idxs,
         solve_strat="keep",
+        extra_id_cols=extra_id_cols,
         chirality=chirality,
         extra_multival_cols=include_metadata,
+        aggregate_mutants=aggregate_mutants,
     )
 
     if output_path is not None:

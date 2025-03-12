@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from CompoundMapper.cli.workflow import aggregate_data
+from CompoundMapper.cli.chembl_data_pipeline import aggregate_data
 
 
 class TestFetchFromChEMBL(unittest.TestCase):
@@ -53,3 +53,7 @@ class TestFetchFromChEMBL(unittest.TestCase):
         # Compare if the assays are the same
         np.testing.assert_array_equal(aggr_df.assay_chembl_id.values, self.aggr_df.assay_chembl_id.values)
         np.testing.assert_array_equal(aggr_df.activity_id.values, self.aggr_df.activity_id.values)
+
+
+if __name__ == "__main__":
+    unittest.main()
