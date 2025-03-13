@@ -70,7 +70,7 @@ def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataF
     results = []
     for col in cols:
         try:
-            results.append(grpd[col].apply(func, group_keys=True).reset_index().set_index(idcols).copy())
+            results.append(grpd[col].apply(func).reset_index().set_index(idcols).copy())
         except Exception as e:
             logger.error(f"Error applying function to column {col}: {e}")
             logger.error(f"Exception type: {type(e).__name__}")

@@ -163,7 +163,10 @@ def process_repeat_mols(
     else:
         id_cols = [*id_cols, "variant_sequence"]
     repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
-    grouped = repeat_subset.groupby(id_cols)
+    if pd.__version__ >= "1.5.0":
+        grouped = repeat_subset.groupby(id_cols, group_keys=True)
+    else:
+        grouped = repeat_subset.groupby(id_cols)
     updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
     updated_df = assign_stats(updated_vals, value_col="pchembl_value").merge(df, on=id_cols, how="left")
     rename_cols = {c: c.rstrip("_x") for c in updated_df.columns if c.endswith("_x")}
