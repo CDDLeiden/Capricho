@@ -74,18 +74,34 @@ def get_full_activity_data_sql(
     additional_fields: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
-) -> str:
-    """Get SQL query for retrieving compound data for specified assay(s).
+) -> pd.DataFrame:
+    """Retrieve ChEMBL bioactivity data from any combination of molecule, target, assay, or document IDs.
+    Data is retrieved using the ChEMBL downloader. Merges are performed on the SQL query level and a
+    DataFrame is returned with the bioactivity data.
 
     Args:
-        assay_chembl_id: Single assay ChEMBL ID or list of assay IDs
+        molecule_chembl_ids: list of ChEMBL molecule IDs to fetch data for. Defaults to None.
+        target_chembl_ids: list of ChEMBL target IDs to fetch data for. Defaults to None.
+        assay_chembl_ids: list of ChEMBL assay IDs to fetch data for. Defaults to None.
+        document_chembl_ids: list of ChEMBL document IDs to fetch data for. Defaults to None.
         standard_relation: Optional filter for standard relation types (e.g., ["=", "<", ">"])
         standard_type: Optional filter for activity types (e.g., ["IC50", "Ki", "EC50"])
+        confidence_scores: list of confidence scores to filter the fetched assay data.
+            Defaults to (9, 8).
+        assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
+            functional (F) data.
+        chembl_version: Not to confuse for `version`. This is the ChEMBL release number used to
+            filter the data. Defaults to None.
         include_null_values: Whether to include activities with null values/relations
         additional_fields: Optional list of additional fields to include in the query
+        prefix: Optional prefix for an alternative data directory. If passed, will create
+            a new configuration file under `~/.data/chembl_downloader_config_{version}.json`
+            pointing to the new data directory. Defaults to None.
+        version: ChEMBL database to be downloaded and used by ChEMBL downloader. If not provided,
+            will download the latest available version. Defaults to None.
 
     Returns:
-        SQL query string
+        pd.DataFrame: a DataFrame with the bioactivity data.
     """
     # Download the ChEMBL database if not present
     downloader_configs = check_and_download_chembl_db(prefix=prefix, version=version)

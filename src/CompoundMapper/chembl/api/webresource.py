@@ -276,8 +276,9 @@ def get_full_activity_data(
     add_document_info: bool = True,
 ) -> pd.DataFrame:
     """
-    This function retrieves and merges data from ChEMBL for given molecule or target IDs.
-    The steps taken to filter this data are:
+    Retrieve ChEMBL bioactivity data from any combination of molecule, target, assay, or document IDs.
+    Data is retrieved using the ChEMBL webresource client, merges and returns a DataFrame with the
+    bioactivity data.
 
     1. Fetch bioactivities for the given target or molecule IDs, considering designated
         confidence scores and assay types (binding or functional) using `new_client.activity`
