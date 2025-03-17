@@ -1,5 +1,6 @@
 """Module holding functionalities for the ChEMBL API."""
 
+import re
 from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -19,44 +20,48 @@ def convert_to_log10(df):
     """
 
     def compute_log(row):
-        value = row["standard_value"]
+        # Sometimes standard_type is already log transformed;
+        if re.findall("log", row["standard_type"], re.IGNORECASE):
+            if row["standard_value"] < 0:
+                return -row["standard_value"]  # log10 transformed, but not negative yet ?
+            else:
+                return row["standard_value"]
+
         unit = row["standard_units"]
+        if pd.isna(unit):
+            return np.nan
+
+        value = row["standard_value"]
         if value == 0:  # avoid division by zero
             return np.nan
-        if unit == "µM" or unit == "uM":
+        if unit == "mM":
+            value_in_M = value * 1e-3
+        elif unit == "µM" or unit == "uM":
             value_in_M = value * 1e-6
         elif unit == "nM":
             value_in_M = value * 1e-9
+
         return -np.log10(value_in_M)
 
-    desired_units = ["nM", "µM", "uM"]
-    final_df = []
-    for unit in desired_units:  # noqa: B007
-        tmp_df = df.query("standard_units == @unit")
-        if tmp_df.shape[0] > 0:
-            tmp_df = tmp_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
-            pchembl_inf_or_nan = tmp_df.replace([np.inf, -np.inf], np.nan).query("pchembl_value.isna()")
-            if not pchembl_inf_or_nan.empty:
-                debug_cols = [
-                    "target_chembl_id",
-                    "assay_chembl_id",
-                    "assay_type",
-                    "molecule_chembl_id",
-                    "standard_units",
-                    "standard_value",
-                ]
-                _info = pchembl_inf_or_nan[debug_cols]
-                logger.info(
-                    f"Found infinite or NaN values upon calculating pchembl values. Dropping:\n{_info}"
-                )
-                tmp_df = tmp_df.drop(pchembl_inf_or_nan.index)
-            final_df.append(tmp_df)
-        else:
-            continue
-    if final_df == []:
-        return None
-    else:
-        return pd.concat(final_df, ignore_index=True)
+    desired_units = ["nM", "µM", "uM", "mM"]  # noqa: F841
+    # allow na values in case value is log transformed
+    tmp_df = df.query("standard_units.isin(@desired_units) | standard_units.isna()").copy()
+    if tmp_df.shape[0] > 0:
+        tmp_df = tmp_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
+        pchembl_inf_or_nan = tmp_df.replace([np.inf, -np.inf], np.nan).query("pchembl_value.isna()")
+        if not pchembl_inf_or_nan.empty:
+            debug_cols = [
+                "target_chembl_id",
+                "assay_chembl_id",
+                "assay_type",
+                "molecule_chembl_id",
+                "standard_units",
+                "standard_value",
+            ]
+            _info = pchembl_inf_or_nan[debug_cols]
+            logger.info(f"Found infinite or NaN values upon calculating pchembl values. Dropping:\n{_info}")
+            tmp_df = tmp_df.drop(pchembl_inf_or_nan.index)
+    return tmp_df
 
 
 def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: bool = True) -> pd.DataFrame:
