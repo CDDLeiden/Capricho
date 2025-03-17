@@ -21,6 +21,7 @@ classifiers = [
 dependencies = [
   "chem-filters @ git+https://github.com/David-Araripe/chemFilters.git",
   "chembl_webresource_client",
+  "chembl_downloader",
   "pandas",
   "numpy",
   "loguru",
