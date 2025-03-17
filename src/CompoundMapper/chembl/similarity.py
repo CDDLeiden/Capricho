@@ -9,7 +9,7 @@ from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import repeated_indices_from_array_series
 from ..logger import logger
-from .api import get_similarity_compound_table
+from .api.webresource import get_similarity_compound_table
 
 
 def get_and_curate_chembl_compounds(

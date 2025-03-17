@@ -1,17 +1,13 @@
 """Module holding functionalities for the ChEMBL API."""
 
-from typing import Optional, Tuple, Union
+from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
 
 from ..logger import logger
-from .api import (
-    get_activity_table,
-    get_assay_table,
-    get_compound_table,
-    get_document_table,
-)
+from .api.downloader import get_full_activity_data_sql
+from .api.webresource import get_full_activity_data
 from .exceptions import BioactivitiesNotFoundError
 
 
@@ -91,92 +87,27 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
     return bioactivities_df.reset_index(drop=True)
 
 
-def get_and_filter_bioactivity_workflow(
-    molecule_chembl_ids: Optional[list] = None,
-    target_chembl_ids: Optional[list] = None,
-    assay_chembl_ids: Optional[list] = None,
-    document_chembl_ids: Optional[list] = None,
+def get_full_activity_workflow(
+    molecule_chembl_ids: Optional[Union[list, str]] = None,
+    target_chembl_ids: Optional[Union[list, str]] = None,
+    assay_chembl_ids: Optional[Union[list, str]] = None,
+    document_chembl_ids: Optional[Union[list, str]] = None,
+    standard_relation: Optional[List[str]] = None,
+    standard_type: Optional[List[str]] = None,
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
-    calculate_pchembl: bool = True,
     chembl_version: Optional[int] = None,
-    add_document_info: bool = True,
-) -> pd.DataFrame:
-    """
-    This function retrieves and merges data from ChEMBL for given molecule or target IDs.
-    The steps taken to filter this data are:
+    include_null_values: bool = False,
+    additional_fields: Optional[List[str]] = None,
+    prefix: Optional[Sequence[str]] = None,
+    version: Optional[Union[int, str]] = None,
+    calculate_pchembl: bool = False,
+    backend: Literal["downloader", "webresource"] = "downloader",
+):
+    if backend == "downloader":
+        bioactivities_df = get_full_activity_data_sql()
+    elif backend == "webresource":
+        bioactivities_df = get_full_activity_data()
 
-    1. Fetch bioactivities for the given target or molecule IDs, considering designated
-        confidence scores and assay types (binding or functional) using `new_client.activity`
-        from them `chembl_webresource_client` package.
-    2. If the `calculate_pchembl` parameter is true, use obtained bioactivity points with values
-        reported in (standard units) nM, µM or uM to calculate the pChEMBL value.
-    3. Extract unique assay IDs from the bioactivities DataFrame & add this information to the
-        final DataFrame.
-
-    Args:
-        molecule_chembl_ids: list of ChEMBL molecule IDs to fetch data for. Defaults to None.
-        target_chembl_ids: list of ChEMBL target IDs to fetch data for. Defaults to None.
-        assay_chembl_ids: list of ChEMBL assay IDs to fetch data for. Defaults to None.
-        document_chembl_ids: list of ChEMBL document IDs to fetch data for. Defaults to None.
-        confidence_scores: list of confidence scores to filter the fetched assay data.
-            Defaults to (9, 8).
-        assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
-            functional (F) data.
-        calculate_pchembl: calculate pChEMBL values for the bioactivities when it's not present
-            for bioactivities reported in nM, µM or uM. Defaults to True.
-        chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.
-        add_document_info: whether to add publication-related fields to the final DataFrame. Setting
-            to True, will require one less query to be made to ChEMBL, but fields like `year` will be
-            lacking. Defaults to True.
-    Returns:
-        pd.DataFrame: Merged DataFrame with molecule, bioactivity, and assay information.
-    """
-    activity_df, parameters = get_activity_table(
-        molecule_chembl_ids=molecule_chembl_ids,
-        target_chembl_ids=target_chembl_ids,
-        assay_chembl_ids=assay_chembl_ids,
-        document_chembl_ids=document_chembl_ids,
-        standard_relation__in=["="],
-        assay_type__in=assay_types,
-    )
-    bioactivities_df = process_bioactivities(
-        activity_df,
-        calculate_pchembl=calculate_pchembl,
-    )
-    unique_assay_ids = bioactivities_df["assay_chembl_id"].unique().tolist()
-    if not unique_assay_ids:
-        raise BioactivitiesNotFoundError(parameters=parameters)
-
-    logger.debug(f"Fetching assays of type {assay_types} with confidence scores: {list(confidence_scores)}")
-    assays_df = get_assay_table(
-        unique_assay_ids, confidence_scores=list(confidence_scores), assay_type__in=assay_types
-    )
-
-    merged_df = pd.merge(
-        bioactivities_df,
-        assays_df,
-        on=["assay_chembl_id", "target_chembl_id", "assay_type"],
-        how="right",  # keep only the bioactivities with respective assays
-    ).drop_duplicates()
-    logger.debug(f"Columns in the merged DataFrame: {merged_df.columns}")
-
-    # Get the molecule structures & merge to the dataset
-    unique_mol_chembl_ids = merged_df["molecule_chembl_id"].unique().tolist()
-    logger.debug(f"Fetching structural information for {len(unique_mol_chembl_ids)} molecule ChEMBL IDs.")
-    mol_data = get_compound_table(unique_mol_chembl_ids)
-
-    # Merge using molecule_chembl_id
-    full_df = merged_df.merge(mol_data, on="molecule_chembl_id", how="inner")
-    full_df = full_df[  # reorder columns with molecule_chembl_id and canonical_smiles first
-        ["molecule_chembl_id", "canonical_smiles"]
-        + [col for col in full_df.columns if col not in ["molecule_chembl_id", "canonical_smiles"]]
-    ]
-    logger.debug(f"Columns in the DataFrame with molecular structures: {full_df.columns}")
-    if any([chembl_version is not None, add_document_info]):
-        document_ids = full_df["document_chembl_id"].unique().tolist()
-        logger.info("Fetching publication details for the documents.")
-        publications_df = get_document_table(document_ids, chembl_version)
-        full_df = pd.merge(full_df, publications_df, on="document_chembl_id", how="left")
-
-    return full_df
+    if bioactivities_df.empty:
+        raise BioactivitiesNotFoundError("No bioactivities found for the given query.")
