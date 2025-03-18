@@ -12,11 +12,17 @@ from .api.webresource import get_full_activity_data
 from .exceptions import BioactivitiesNotFoundError
 
 
-def convert_to_log10(df):
+def convert_to_log10(df) -> pd.DataFrame:
     """Function to be applied to the whole DataFrame. Will convert the standard_value
     column to pchembl_value column, if the standard_units are in nM, µM or uM.
+
     Args:
         df: a bioactivity DataFrame. e.g.: output from `get_activity_table`.
+
+    Returns:
+        pd.DataFrame: the DataFrame with the pchembl_value column added. If the data didn't
+            meet the pchembl_value calculation criteria (standard_units not in nM, µM or uM) |
+            (standard_type.str.contains(log)), it can return an empty DataFrame.
     """
 
     def compute_log(row):
@@ -46,6 +52,13 @@ def convert_to_log10(df):
     desired_units = ["nM", "µM", "uM", "mM"]  # noqa: F841
     # allow na values in case value is log transformed
     tmp_df = df.query("standard_units.isin(@desired_units) | standard_units.isna()").copy()
+    if "pchembl_value" not in tmp_df.columns:
+        raise ValueError("pchembl_value column not found in input DataFrame.")
+    elif (~tmp_df.pchembl_value.isna()).any():
+        raise ValueError(
+            "input DataFrame should only have pchembl_value.isna() values. If not, use "
+            "chembl.processing.process_bioactivities instead."
+        )
     if tmp_df.shape[0] > 0:
         tmp_df = tmp_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
         pchembl_inf_or_nan = tmp_df.replace([np.inf, -np.inf], np.nan).query("pchembl_value.isna()")
@@ -66,13 +79,15 @@ def convert_to_log10(df):
 
 def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: bool = True) -> pd.DataFrame:
     """Processes the bioactivities DataFrame. Will convert the standard_value
-    column to pchembl_value column if the standard_units are in nM, µM or uM.
+    column to pchembl_value column if the standard_units are in mM, µM, uM, or nM. If the
+    standard_units are in log, the original value in the pchembl_value is preserved.
+
     Args:
         bioactivities_df: bioactivity dataframe, e.g.: output from `get_activity_table`.
+
     Returns:
         pd.DataFrame: the processed bioactivities DataFrame.
     """
-    without_pchembl = None
     bioactivities_df = (
         bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
         .replace({None: np.nan})
@@ -85,7 +100,7 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
         without_pchembl = convert_to_log10(  # if pchembl value not present, calculate it
             bioactivities_df.query("pchembl_value.isna()")
         )
-        if without_pchembl is not None:
+        if not without_pchembl.empty:
             bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
     else:
         bioactivities_df = with_pchembl
@@ -123,6 +138,9 @@ def get_bioactivities_workflow(
 
     By passing this parameter to True, pchembl values will be calculated for bioactivities reported in
     nM, µM or uM `standard_unit`, or -Log|Log `standard_type`.
+
+    3. The first quality filter is applied. Data containing "data_validity_description" or
+    "potential_duplicate" flags are immediatelly removed from the DataFrame.
 
     Args:
         molecule_chembl_ids: list of ChEMBL molecule IDs to fetch data for. Defaults to None.
@@ -179,6 +197,21 @@ def get_bioactivities_workflow(
         )
 
     if bioactivities_df.empty:
-        raise BioactivitiesNotFoundError("No bioactivities found for the given query.")
+        raise BioactivitiesNotFoundError(
+            "No bioactivities found for the given query: "
+            f"molecule_chembl_ids={molecule_chembl_ids}, "
+            f"target_chembl_ids={target_chembl_ids}, "
+            f"assay_chembl_ids={assay_chembl_ids}, "
+            f"document_chembl_ids={document_chembl_ids}, "
+        )
 
-    return process_bioactivities(bioactivities_df, calculate_pchembl=calculate_pchembl)
+    bioactivities_df = process_bioactivities(bioactivities_df, calculate_pchembl=calculate_pchembl)
+
+    if bioactivities_df.empty:
+        raise BioactivitiesNotFoundError(
+            "No bioactivities found after calculating pchembl_values. To investigate, use "
+            "either methods CompoundMapper.chembl.api.downloader.get_full_activity_data_sql or "
+            "CompoundMapper.chembl.api.webresource.get_full_activity_data."
+        )
+
+    return bioactivities_df
