@@ -187,18 +187,20 @@ def get_assay_table(
     }
     assays_api = new_client.assay
     assays = assays_api.filter(**activity_kwargs).only(
-        "assay_cell_type",
         "assay_chembl_id",
-        "assay_organism",
-        "assay_subcellular_fraction",
-        "assay_tissue",
-        "assay_type",
-        "assay_type_description",
-        "confidence_score",
         "description",
-        "document_chembl_id",
-        "relationship_description",
         "relationship_type",
+        "assay_type",
+        "assay_organism",
+        "assay_category",
+        "assay_tax_id",
+        "assay_strain",
+        "assay_tissue",
+        "assay_cell_type",
+        "assay_subcellular_fraction",
+        "bao_format",
+        "confidence_score",
+        "document_chembl_id",
         "target_chembl_id",
         "variant_sequence",
     )
@@ -220,7 +222,7 @@ def get_assay_table(
         raise ValueError(
             f"No assays found for the ids: {assay_chembl_ids} with the parameters: {activity_kwargs}"
         )
-    return assays_df
+    return assays_df.rename(columns={"description": "assay_description"})
 
 
 def get_activity_table(

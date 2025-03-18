@@ -25,17 +25,17 @@ def parse_compound_response(r: dict, compound_id: str) -> dict:
         hierarchy_parent_id = None
     if r["molecule_structures"] is not None:
         canonical_smiles = r.get("molecule_structures", {}).get("canonical_smiles", None)
-        standard_inchikey = r.get("molecule_structures", {}).get("standard_inchi_key", None)
+        standard_inchi_key = r.get("molecule_structures", {}).get("standard_inchi_key", None)
         r.pop("molecule_structures")
     else:
         logger.warning(f"No structure information found for compound {compound_id}")
         canonical_smiles = None
-        standard_inchikey = None
+        standard_inchi_key = None
     return {
         "hierarchy_active_id": hierarchy_active_id,
         "hierarchy_molecule_id": hierarchy_molecule_id,
         "hierarchy_parent_id": hierarchy_parent_id,
         "canonical_smiles": canonical_smiles,
-        "standard_inchikey": standard_inchikey,
+        "standard_inchi_key": standard_inchi_key,
         **r,
     }
