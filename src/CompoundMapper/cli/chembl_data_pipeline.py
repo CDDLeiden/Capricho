@@ -64,12 +64,15 @@ def get_standardize_and_clean_workflow(
         if isinstance(output_path, str):
             output_path = Path(output_path)
 
-    # since we work with pchembl values, standard values reported as -pXC50, -Log XC50, etc. will be renamed
-    bioactivity_type_rename_dict = {
-        **{f"p{bio}": bio for bio in bioactivity_type},
-        **{f"Log {bio}": bio for bio in bioactivity_type},
-        **{f"-Log {bio}": bio for bio in bioactivity_type},
-    }
+    # -log | log transformed values reported as Log XC50, -Log XC50, etc, might not
+    # have a pchembl value, but *could* still be used.  If standard_type contains `Log`,
+    # the standard_value will be transferred to pchembl_value.
+    if calculate_pchembl:
+        biotypes = []
+        for act in bioactivity_type:
+            biotypes.extend([f"Log {act}", f"-Log {act}", act])
+    else:
+        biotypes = bioactivity_type
 
     full_df = get_and_filter_bioactivity_workflow(
         molecule_chembl_ids=molecule_ids,
@@ -83,8 +86,18 @@ def get_standardize_and_clean_workflow(
         add_document_info=add_document_info,
     )
 
+    todrop_cols = [  # cols that won't be used; we'll use `standard_<colname>` instead
+        "type",
+        "relation",
+        "units",
+        "value",
+        "standard_value",  # we'll use pchembl instead
+        "type",
+        # "description",
+    ]
+
     logger.debug(f"All fetched bioactivity types: {full_df.standard_type.unique().tolist()}")
-    logger.debug(f"Keeping only: {bioactivity_type_rename_dict.keys()}")
+    logger.debug(f"Keeping only: {biotypes}")
 
     # drop rows without chemical structures
     no_smiles_mask = full_df.canonical_smiles.isna()
@@ -95,10 +108,7 @@ def get_standardize_and_clean_workflow(
 
     stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
     queried_df = (
-        full_df.assign(  # rename bioactivities & filter by preferred bioactivity type
-            standard_type=lambda x: x["standard_type"].replace(bioactivity_type_rename_dict)
-        )
-        .query("standard_type.isin(@bioactivity_type)")
+        full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string
         .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
         .dropna(subset=["standard_smiles"])  # drop if no structure is found
@@ -106,18 +116,7 @@ def get_standardize_and_clean_workflow(
         .assign(final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures))
         .drop(columns="standard_smiles")
         .rename(columns={"final_smiles": "standard_smiles"})
-        # Drop cols that won't be used; we'll use `standard_<colname>` instead
-        .drop(
-            columns=[
-                "type",
-                "relation",
-                "units",
-                "value",
-                "standard_value",  # we'll use pchembl instead
-                "type",
-                # "description",
-            ]
-        )
+        .drop(columns=[c for c in todrop_cols if c in full_df.columns])
         .reset_index(drop=True)
         .copy()
     )
