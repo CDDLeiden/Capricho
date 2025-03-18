@@ -198,11 +198,15 @@ def get_assay_table(
         assays_df = pd.DataFrame.from_records(assays)
         if find_dict_in_dataframe(assays_df) is not None:
             logger.warning("Keeping only mutation info from `variant_sequence`.")
-            assays_df = assays_df.assign(
-                variant_sequence=lambda x: x.variant_sequence.apply(
-                    lambda y: y.get("mutation") if isinstance(y, dict) else y
+            assays_df = (
+                assays_df.assign(
+                    mutation=lambda x: x.variant_sequence.apply(
+                        lambda y: y.get("mutation") if isinstance(y, dict) else y
+                    )
                 )
-            ).assign(variant_sequence=lambda x: x.variant_sequence.replace({None: "WT"}))
+                .assign(mutation=lambda x: x.mutation.replace({None: "WT"}))
+                .drop(columns=["variant_sequence"])
+            )
     else:
         activity_kwargs.pop("assay_chembl_id__in")
         raise ValueError(
@@ -253,7 +257,7 @@ def get_activity_table(
         "pchembl_value",
         "target_chembl_id",
         "target_organism",
-        "data_validity_description",
+        "data_validity_comment",
         "potential_duplicate",
     )
     if bioactivities:

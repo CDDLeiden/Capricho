@@ -88,12 +88,13 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
     Returns:
         pd.DataFrame: the processed bioactivities DataFrame.
     """
+    print(bioactivities_df.columns)
     bioactivities_df = (
         bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
         .replace({None: np.nan})
-        .query("data_validity_description.isna()")
+        .query("data_validity_comment.isna()")
         .query("potential_duplicate == 0")
-        .drop(columns=["data_validity_description", "potential_duplicate"])
+        .drop(columns=["data_validity_comment", "potential_duplicate"])
     )
     with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
     if calculate_pchembl:
@@ -194,7 +195,7 @@ def get_bioactivities_workflow(
             confidence_scores=confidence_scores,
             assay_types=assay_types,
             chembl_version=chembl_version,
-        )
+        ).sort_values(by=["molecule_chembl_id", "activity_id", "standard_value"])
 
     if bioactivities_df.empty:
         raise BioactivitiesNotFoundError(

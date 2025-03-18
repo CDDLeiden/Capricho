@@ -143,9 +143,10 @@ def get_full_activity_data_sql(
 
     # Build field list
     base_fields = [
-        "act.activity_id AS activity_chembl_id",
+        "act.activity_id",
         "a.chembl_id AS assay_chembl_id",
         "a.description AS assay_description",
+        "a.relationship_type",
         "a.assay_type",
         "a.assay_organism",
         "a.assay_category",
@@ -172,7 +173,7 @@ def get_full_activity_data_sql(
         "act.standard_value",
         "act.pchembl_value",
         "td.chembl_id AS target_chembl_id",
-        "td.organism",
+        "td.organism AS target_organism",
         "cs.canonical_smiles",
         "cs.standard_inchi_key",
         # "cs.molregno",
@@ -189,7 +190,7 @@ def get_full_activity_data_sql(
         "d.year",
         "d.title",
         "vs.mutation",
-        "d.chembl_release_id",
+        "d.chembl_release_id AS chembl_release",
     ]
 
     if additional_fields:
@@ -237,7 +238,7 @@ def get_full_activity_data_sql(
         WHERE
             {where_clause}
         ORDER BY
-            md.chembl_id, act.standard_type
+            md.chembl_id, act.activity_id, act.standard_value
     """
     )
 
@@ -247,4 +248,4 @@ def get_full_activity_data_sql(
         query_str,
         version=downloader_configs["version"],
         prefix=downloader_configs["prefix"],
-    )
+    ).assign(mutation=lambda x: x["mutation"].fillna("WT"))
