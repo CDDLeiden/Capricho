@@ -7,7 +7,7 @@ import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..chembl.exceptions import BioactivitiesNotFoundError
-from ..chembl.processing import get_and_filter_bioactivity_workflow
+from ..chembl.processing import get_bioactivities_workflow
 from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
@@ -74,7 +74,7 @@ def get_standardize_and_clean_workflow(
     else:
         biotypes = bioactivity_type
 
-    full_df = get_and_filter_bioactivity_workflow(
+    full_df = get_bioactivities_workflow(
         molecule_chembl_ids=molecule_ids,
         target_chembl_ids=target_ids,
         assay_chembl_ids=assay_ids,

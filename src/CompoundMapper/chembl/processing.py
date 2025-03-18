@@ -92,7 +92,7 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
     return bioactivities_df.reset_index(drop=True)
 
 
-def get_full_activity_workflow(
+def get_bioactivities_workflow(
     molecule_chembl_ids: Optional[Union[list, str]] = None,
     target_chembl_ids: Optional[Union[list, str]] = None,
     assay_chembl_ids: Optional[Union[list, str]] = None,
@@ -102,17 +102,83 @@ def get_full_activity_workflow(
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
     chembl_version: Optional[int] = None,
-    include_null_values: bool = False,
     additional_fields: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
     calculate_pchembl: bool = False,
     backend: Literal["downloader", "webresource"] = "downloader",
 ):
+    """Perform the first step of the bioactivity data retrieval workflow. These are:
+
+    1. Get ChEMBL data using any of the input identifiers: molecule_chembl_ids, target_chembl_ids,
+    assay_chembl_ids, or document_chembl_ids. Additional filters are supported by other input
+    parameters.
+
+    2. Once the data is retrieved, the bioactivities are processed according to the `calculate_pchembl`
+    parameter. ChEMBL calculates pChEMBL values for activity data with the following criteria:
+
+    - "standard_type" in "[IC50", "XC50", "EC50", "AC50", "Ki", "Kd", "Potency", "ED50"];
+    - "standard_relation" == "=" & "standard_units" == "nM";
+    - "standard_value" > 0 & "data_validity_comment"].isnull()) | "data_validity_comment" == "Manually validated"
+
+    By passing this parameter to True, pchembl values will be calculated for bioactivities reported in
+    nM, µM or uM `standard_unit`, or -Log|Log `standard_type`.
+
+    Args:
+        molecule_chembl_ids: list of ChEMBL molecule IDs to fetch data for. Defaults to None.
+        target_chembl_ids: list of ChEMBL target IDs to fetch data for. Defaults to None.
+        assay_chembl_ids: list of ChEMBL assay IDs to fetch data for. Defaults to None.
+        document_chembl_ids: list of ChEMBL document IDs to fetch data for. Defaults to None.
+        standard_relation: Optional filter for standard relation types (e.g., ["=", "<", ">"])
+        standard_type: Optional filter for activity types (e.g., ["IC50", "Ki", "EC50"])
+        confidence_scores: list of confidence scores to filter the fetched assay data.
+            Defaults to (9, 8).
+        assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
+            functional (F) data.
+        chembl_version: Not to confuse for `version`. This is the ChEMBL release number used to
+            filter the data. Defaults to None.
+        additional_fields: `backend=="downloader"` only! "Optional list of additional fields to
+            include in the sql query. E.g.: ["vs.sequence"], to retrieve the sequence of the
+            variant, if available. Defaults to None.
+        prefix: `backend=="downloader"` only! prefix to be used by pystow for storing the data
+            on a custom directory. Defaults to None.
+        version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
+            chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
+        calculate_pchembl: calculate pChEMBL values for bioactivities reported in nM, µM or uM `standard_unit`
+            or -Log|Log `standard_type`. Defaults to False
+        backend: the backend to be used for fetching the data. If downloader, the ChEMBL sql database
+            is downloaded and extracted first. Defaults to "downloader".
+
+    Raises:
+        BioactivitiesNotFoundError: If the retrieved bioactivity dataframe is empty.
+    """
     if backend == "downloader":
-        bioactivities_df = get_full_activity_data_sql()
+        bioactivities_df = get_full_activity_data_sql(
+            molecule_chembl_ids=molecule_chembl_ids,
+            target_chembl_ids=target_chembl_ids,
+            assay_chembl_ids=assay_chembl_ids,
+            document_chembl_ids=document_chembl_ids,
+            standard_relation=standard_relation,
+            standard_type=standard_type,
+            confidence_scores=confidence_scores,
+            assay_types=assay_types,
+            chembl_version=chembl_version,
+            additional_fields=additional_fields,
+            prefix=prefix,
+            version=version,
+        )
     elif backend == "webresource":
-        bioactivities_df = get_full_activity_data()
+        bioactivities_df = get_full_activity_data(
+            molecule_chembl_ids=molecule_chembl_ids,
+            target_chembl_ids=target_chembl_ids,
+            assay_chembl_ids=assay_chembl_ids,
+            document_chembl_ids=document_chembl_ids,
+            confidence_scores=confidence_scores,
+            assay_types=assay_types,
+            chembl_version=chembl_version,
+        )
 
     if bioactivities_df.empty:
         raise BioactivitiesNotFoundError("No bioactivities found for the given query.")
+
+    return process_bioactivities(bioactivities_df, calculate_pchembl=calculate_pchembl)
