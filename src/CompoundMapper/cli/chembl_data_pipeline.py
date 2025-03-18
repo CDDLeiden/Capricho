@@ -83,7 +83,6 @@ def get_standardize_and_clean_workflow(
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
         chembl_version=chembl_version,
-        add_document_info=add_document_info,
     )
 
     todrop_cols = [  # cols that won't be used; we'll use `standard_<colname>` instead
@@ -220,7 +219,7 @@ def aggregate_data(
             `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
             if the compound is the same and the assay is the same.
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
-            regardless of the variant_sequence flag in ChEMBL. Defaults to False.
+            regardless of the mutation flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data
 
     Returns:

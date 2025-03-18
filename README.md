@@ -56,7 +56,7 @@ The other operations performed to aggregate the fetched dataset and produce the 
 |--------|-------------|---------|
 | `id_columns` | Additional columns to use as identifiers during aggregation. For example, using `assay_chembl_id` will **only** aggregate readouts if the assay reporting them is the same | `[]` |
 | `chirality` | Consider whether molecules have the same stereochemistry when aggregating repeated bioactivity measurements | `False` |
-| `aggregate_mutants` | Aggregate data on targets regardless of their variant sequence, treating mutants as the same target. Mutation data is still stored under `variant_sequence` in ChEMBL | `False` |
+| `aggregate_mutants` | Aggregate data on targets regardless of their variant sequence, treating mutants as the same target. Mutation data is still stored under `mutation` in ChEMBL | `False` |
 | `skip_not_aggregated` | Skip saving the raw data before any aggregation of repeated molecules is applied. Not-aggregated data is saved with the `_not_aggregated.csv` suffix | `False` |
 | `calculate_pchembl` | Calculate pChEMBL (pXC50) values for bioactivities reported in nM, µM or uM when not available | `False` |
 | `no_document_info` | Skip retrieving ChEMBL document info to reduce API calls. Passing this has the drawback that information such as `year` and `chembl_release` will be missing  | `False` |

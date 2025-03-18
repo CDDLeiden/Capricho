@@ -14,7 +14,7 @@ multiple_value_cols = (
     "document_chembl_id",
     "assay_tissue",
     "assay_cell_type",
-    "relationship_description",
+    "relationship_type",
     "indication_class",
     "max_phase",
     "oral",

@@ -226,9 +226,9 @@ def parse_arguments() -> argparse.Namespace:
         "--aggregate_mutants",
         action="store_true",
         help=(
-            "Aggregate data on targets regardless of the variant_sequence flag in ChEMBL, treating "
+            "Aggregate data on targets regardless of the mutation flag in ChEMBL, treating "
             "mutants as the same target. Regardless of the configuration, mutation data will be "
-            "stored under `variant_sequence`. Default is False."
+            "stored under `mutation`. Default is False."
         ),
     )
     parser.add_argument(

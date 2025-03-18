@@ -159,9 +159,9 @@ def process_repeat_mols(
         *extra_multival_cols,
     ]
     if aggregate_mutants:
-        multival_cols = [*multival_cols, "variant_sequence"]
+        multival_cols = [*multival_cols, "mutation"]
     else:
-        id_cols = [*id_cols, "variant_sequence"]
+        id_cols = [*id_cols, "mutation"]
     repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
     if pd.__version__ >= "1.5.0":
         grouped = repeat_subset.groupby(id_cols, group_keys=True)
