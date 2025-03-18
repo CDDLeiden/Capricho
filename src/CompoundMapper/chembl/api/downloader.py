@@ -19,7 +19,7 @@ PYSTOW_CONFIG = {"name": "chembl_downloader_config_{version}.json"}
 
 def _get_config_file(version: Optional[Union[int, str]] = None) -> Path:
     version = version if version is not None else latest()
-    return pystow.join(*(PYSTOW_PARTS), PYSTOW_CONFIG["name"].format(version=version))
+    return pystow.join(*(PYSTOW_PARTS), name=PYSTOW_CONFIG["name"].format(version=version))
 
 
 def check_and_download_chembl_db(
@@ -48,7 +48,9 @@ def check_and_download_chembl_db(
         configs = json.loads(config_file.read_text())
         logger.debug(f"Loaded configuration:\n{json.dumps(configs, indent=2)}")
 
-    sql_path = _find_sqlite_file(pystow.join(*(configs["prefix"]), f"{configs['version']}/data"))
+    sql_path = _find_sqlite_file(
+        pystow.join(*(configs["prefix"] or PYSTOW_PARTS), f"{configs['version']}/data")
+    )
     if not sql_path.exists():
         logger.info(f"Downloading and extracting ChEMBL version {version} into:\n\t{sql_path}")
         download_extract_sqlite(**configs)
