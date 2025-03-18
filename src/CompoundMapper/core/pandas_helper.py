@@ -125,12 +125,12 @@ def assign_stats(df: pd.DataFrame, sep=";", value_col="pchembl_value", use_geome
         df[new_cols[0]] = value_series.apply(gmean)
         df[new_cols[1]] = value_series.apply(gstd)
         df[new_cols[2]] = value_series.apply(lambda x: -np.log10(10 ** (-np.median(x))))
-        df[new_cols[4]] = value_series.apply(len)
+        df[new_cols[3]] = value_series.apply(len)
     else:
         df[new_cols[0]] = value_series.apply(np.mean)
         df[new_cols[1]] = value_series.apply(np.std)
         df[new_cols[2]] = value_series.apply(np.median)
-        df[new_cols[4]] = value_series.apply(len)
+        df[new_cols[3]] = value_series.apply(len)
     return df
 
 

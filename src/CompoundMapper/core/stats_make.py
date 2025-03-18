@@ -193,7 +193,7 @@ def process_repeat_mols(
     logger.info("Canonicalizing smiles...")
     df = df.assign(smiles=smiles_canonizer(smiles))
 
-    stats_cols = [f"pchembl_value{suffix}" for suffix in ["_mean", "_std", "_median", "_mad", "_counts"]]
+    stats_cols = [f"pchembl_value{suffix}" for suffix in ["_mean", "_std", "_median", "_counts"]]
     final_cols = [*id_cols, "smiles", *multival_cols, "might_rancemic", *stats_cols]
     final_cols.pop(final_cols.index("repeat_mapping"))  # remove repeat_mapping from final_cols
     df = (
