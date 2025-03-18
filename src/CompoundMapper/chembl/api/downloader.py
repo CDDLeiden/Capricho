@@ -70,7 +70,6 @@ def get_full_activity_data_sql(
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
     chembl_version: Optional[int] = None,
-    include_null_values: bool = False,
     additional_fields: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
@@ -92,8 +91,8 @@ def get_full_activity_data_sql(
             functional (F) data.
         chembl_version: Not to confuse for `version`. This is the ChEMBL release number used to
             filter the data. Defaults to None.
-        include_null_values: Whether to include activities with null values/relations
-        additional_fields: Optional list of additional fields to include in the query
+        additional_fields: Optional list of additional fields to include in the sql query. E.g.:
+            ["vs.sequence"], to retrieve the sequence of the variant, if available. Defaults to None.
         prefix: Optional prefix for an alternative data directory. If passed, will create
             a new configuration file under `~/.data/chembl_downloader_config_{version}.json`
             pointing to the new data directory. Defaults to None.
@@ -199,9 +198,8 @@ def get_full_activity_data_sql(
 
     fields_clause = ",\n            ".join(all_fields)
 
-    if not include_null_values:
-        where_conditions.append("act.standard_value IS NOT NULL")
-        where_conditions.append("act.standard_relation IS NOT NULL")
+    where_conditions.append("act.standard_value IS NOT NULL")
+    where_conditions.append("act.standard_relation IS NOT NULL")
 
     if standard_relation:
         relation_placeholders = ", ".join([f"'{rel}'" for rel in standard_relation])
