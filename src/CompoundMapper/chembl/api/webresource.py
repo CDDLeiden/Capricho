@@ -16,7 +16,7 @@ from ..parsing import parse_compound_response
 # source: https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/drug-and-compound-questions#:~:text=Blog%20post.-,Can%20you%20provide%20more%20details%20on%20the%20chirality%20flag%3F,-The%20chirality%20flag
 
 
-def get_document_table(document_chembl_ids: list, chembl_version: Optional[int] = None) -> pd.DataFrame:
+def get_document_table(document_chembl_ids: list) -> pd.DataFrame:
     """From a list of ChEMBL assay IDs, get the publication details.
     Args:
         assay_chembl_ids: list of ChEMBL assay IDs.
@@ -41,24 +41,32 @@ def get_document_table(document_chembl_ids: list, chembl_version: Optional[int] 
     )
     publications_details = {}
     for doc_data in documents:
+
+        if not doc_data:
+            continue
+
         authors, doi, journal, volume, year, title = None, None, None, None, None, None
         chembl_release = None
-        if doc_data:
-            document_id = doc_data.get("document_chembl_id")
-            doc_type = doc_data.get("doc_type")
-            authors = doc_data.get("authors")
-            doi = doc_data.get("doi")
-            journal = doc_data.get("journal")
-            volume = doc_data.get("volume")
-            year = doc_data.get("year")
-            title = doc_data.get("title")
-            chembl_release = doc_data.get("chembl_release")
-            if isinstance(chembl_release, dict):
-                chembl_release = chembl_release.get("chembl_release")
+        document_id = None
+        doc_type = None
 
-            if chembl_version is not None:
-                if chembl_release is None or int(chembl_release.split("_")[1]) > chembl_version:
-                    continue
+        document_id = doc_data.get("document_chembl_id")
+        if not document_id:  # Skip if no document ID
+            continue
+
+        doc_type = doc_data.get("doc_type")
+        authors = doc_data.get("authors")
+        doi = doc_data.get("doi")
+        journal = doc_data.get("journal")
+        volume = doc_data.get("volume")
+        year = doc_data.get("year")
+        title = doc_data.get("title")
+        chembl_release = doc_data.get("chembl_release")
+
+        # Handle nested structure:
+        # {'chembl_release': 'CHEMBL_7', 'creation_date': '2010-09-29'}
+        if isinstance(chembl_release, dict):
+            chembl_release = chembl_release.get("chembl_release")
 
         publications_details[document_id] = {
             "doc_type": doc_type,
@@ -346,7 +354,12 @@ def get_full_activity_data(
     if any([chembl_version is not None, add_document_info]):
         document_ids = full_df["document_chembl_id"].unique().tolist()
         logger.info("Fetching publication details for the documents.")
-        publications_df = get_document_table(document_ids, chembl_version)
-        full_df = pd.merge(full_df, publications_df, on="document_chembl_id", how="left")
+        publications_df = get_document_table(document_ids)
+        full_df = (
+            pd.merge(full_df, publications_df, on="document_chembl_id", how="left")
+            .assign(chembl_release=lambda x: x.chembl_release.str.replace("CHEMBL_", "").astype(int))
+            .query(f"chembl_release <= {chembl_version}")
+            .reset_index(drop=True)
+        )
 
     return full_df
