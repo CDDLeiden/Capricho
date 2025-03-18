@@ -178,7 +178,6 @@ def get_full_activity_data_sql(
         # "cs.parent_molregno",
         "act.data_validity_comment",
         "act.potential_duplicate",
-        "act.data_validity_comment",
         "d.chembl_id AS document_chembl_id",
         "d.doc_type",
         "d.authors",
