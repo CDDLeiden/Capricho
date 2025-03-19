@@ -1,13 +1,13 @@
 from inspect import signature
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..chembl.exceptions import BioactivitiesNotFoundError
-from ..chembl.processing import get_and_filter_bioactivity_workflow
+from ..chembl.processing import get_bioactivities_workflow
 from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
@@ -26,11 +26,12 @@ def get_standardize_and_clean_workflow(
     bioactivity_type: list[str],
     standard_relation: list[str],  # TODO: later support data with  >, <, >=, <=...
     assay_types: list[str],
-    chembl_version: int,
-    save_not_aggregated: bool,
+    chembl_release: Optional[int],
+    save_not_aggregated: bool = True,
     save_duplicated: bool = False,
-    add_document_info: bool = True,
-    drop_unassigned_chiral=False,
+    drop_unassigned_chiral: bool = False,
+    version: Optional[Union[int, str]] = None,
+    backend: Literal["downloader", "webresource"] = "downloader",
 ) -> None:
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -49,13 +50,14 @@ def get_standardize_and_clean_workflow(
         bioactivity_type: list of bioactivity types (assay-related) to filter data from
         standard_relation: standard relation to filter data from. Currently only supports "="
             Defaults to "=".
-        chembl_version: latest ChEMBL release to retrieve data from
+        chembl_release: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
         save_duplicated: whether to save the duplicated data (if any) to a separate csv file
-        add_document_info: whether to add publication-related fields to the final DataFrame. Setting
-            to True, will require one less query to be made to ChEMBL, but fields like `year` will be
-            lacking. Defaults to True.
         drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
+        version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
+            chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
+        backend: the backend to be used for fetching the data. If downloader, the ChEMBL sql database
+            is downloaded and extracted first. Defaults to "downloader".
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -64,14 +66,17 @@ def get_standardize_and_clean_workflow(
         if isinstance(output_path, str):
             output_path = Path(output_path)
 
-    # since we work with pchembl values, standard values reported as -pXC50, -Log XC50, etc. will be renamed
-    bioactivity_type_rename_dict = {
-        **{f"p{bio}": bio for bio in bioactivity_type},
-        **{f"Log {bio}": bio for bio in bioactivity_type},
-        **{f"-Log {bio}": bio for bio in bioactivity_type},
-    }
+    # -log | log transformed values reported as Log XC50, -Log XC50, etc, might not
+    # have a pchembl value, but *could* still be used.  If standard_type contains `Log`,
+    # the standard_value will be transferred to pchembl_value.
+    if calculate_pchembl:
+        biotypes = []
+        for act in bioactivity_type:
+            biotypes.extend([f"Log {act}", f"-Log {act}", act])
+    else:
+        biotypes = bioactivity_type
 
-    full_df = get_and_filter_bioactivity_workflow(
+    full_df = get_bioactivities_workflow(
         molecule_chembl_ids=molecule_ids,
         target_chembl_ids=target_ids,
         assay_chembl_ids=assay_ids,
@@ -79,12 +84,23 @@ def get_standardize_and_clean_workflow(
         confidence_scores=confidence_scores,
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
-        chembl_version=chembl_version,
-        add_document_info=add_document_info,
+        chembl_release=chembl_release,
+        version=version,
+        backend=backend,
     )
 
+    todrop_cols = [  # cols that won't be used; we'll use `standard_<colname>` instead
+        "type",
+        "relation",
+        "units",
+        "value",
+        "standard_value",  # we'll use pchembl instead
+        "type",
+        # "description",
+    ]
+
     logger.debug(f"All fetched bioactivity types: {full_df.standard_type.unique().tolist()}")
-    logger.debug(f"Keeping only: {bioactivity_type_rename_dict.keys()}")
+    logger.debug(f"Keeping only: {biotypes}")
 
     # drop rows without chemical structures
     no_smiles_mask = full_df.canonical_smiles.isna()
@@ -95,10 +111,7 @@ def get_standardize_and_clean_workflow(
 
     stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
     queried_df = (
-        full_df.assign(  # rename bioactivities & filter by preferred bioactivity type
-            standard_type=lambda x: x["standard_type"].replace(bioactivity_type_rename_dict)
-        )
-        .query("standard_type.isin(@bioactivity_type)")
+        full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string
         .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
         .dropna(subset=["standard_smiles"])  # drop if no structure is found
@@ -106,18 +119,7 @@ def get_standardize_and_clean_workflow(
         .assign(final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures))
         .drop(columns="standard_smiles")
         .rename(columns={"final_smiles": "standard_smiles"})
-        # Drop cols that won't be used; we'll use `standard_<colname>` instead
-        .drop(
-            columns=[
-                "type",
-                "relation",
-                "units",
-                "value",
-                "standard_value",  # we'll use pchembl instead
-                "type",
-                # "description",
-            ]
-        )
+        .drop(columns=[c for c in todrop_cols if c in full_df.columns])
         .reset_index(drop=True)
         .copy()
     )
@@ -196,7 +198,6 @@ def get_standardize_and_clean_workflow(
 def aggregate_data(
     df,
     chirality: bool,
-    chembl_version: int,
     metadata_cols: list[str] = [],
     extra_id_cols: list[str] = [],
     aggregate_mutants: bool = False,
@@ -214,14 +215,13 @@ def aggregate_data(
 
         df: dataframe output from `CompoundMapper.cli.workflow.fetch_standardize_and_clean_workflow`
         chirality: toggle chiral-sensitive fingerprints for identifying same molecules
-        chembl_version: latest ChEMBL release to retrieve data from
         metadata_cols: additional metadata columns to keep in the final dataframe. Metadata will
             be saved separated by a semicolon whenever aggregation is performed.
         extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
             `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
             if the compound is the same and the assay is the same.
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
-            regardless of the variant_sequence flag in ChEMBL. Defaults to False.
+            regardless of the mutation flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data
 
     Returns:
@@ -233,10 +233,7 @@ def aggregate_data(
     df = df.assign(fps=fps)
     repeats_idxs = repeated_indices_from_array_series(df["fps"])
 
-    if chembl_version is not None:
-        include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *metadata_cols]
-    else:
-        include_metadata = metadata_cols
+    include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *metadata_cols]
 
     final_data = process_repeat_mols(
         df,

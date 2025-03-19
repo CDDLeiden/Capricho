@@ -1,6 +1,13 @@
 """Module to test the workflow functions within /cli. To reproduce the same data found in test/resources, run:
 
-`getchembl -tids CHEMBL256 -o ADORA3_data.csv -c 7 8 9 -biotype Ki -chiral -v 28 -noaggr`
+getchembl --target-ids CHEMBL256 \
+    --output-path ADORA3_data.csv \
+    --bioactivity-type Ki \
+    --chirality \
+    --log-level debug \
+    --chembl-release 28 \
+    --chembl-version 35 \
+    --chembl-backend downloader
 """
 
 import tempfile
@@ -23,7 +30,6 @@ class TestFetchFromChEMBL(unittest.TestCase):
         aggr_df = aggregate_data(
             self.not_aggr_df,
             chirality=True,
-            chembl_version=28,
             metadata_cols=[],
             output_path=None,
         )

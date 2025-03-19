@@ -2,9 +2,14 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
+from chembl_downloader import latest
+
 from .. import __version__
+from ..chembl.api.downloader import check_and_download_chembl_db
+from ..chembl.api.sql_explorer import explorer_main
 from ..logger import logger, setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
@@ -21,34 +26,118 @@ DEFAULTS = {
     "standard_relation": ["="],
     "assay_types": ["B", "F"],
     "log_level": "info",
-    "chembl_version": None,
-    "no_document_info": False,
+    "chembl_release": None,
     "metadata_columns": [],
     "id_columns": [],
     "skip_not_aggregated": False,
     "aggregate_mutants": False,
-    "save_recipe": True,
+    "skip_recipe": True,
     "drop_unassigned_chiral": False,
+    "chembl_backend": "downloader",
+    "chembl_version": None,
 }
 
 STORE_TRUE_ARGS = [
     "calculate_pchembl",
     "chirality",
-    "no_document_info",
     "skip_not_aggregated",
     "aggregate_mutants",
     "drop_unassigned_chiral",
 ]
 
+STORE_FALSE_ARGS = ["skip_recipe"]
+
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="ChEMBL fetcher",
+        prog="CompoundMapper",
         description="A command line interface to filter, download and process data from ChEMBL.",
     )
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+    # Explore the downloaded ChEMBL SQL database
+    explore_parser = subparsers.add_parser(
+        "explore",
+        help=(
+            "Explore the ChEMBL SQL database downloaded using chembl_downloader. For a visual "
+            "inspection of the latest ChEMBL schema, consider checking: https://www.ebi.ac.uk/chembl/db_schema"
+        ),
+    )
+    explore_parser.add_argument(
+        "--version",
+        "-v",
+        required=False,
+        help="ChEMBL version to use. If not provided, will use the latest version.",
+        type=int,
+    )
+    explore_parser.add_argument(
+        "--list-tables",
+        "-list",
+        dest="list_tables",
+        action="store_true",
+        help="List all tables within the SQL database and exit.",
+    )
+    explore_parser.add_argument(
+        "--table",
+        "-t",
+        help="Explore a specific table",
+    )
+    explore_parser.add_argument(
+        "--search-column",
+        "-search",
+        dest="search_column",
+        help="Search for tables containing column name pattern.",
+    )
+    explore_parser.add_argument(
+        "--query",
+        "-q",
+        help="Run a custom SQL query",
+    )
+    explore_parser.add_argument(
+        "-log",
+        "--log-level",
+        dest="log_level",
+        default=DEFAULTS["log_level"],
+        choices=["trace", "debug", "info", "warning", "error", "critical"],
+        help="Set the logging level. Defaults to info",
+    )
+
+    # Download ChEMBL SQL database using chembl_downloader
+    download_parser = subparsers.add_parser(
+        "download", help="Download ChEMBL SQL database using chembl_downloader."
+    )
+    download_parser.add_argument(
+        "--version",
+        "-v",
+        dest="version",
+        help="ChEMBL version download and extract. If not provided, will use the latest version.",
+        default=None,
+        type=int,
+    )
+    download_parser.add_argument(
+        "--prefix",
+        "-p",
+        dest="prefix",
+        help=(
+            "Path to be used by pystow to store the data. If a custom prefix is passed, a config.json "
+            "will created under `~/.data/` pointing to the custom path whenever the same ChEMBL version "
+            "(--version) is referred to. Defaults to None, saving under `~/.data/chembl/."
+        ),
+        nargs="*",
+        default=None,
+        type=str,
+    )
+    download_parser.add_argument(
+        "-log",
+        "--log-level",
+        dest="log_level",
+        default=DEFAULTS["log_level"],
+        choices=["trace", "debug", "info", "warning", "error", "critical"],
+        help="Set the logging level. Defaults to info",
+    )
+
     parser.add_argument(
         "-mids",
-        "--molecule_ids",
+        "--molecule-ids",
         dest="molecule_ids",
         nargs="*",
         required=False,
@@ -57,7 +146,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-tids",
-        "--target_ids",
+        "--target-ids",
         dest="target_ids",
         nargs="*",
         required=False,
@@ -66,7 +155,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-asids",
-        "--assay_ids",
+        "--assay-ids",
         dest="assay_ids",
         nargs="*",
         required=False,
@@ -75,7 +164,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-dids",
-        "--document_ids",
+        "--document-ids",
         dest="document_ids",
         nargs="*",
         required=False,
@@ -84,7 +173,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-calc",
-        "--calculate_pchembl",
+        "--calculate-pchembl",
         action="store_true",
         help=(
             "Calculate the pChEMBL (pXC50) values when not reported for bioactivities "
@@ -93,7 +182,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-o",
-        "--output_path",
+        "--output-path",
         type=str,
         help=(
             "Path to save the output files. If not provided, "
@@ -103,7 +192,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-c",
-        "--confidence_scores",
+        "--confidence-scores",
         dest="confidence_scores",
         nargs="*",
         required=False,
@@ -116,7 +205,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-biotype",
-        "--bioactivity_type",
+        "--bioactivity-type",
         dest="bioactivity_type",
         help=(
             "Type of bioactivity to filter. If left empty, will fetch for all types. "
@@ -149,7 +238,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-rel",
-        "--standard_relation",
+        "--standard-relation",
         nargs="*",
         default=DEFAULTS["standard_relation"],
         help=("Filter only bioactivities with the specified relation. Not implemented yet."),
@@ -157,7 +246,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-at",
-        "--assay_types",
+        "--assay-types",
         nargs="*",
         default=DEFAULTS["assay_types"],
         help=(
@@ -172,32 +261,18 @@ def parse_arguments() -> argparse.Namespace:
         dest="log_level",
         default=DEFAULTS["log_level"],
         choices=["trace", "debug", "info", "warning", "error", "critical"],
-        help=(
-            "Set the logging level. Defaults to info. "
-            "Choose between: info, debug, warning, error, critical."
-        ),
-        type=str,
+        help="Set the logging level. Defaults to info",
     )
     parser.add_argument(
-        "-v",
-        "--chembl_version",
+        "-cr",
+        "--chembl-release",
         type=int,
-        help="chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.",
-        default=DEFAULTS["chembl_version"],
+        help="chembl_release: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.",
+        default=DEFAULTS["chembl_release"],
     )
-    parser.add_argument(
-        "-nodoc",
-        "--no_document_info",
-        action="store_true",
-        help=(
-            "If passed, document information won't be included in the retrieved dataset. For example, "
-            "year metadata will be missing, but requires one less API call. Defaults to False."
-        ),
-    )
-
     parser.add_argument(
         "-mcols",
-        "--metadata_columns",
+        "--metadata-columns",
         nargs="*",
         default=DEFAULTS["metadata_columns"],
         help="Extra metadata columns to keep in the final dataframe, aggregated by ';'. Defaults to [].",
@@ -205,7 +280,7 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-idcols",
-        "--id_columns",
+        "--id-columns",
         nargs="*",
         default=DEFAULTS["id_columns"],
         help=(
@@ -217,30 +292,56 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-skip_agg",
-        "--skip_not_aggregated",
+        "--skip-not-aggregated",
         action="store_true",
         help="Skips saving the data before aggregation of same-molecule datapoint takes place.",
     )
     parser.add_argument(
         "-mutagg",
-        "--aggregate_mutants",
+        "--aggregate-mutants",
         action="store_true",
         help=(
-            "Aggregate data on targets regardless of the variant_sequence flag in ChEMBL, treating "
+            "Aggregate data on targets regardless of the mutation flag in ChEMBL, treating "
             "mutants as the same target. Regardless of the configuration, mutation data will be "
-            "stored under `variant_sequence`. Default is False."
+            "stored under `mutation`. Default is False."
         ),
     )
     parser.add_argument(
         "-rec",
-        "--save_recipe",
+        "--skip-recipe",
+        dest="skip_recipe",
         help=(
             "Saves a json file with the parameters used to fetch the data. Useful for reproducibility. "
             "The file will be saved with the asme output path, but with the `_recipe.json` suffix."
             "Defaults to True."
         ),
-        default=True,
-        type=bool,
+        action="store_false",
+    )
+    parser.add_argument(
+        "-back",
+        "--chembl-backend",
+        dest="chembl_backend",
+        help=(
+            "Choose the backend to use for interacting with the ChEMBL database. Options are 'webresource' "
+            "and 'downloader'. If 'downloader' is used, the sql data will be downloaded using chembl_downloader. "
+            "Using webresource will fetch the data using the ChEMBL webresource client instead, not requiring "
+            "the download of the SQL database, but will be slower due to API requests. Defaults to 'downloader'."
+        ),
+        choices=["webresource", "downloader"],
+        default=DEFAULTS["chembl_backend"],
+        type=str,
+    )
+    parser.add_argument(
+        "-v",
+        "--chembl-version",
+        dest="chembl_version",
+        help=(
+            "Not to be confused for the --chembl-release argument. Version of the ChEMBL database to be "
+            "used by chembl_downloader. Only used when `backend=='downloader'`. If left as default, the "
+            "latest version available will be used. Defaults to None."
+        ),
+        default=DEFAULTS["chembl_version"],
+        type=str,
     )
 
     return parser.parse_args()
@@ -248,10 +349,24 @@ def parse_arguments() -> argparse.Namespace:
 
 def main(args: argparse.Namespace) -> None:
 
+    setup_logger(level=args.log_level.upper())
+
+    if args.command:
+        if args.command == "download":
+            check_and_download_chembl_db(prefix=args.prefix, version=args.version)
+        elif args.command == "explore":
+            explorer_main(
+                version=args.version,
+                list_tables=args.list_tables,
+                table=args.table,
+                search_column=args.search_column,
+                query=args.query,
+            )
+        sys.exit(0)
+
     if args.standard_relation != ["="]:
         raise NotImplementedError("Fetching data using different relation types isn't implemented yet.")
 
-    setup_logger(level=args.log_level.upper())
     output_path = Path(args.output_path)
     if not output_path.parent.exists():
         output_path.mkdir()
@@ -275,16 +390,16 @@ def main(args: argparse.Namespace) -> None:
         bioactivity_type=args.bioactivity_type,
         standard_relation=args.standard_relation,
         assay_types=args.assay_types,
-        chembl_version=args.chembl_version,
+        chembl_release=args.chembl_release,
         save_not_aggregated=(not args.skip_not_aggregated),
-        add_document_info=(not args.no_document_info),
         drop_unassigned_chiral=args.drop_unassigned_chiral,
+        version=args.chembl_version,
+        backend=args.chembl_backend,
     )
 
     df = aggregate_data(
         df=df,
         chirality=args.chirality,
-        chembl_version=args.chembl_version,
         metadata_cols=args.metadata_columns,
         extra_id_cols=args.id_columns,
         aggregate_mutants=args.aggregate_mutants,
@@ -292,22 +407,31 @@ def main(args: argparse.Namespace) -> None:
     )
 
     # Save the recipe
-    if args.save_recipe:
+    if not args.skip_recipe:
         output_name = output_path.stem
         recipe_path = output_path.parent / f"{output_name}_recipe.json"
 
         configs = vars(args)
         command_vals = []
         for k, v in configs.items():
-            if isinstance(v, bool):
-                if DEFAULTS[k] != v:
-                    command_vals.append((f"--{k}" if k in STORE_TRUE_ARGS else f"--{k} {v}"))
+
+            save_k = k.replace("_", "-")  # same format as the command line
+
+            if k in ["chembl_release", "chembl_version"]:
+                if v is not None:
+                    command_vals.append((f"--{save_k} {v}"))
+                else:  # safe to assume latest version; if None, chembl_downloader gets latest
+                    command_vals.append(f"--{save_k} {latest()}")
+
+            elif isinstance(v, bool):
+                if DEFAULTS[k] is not v:
+                    command_vals.append((f"--{save_k}" if k in STORE_TRUE_ARGS else f"--{k} {v}"))
             elif isinstance(v, list):
                 if DEFAULTS[k] != v:
-                    command_vals.append(f"--{k} {' '.join([str(i) for i in v])}")
+                    command_vals.append(f"--{save_k} {' '.join([str(i) for i in v])}")
             elif isinstance(v, str):
                 if DEFAULTS[k] != v:
-                    command_vals.append(f"--{k} {v}")
+                    command_vals.append(f"--{save_k} {v}")
 
         command = "getchembl " + " ".join(command_vals)
         configs.update({"CompoundMapper version": __version__})
