@@ -150,28 +150,44 @@ def explore_table(conn, table_name):
         print(f"Error exploring table {table_name}: {str(e)}")
 
 
-def explorer_main(args):
-    configs = check_and_download_chembl_db(version=args.version)
+def explorer_main(
+    version: str | int | None = None,
+    list_tables: bool = False,
+    table: str = None,
+    search_column: str = None,
+    query: str = None,
+):
+    """Main function for the ChEMBL schema explorer. This function is called by the CLI script.
+    For a visual overview of the lastest ChEMBL database schema, consider checking the official
+    ChEMBL schema diagram: https://www.ebi.ac.uk/chembl/db_schema
+
+    Args:
+        list_tables: list all tables in the database and exit. Defaults to False.
+        table: explore a specific table. Defaults to None.
+        search_column: search for columns containing a specific pattern. Defaults to None.
+        query: execute a custom SQL query. Defaults to None.
+    """
+    configs = check_and_download_chembl_db(version=version)
     with chembl_downloader.connect(version=configs["version"], prefix=configs["prefix"]) as conn:
-        if args.list_tables:
+        if list_tables:
             tables_df = list_all_tables(conn)
             print("\nTABLES IN CHEMBL DATABASE:")
             print(tabulate(tables_df, headers="keys", tablefmt="psql", showindex=False))
 
-        elif args.table:
-            explore_table(conn, args.table)
+        elif table:
+            explore_table(conn, table)
 
-        elif args.search_column:
-            results = search_tables_for_column(conn, args.search_column)
+        elif search_column:
+            results = search_tables_for_column(conn, search_column)
             if results:
-                print(f"\nTables containing columns matching '{args.search_column}':")
+                print(f"\nTables containing columns matching '{search_column}':")
                 print(tabulate(pd.DataFrame(results), headers="keys", tablefmt="psql", showindex=False))
             else:
-                print(f"No columns found matching '{args.search_column}'")
+                print(f"No columns found matching '{search_column}'")
 
-        elif args.query:
+        elif query:
             try:
-                result = pd.read_sql(args.query, conn)
+                result = pd.read_sql(query, conn)
                 print("\nQuery Result:")
                 print(tabulate(result, headers="keys", tablefmt="psql"))
             except Exception as e:

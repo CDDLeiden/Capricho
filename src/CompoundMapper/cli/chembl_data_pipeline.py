@@ -1,6 +1,6 @@
 from inspect import signature
 from pathlib import Path
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -30,6 +30,8 @@ def get_standardize_and_clean_workflow(
     save_not_aggregated: bool = True,
     save_duplicated: bool = False,
     drop_unassigned_chiral: bool = False,
+    version: Optional[Union[int, str]] = None,
+    backend: Literal["downloader", "webresource"] = "downloader",
 ) -> None:
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -52,6 +54,10 @@ def get_standardize_and_clean_workflow(
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
         save_duplicated: whether to save the duplicated data (if any) to a separate csv file
         drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
+        version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
+            chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
+        backend: the backend to be used for fetching the data. If downloader, the ChEMBL sql database
+            is downloaded and extracted first. Defaults to "downloader".
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -79,6 +85,8 @@ def get_standardize_and_clean_workflow(
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
         chembl_release=chembl_release,
+        version=version,
+        backend=backend,
     )
 
     todrop_cols = [  # cols that won't be used; we'll use `standard_<colname>` instead
