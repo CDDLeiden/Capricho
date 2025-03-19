@@ -41,23 +41,21 @@ def check_and_download_chembl_db(
     # if present, config file override the default path, unless a prefix is defined
     version = version if version is not None else latest()
     config_file = _get_config_file(version)
-    configs = {"prefix": (prefix if prefix is not None else prefix), "version": version}
+    configs = {"prefix": (prefix if prefix is not None else PYSTOW_PARTS), "version": version}
 
     if config_file.exists():  # only exists if that version was downloaded to custom path before
-        logger.info(f"Loading ChEMBL configuration from:\n\t{config_file}")
+        logger.info(f"Loaded ChEMBL configuration from:\n\t{config_file}")
         configs = json.loads(config_file.read_text())
-        logger.debug(f"Loaded configuration:\n{json.dumps(configs, indent=2)}")
+        logger.debug(f"configuration:\n{json.dumps(configs, indent=2)}")
 
-    sql_path = _find_sqlite_file(
-        pystow.join(*(configs["prefix"] or PYSTOW_PARTS), f"{configs['version']}/data")
-    )
-    if not sql_path.exists():
-        logger.info(f"Downloading and extracting ChEMBL version {version} into:\n\t{sql_path}")
-        download_extract_sqlite(**configs)
+    sql_path = _find_sqlite_file(pystow.join(*(configs["prefix"]), f"{configs['version']}"))
+    if sql_path is None:
+        logger.info(f"Downloading and extracting ChEMBL version {version}...")
+        download_extract_sqlite(version=str(version), prefix=(configs["prefix"] or PYSTOW_PARTS))
         if prefix is not None:
             config_file.write_text(json.dumps(configs, indent=2))
     else:
-        logger.info(f"Loading local ChEMBL database at:\n\t{sql_path}")
+        logger.info(f"Loaded local ChEMBL database at:\n\t{sql_path}")
 
     return configs
 

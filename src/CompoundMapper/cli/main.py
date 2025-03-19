@@ -2,9 +2,12 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from .. import __version__
+from ..chembl.api.downloader import check_and_download_chembl_db
+from ..chembl.api.sql_explorer import explorer_main
 from ..logger import logger, setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
@@ -43,9 +46,82 @@ STORE_TRUE_ARGS = [
 
 def parse_arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="ChEMBL fetcher",
+        prog="CompoundMapper",
         description="A command line interface to filter, download and process data from ChEMBL.",
     )
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+    # Explore the downloaded ChEMBL SQL database
+    explore_parser = subparsers.add_parser("explore", help="Explore the ChEMBL SQL database")
+    explore_parser.add_argument(
+        "--version",
+        "-v",
+        required=False,
+        help="ChEMBL version to use. If not provided, will use the latest version.",
+        type=int,
+    )
+    explore_parser.add_argument(
+        "--list-tables",
+        "-list",
+        dest="list_tables",
+        action="store_true",
+        help="List all tables within the SQL database and exit.",
+    )
+    explore_parser.add_argument(
+        "--table",
+        "-t",
+        help="Explore a specific table",
+    )
+    explore_parser.add_argument(
+        "--search-column",
+        "-search",
+        dest="search_column",
+        help="Search for tables containing column name pattern.",
+    )
+    explore_parser.add_argument(
+        "--query",
+        "-q",
+        help="Run a custom SQL query",
+    )
+    explore_parser.add_argument(
+        "-log",
+        "--log-level",
+        dest="log_level",
+        default=DEFAULTS["log_level"],
+        choices=["trace", "debug", "info", "warning", "error", "critical"],
+        help="Set the logging level. Defaults to info",
+    )
+
+    # Download ChEMBL SQL database using chembl_downloader
+    download_parser = subparsers.add_parser("download", help="Download ChEMBL SQL database")
+    download_parser.add_argument(
+        "--version",
+        "-v",
+        dest="version",
+        help="ChEMBL version download and extract. If not provided, will use the latest version.",
+        default=None,
+        type=int,
+    )
+    download_parser.add_argument(
+        "--prefix",
+        "-p",
+        dest="prefix",
+        help=(
+            "Path to be used by pystow to store the data. If a custom prefix is passed, a config.json "
+            "will created under `~/.data/` pointing to the correct path. Defaults to 'chembl'."
+        ),
+        nargs="*",
+        default=None,
+        type=str,
+    )
+    download_parser.add_argument(
+        "-log",
+        "--log-level",
+        dest="log_level",
+        default=DEFAULTS["log_level"],
+        choices=["trace", "debug", "info", "warning", "error", "critical"],
+        help="Set the logging level. Defaults to info",
+    )
+
     parser.add_argument(
         "-mids",
         "--molecule_ids",
@@ -172,11 +248,7 @@ def parse_arguments() -> argparse.Namespace:
         dest="log_level",
         default=DEFAULTS["log_level"],
         choices=["trace", "debug", "info", "warning", "error", "critical"],
-        help=(
-            "Set the logging level. Defaults to info. "
-            "Choose between: info, debug, warning, error, critical."
-        ),
-        type=str,
+        help="Set the logging level. Defaults to info",
     )
     parser.add_argument(
         "-v",
@@ -248,10 +320,18 @@ def parse_arguments() -> argparse.Namespace:
 
 def main(args: argparse.Namespace) -> None:
 
+    setup_logger(level=args.log_level.upper())
+
+    if args.command:
+        if args.command == "download":
+            check_and_download_chembl_db(prefix=args.prefix, version=args.version)
+        elif args.command == "explore":
+            explorer_main(args)
+        sys.exit(0)
+
     if args.standard_relation != ["="]:
         raise NotImplementedError("Fetching data using different relation types isn't implemented yet.")
 
-    setup_logger(level=args.log_level.upper())
     output_path = Path(args.output_path)
     if not output_path.parent.exists():
         output_path.mkdir()

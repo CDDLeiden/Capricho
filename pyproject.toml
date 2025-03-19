@@ -22,6 +22,7 @@ dependencies = [
   "chem-filters @ git+https://github.com/David-Araripe/chemFilters.git",
   "chembl_webresource_client",
   "chembl_downloader",
+  "tabulate",
   "pandas",
   "numpy",
   "loguru",
