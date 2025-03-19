@@ -51,7 +51,11 @@ def check_and_download_chembl_db(
     sql_path = _find_sqlite_file(pystow.join(*(configs["prefix"]), f"{configs['version']}"))
     if sql_path is None:
         logger.info(f"Downloading and extracting ChEMBL version {version}...")
-        download_extract_sqlite(version=str(version), prefix=(configs["prefix"] or PYSTOW_PARTS))
+        rv = download_extract_sqlite(version=str(version), prefix=(configs["prefix"] or PYSTOW_PARTS))
+        tar_path = rv.parents[3] / f"chembl_{version}_sqlite.tar.gz"
+        if tar_path.exists():
+            logger.info(f"Removing downloaded tarball: {tar_path}")
+            tar_path.unlink()
         if prefix is not None:
             config_file.write_text(json.dumps(configs, indent=2))
     else:
