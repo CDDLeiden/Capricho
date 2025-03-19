@@ -24,8 +24,7 @@ DEFAULTS = {
     "standard_relation": ["="],
     "assay_types": ["B", "F"],
     "log_level": "info",
-    "chembl_version": None,
-    "no_document_info": False,
+    "chembl_release": None,
     "metadata_columns": [],
     "id_columns": [],
     "skip_not_aggregated": False,
@@ -37,7 +36,6 @@ DEFAULTS = {
 STORE_TRUE_ARGS = [
     "calculate_pchembl",
     "chirality",
-    "no_document_info",
     "skip_not_aggregated",
     "aggregate_mutants",
     "drop_unassigned_chiral",
@@ -252,21 +250,11 @@ def parse_arguments() -> argparse.Namespace:
     )
     parser.add_argument(
         "-v",
-        "--chembl_version",
+        "--chembl_release",
         type=int,
-        help="chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.",
-        default=DEFAULTS["chembl_version"],
+        help="chembl_release: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.",
+        default=DEFAULTS["chembl_release"],
     )
-    parser.add_argument(
-        "-nodoc",
-        "--no_document_info",
-        action="store_true",
-        help=(
-            "If passed, document information won't be included in the retrieved dataset. For example, "
-            "year metadata will be missing, but requires one less API call. Defaults to False."
-        ),
-    )
-
     parser.add_argument(
         "-mcols",
         "--metadata_columns",
@@ -302,6 +290,17 @@ def parse_arguments() -> argparse.Namespace:
             "mutants as the same target. Regardless of the configuration, mutation data will be "
             "stored under `mutation`. Default is False."
         ),
+    )
+    parser.add_argument(
+        "-rec",
+        "--save_recipe",
+        help=(
+            "Saves a json file with the parameters used to fetch the data. Useful for reproducibility. "
+            "The file will be saved with the asme output path, but with the `_recipe.json` suffix."
+            "Defaults to True."
+        ),
+        default=True,
+        type=bool,
     )
     parser.add_argument(
         "-rec",
@@ -355,16 +354,15 @@ def main(args: argparse.Namespace) -> None:
         bioactivity_type=args.bioactivity_type,
         standard_relation=args.standard_relation,
         assay_types=args.assay_types,
-        chembl_version=args.chembl_version,
+        chembl_release=args.chembl_release,
         save_not_aggregated=(not args.skip_not_aggregated),
-        add_document_info=(not args.no_document_info),
         drop_unassigned_chiral=args.drop_unassigned_chiral,
     )
 
     df = aggregate_data(
         df=df,
         chirality=args.chirality,
-        chembl_version=args.chembl_version,
+        chembl_release=args.chembl_release,
         metadata_cols=args.metadata_columns,
         extra_id_cols=args.id_columns,
         aggregate_mutants=args.aggregate_mutants,

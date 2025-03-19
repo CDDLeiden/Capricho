@@ -26,11 +26,10 @@ def get_standardize_and_clean_workflow(
     bioactivity_type: list[str],
     standard_relation: list[str],  # TODO: later support data with  >, <, >=, <=...
     assay_types: list[str],
-    chembl_version: int,
-    save_not_aggregated: bool,
+    chembl_release: Optional[int],
+    save_not_aggregated: bool = True,
     save_duplicated: bool = False,
-    add_document_info: bool = True,
-    drop_unassigned_chiral=False,
+    drop_unassigned_chiral: bool = False,
 ) -> None:
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -49,12 +48,9 @@ def get_standardize_and_clean_workflow(
         bioactivity_type: list of bioactivity types (assay-related) to filter data from
         standard_relation: standard relation to filter data from. Currently only supports "="
             Defaults to "=".
-        chembl_version: latest ChEMBL release to retrieve data from
+        chembl_release: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
         save_duplicated: whether to save the duplicated data (if any) to a separate csv file
-        add_document_info: whether to add publication-related fields to the final DataFrame. Setting
-            to True, will require one less query to be made to ChEMBL, but fields like `year` will be
-            lacking. Defaults to True.
         drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
 
     Returns:
@@ -82,7 +78,7 @@ def get_standardize_and_clean_workflow(
         confidence_scores=confidence_scores,
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
-        chembl_version=chembl_version,
+        chembl_release=chembl_release,
     )
 
     todrop_cols = [  # cols that won't be used; we'll use `standard_<colname>` instead
@@ -194,7 +190,6 @@ def get_standardize_and_clean_workflow(
 def aggregate_data(
     df,
     chirality: bool,
-    chembl_version: int,
     metadata_cols: list[str] = [],
     extra_id_cols: list[str] = [],
     aggregate_mutants: bool = False,
@@ -212,7 +207,6 @@ def aggregate_data(
 
         df: dataframe output from `CompoundMapper.cli.workflow.fetch_standardize_and_clean_workflow`
         chirality: toggle chiral-sensitive fingerprints for identifying same molecules
-        chembl_version: latest ChEMBL release to retrieve data from
         metadata_cols: additional metadata columns to keep in the final dataframe. Metadata will
             be saved separated by a semicolon whenever aggregation is performed.
         extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
@@ -231,10 +225,7 @@ def aggregate_data(
     df = df.assign(fps=fps)
     repeats_idxs = repeated_indices_from_array_series(df["fps"])
 
-    if chembl_version is not None:
-        include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *metadata_cols]
-    else:
-        include_metadata = metadata_cols
+    include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *metadata_cols]
 
     final_data = process_repeat_mols(
         df,

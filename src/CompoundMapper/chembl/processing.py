@@ -117,7 +117,7 @@ def get_bioactivities_workflow(
     standard_type: Optional[List[str]] = None,
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
-    chembl_version: Optional[int] = None,
+    chembl_release: Optional[int] = None,
     additional_fields: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
@@ -154,7 +154,7 @@ def get_bioactivities_workflow(
             Defaults to (9, 8).
         assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
             functional (F) data.
-        chembl_version: Not to confuse for `version`. This is the ChEMBL release number used to
+        chembl_release: Not to confuse for `version`. This is the ChEMBL release number used to
             filter the data. Defaults to None.
         additional_fields: `backend=="downloader"` only! "Optional list of additional fields to
             include in the sql query. E.g.: ["vs.sequence"], to retrieve the sequence of the
@@ -181,7 +181,7 @@ def get_bioactivities_workflow(
             standard_type=standard_type,
             confidence_scores=confidence_scores,
             assay_types=assay_types,
-            chembl_version=chembl_version,
+            chembl_release=chembl_release,
             additional_fields=additional_fields,
             prefix=prefix,
             version=version,
@@ -194,7 +194,7 @@ def get_bioactivities_workflow(
             document_chembl_ids=document_chembl_ids,
             confidence_scores=confidence_scores,
             assay_types=assay_types,
-            chembl_version=chembl_version,
+            chembl_release=chembl_release,
         ).sort_values(by=["molecule_chembl_id", "activity_id", "standard_value"])
 
     if bioactivities_df.empty:

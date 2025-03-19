@@ -38,7 +38,7 @@ Once you have the starting point, additional parameters can be passed to filter 
 | `confidence_scores` | Confidence scores for filtering bioactivities | [`7`, `8`, `9`] |
 | `bioactivity_type` | Types of bioactivity to include | [`Potency`, `Kd`, `Ki`, `IC50`, `AC50`, `EC50`] |
 | `assay_types` | Types of assays to include | [`B`, `F`] |
-| `chembl_version` | Specific ChEMBL version to use | `None` |
+| `chembl_release` | Get only activities up to a certain release. `None` gets up to the latest reported activities. | `None` |
 | `standard_relation` | ChEMBL standard relations to use | [`=`] |
 
 ### 🔨 Processing Options

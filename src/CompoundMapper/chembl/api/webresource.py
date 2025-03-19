@@ -286,7 +286,7 @@ def get_full_activity_data(
     document_chembl_ids: Optional[list] = None,
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
-    chembl_version: Optional[int] = None,
+    chembl_release: Optional[int] = None,
     add_document_info: bool = True,
 ) -> pd.DataFrame:
     """
@@ -309,7 +309,7 @@ def get_full_activity_data(
             Defaults to (9, 8).
         assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
             functional (F) data.
-        chembl_version: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.
+        chembl_release: specify latest ChEMBL release to extract data from (e.g., 28). Defaults to None.
         add_document_info: whether to add publication-related fields to the final DataFrame. Setting
             to True, will require one less query to be made to ChEMBL, but fields like `year` will be
             lacking. Defaults to True.
@@ -353,14 +353,14 @@ def get_full_activity_data(
         + [col for col in full_df.columns if col not in ["molecule_chembl_id", "canonical_smiles"]]
     ]
     logger.debug(f"Columns in the DataFrame with molecular structures: {full_df.columns}")
-    if any([chembl_version is not None, add_document_info]):
+    if any([chembl_release is not None, add_document_info]):
         document_ids = full_df["document_chembl_id"].unique().tolist()
         logger.info("Fetching publication details for the documents.")
         publications_df = get_document_table(document_ids)
         full_df = (
             pd.merge(full_df, publications_df, on="document_chembl_id", how="left")
             .assign(chembl_release=lambda x: x.chembl_release.str.replace("CHEMBL_", "").astype(int))
-            .query(f"chembl_release <= {chembl_version}")
+            .query(f"chembl_release <= {chembl_release}")
             .reset_index(drop=True)
         )
 

@@ -69,7 +69,7 @@ def get_full_activity_data_sql(
     standard_type: Optional[List[str]] = None,
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
-    chembl_version: Optional[int] = None,
+    chembl_release: Optional[int] = None,
     additional_fields: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
@@ -89,7 +89,7 @@ def get_full_activity_data_sql(
             Defaults to (9, 8).
         assay_types: list of assay types to be fetched from ChEMBL. Defaults to binding (B) and
             functional (F) data.
-        chembl_version: Not to confuse for `version`. This is the ChEMBL release number used to
+        chembl_release: Not to confuse for `version`. This is the ChEMBL release number used to
             filter the data. Defaults to None.
         additional_fields: Optional list of additional fields to include in the sql query. E.g.:
             ["vs.sequence"], to retrieve the sequence of the variant, if available. Defaults to None.
@@ -217,8 +217,8 @@ def get_full_activity_data_sql(
         atype_placeholders = ", ".join([f"'{type}'" for type in assay_types])
         where_conditions.append(f"a.assay_type IN ({atype_placeholders})")
 
-    if chembl_version:
-        where_conditions.append(f"(d.chembl_release_id IS NULL OR d.chembl_release_id <= {chembl_version})")
+    if chembl_release:
+        where_conditions.append(f"(d.chembl_release_id IS NULL OR d.chembl_release_id <= {chembl_release})")
 
     where_clause = " AND\n            ".join(where_conditions)
 
