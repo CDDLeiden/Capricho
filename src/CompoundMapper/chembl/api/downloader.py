@@ -18,6 +18,18 @@ PYSTOW_PARTS = ["chembl"]
 PYSTOW_CONFIG = {"name": "chembl_downloader_config_{version}.json"}
 
 
+def _get_kwargs_where_clauses(**kwargs):
+    """Generate WHERE clauses for SQL queries based on kwargs."""
+    where_clauses = []
+    for key, value in kwargs.items():
+        if isinstance(value, list):  # Handle lists of values (IN clause)
+            placeholders = ", ".join([f"'{v}'" for v in value])
+            where_clauses.append(f"a.{key} IN ({placeholders})")
+        else:  # Handle single values
+            where_clauses.append(f"a.{key} = '{value}'")
+    return where_clauses
+
+
 def _get_config_file(version: Optional[Union[int, str]] = None) -> Path:
     version = version if version is not None else latest()
     return pystow.join(*(PYSTOW_PARTS), name=PYSTOW_CONFIG["name"].format(version=version))
@@ -68,14 +80,15 @@ def check_and_download_chembl_db(
 
 
 def get_document_table_sql(
-    document_chembl_ids: List[str],
+    document_chembl_ids: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
+    **kwargs,
 ) -> pd.DataFrame:
     """Get publication details for a list of ChEMBL document IDs using SQL backend.
 
     Args:
-        document_chembl_ids: list of ChEMBL document IDs.
+        document_chembl_ids: list of ChEMBL document IDs. Fetch all if None. Defaults to None.
         prefix: Optional prefix for an alternative data directory.
         version: Optional ChEMBL version to use.
 
@@ -88,7 +101,13 @@ def get_document_table_sql(
     if not document_chembl_ids:
         raise ValueError("No document IDs provided")
 
-    doc_placeholders = ", ".join([f"'{doc_id}'" for doc_id in document_chembl_ids])
+    where_clauses = []
+    if document_chembl_ids:
+        doc_placeholders = ", ".join([f"'{doc_id}'" for doc_id in document_chembl_ids])
+        where_clauses.append(f"chembl_id IN ({doc_placeholders})")
+
+    where_clauses.extend(_get_kwargs_where_clauses(**kwargs))
+    where_clause = " AND ".join(where_clauses)
 
     query_str = dedent(
         f"""\
@@ -103,7 +122,8 @@ def get_document_table_sql(
             title,
             chembl_release_id AS chembl_release
         FROM docs
-        WHERE chembl_id IN ({doc_placeholders})
+        WHERE
+            {where_clause}
         """
     )
 
@@ -122,9 +142,10 @@ def get_document_table_sql(
 
 
 def get_compound_table_sql(
-    molecule_chembl_ids: List[str],
+    molecule_chembl_ids: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
+    **kwargs,
 ) -> pd.DataFrame:
     """Get information on molecules from ChEMBL using SQL backend.
 
@@ -141,7 +162,14 @@ def get_compound_table_sql(
     if not molecule_chembl_ids:
         raise ValueError("No molecule IDs provided")
 
-    mol_placeholders = ", ".join([f"'{mol_id}'" for mol_id in molecule_chembl_ids])
+    where_clauses = []
+
+    if molecule_chembl_ids:
+        mol_placeholders = ", ".join([f"'{mol_id}'" for mol_id in molecule_chembl_ids])
+        where_clauses.append(f"md.chembl_id IN ({mol_placeholders})")
+
+    where_clauses.extend(_get_kwargs_where_clauses(**kwargs))
+    where_clause = " AND ".join(where_clauses)
 
     query_str = dedent(
         f"""\
@@ -163,7 +191,7 @@ def get_compound_table_sql(
         JOIN compound_structures cs ON md.molregno = cs.molregno
         LEFT JOIN molecule_hierarchy mh ON md.molregno = mh.molregno
         WHERE
-            md.chembl_id IN ({mol_placeholders})
+            {where_clause}
         ORDER BY
             md.chembl_id
         """
@@ -217,7 +245,7 @@ def get_compound_table_sql(
 
 
 def get_assay_table_sql(
-    assay_chembl_ids: List[str],
+    assay_chembl_ids: Optional[List[str]] = None,
     confidence_scores: Optional[List[int]] = None,
     assay_types: Optional[List[str]] = None,
     prefix: Optional[Sequence[str]] = None,
@@ -227,7 +255,7 @@ def get_assay_table_sql(
     """Get assay information from ChEMBL using SQL backend.
 
     Args:
-        assay_chembl_ids: list of assay ChEMBL IDs.
+        assay_chembl_ids: list of assay ChEMBL IDs. If None, all assays are fetched. Defaults to None.
         confidence_scores: list of confidence scores to filter the assays. Defaults to None.
         assay_types: list of assay types to filter. Defaults to None.
         prefix: Optional prefix for an alternative data directory.
@@ -239,32 +267,22 @@ def get_assay_table_sql(
     """
     downloader_configs = check_and_download_chembl_db(prefix=prefix, version=version)
 
-    if not assay_chembl_ids:
-        raise ValueError("No assay IDs provided")
-
     if confidence_scores is None:
         confidence_scores = list(range(0, 10))
 
-    assay_placeholders = ", ".join([f"'{assay_id}'" for assay_id in assay_chembl_ids])
+    assay_placeholders = ", ".join([f"'{aid}'" for aid in assay_chembl_ids]) if assay_chembl_ids else "''"
     confidence_placeholders = ", ".join([f"{score}" for score in confidence_scores])
 
-    where_clauses = [f"a.chembl_id IN ({assay_placeholders})"]
+    where_clauses = []
+    if assay_chembl_ids:
+        where_clauses.append[f"a.chembl_id IN ({assay_placeholders})"]
     where_clauses.append(f"a.confidence_score IN ({confidence_placeholders})")
 
     if assay_types:
         type_placeholders = ", ".join([f"'{assay_type}'" for assay_type in assay_types])
         where_clauses.append(f"a.assay_type IN ({type_placeholders})")
 
-    # Add any additional filters from kwargs (simplified implementation)
-    for key, value in kwargs.items():
-        if isinstance(value, list):
-            # Handle lists of values (IN clause)
-            placeholders = ", ".join([f"'{v}'" for v in value])
-            where_clauses.append(f"a.{key} IN ({placeholders})")
-        else:
-            # Handle single values
-            where_clauses.append(f"a.{key} = '{value}'")
-
+    where_clauses.extend(_get_kwargs_where_clauses(**kwargs))
     where_clause = " AND ".join(where_clauses)
 
     query_str = dedent(
