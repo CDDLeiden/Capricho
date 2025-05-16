@@ -200,6 +200,7 @@ def aggregate_data(
     chirality: bool,
     metadata_cols: list[str] = [],
     extra_id_cols: list[str] = [],
+    extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
     output_path: Optional[Union[str, Path]] = None,
 ):
@@ -215,11 +216,12 @@ def aggregate_data(
 
         df: dataframe output from `CompoundMapper.cli.workflow.fetch_standardize_and_clean_workflow`
         chirality: toggle chiral-sensitive fingerprints for identifying same molecules
-        metadata_cols: additional metadata columns to keep in the final dataframe. Metadata will
-            be saved separated by a semicolon whenever aggregation is performed.
         extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
             `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
             if the compound is the same and the assay is the same.
+        extra_multival_cols: list of extra columns that you'd like to keep as aggregated
+            values in the final dataframe. Caveat: these columns will be displayes as (str)
+            separated by `;` in the final dataframe. Defaults to [].
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data
@@ -233,7 +235,7 @@ def aggregate_data(
     df = df.assign(fps=fps)
     repeats_idxs = repeated_indices_from_array_series(df["fps"])
 
-    include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *metadata_cols]
+    include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *extra_multival_cols]
 
     final_data = process_repeat_mols(
         df,
