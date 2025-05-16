@@ -31,7 +31,7 @@ DEFAULTS = {
     "id_columns": [],
     "skip_not_aggregated": False,
     "aggregate_mutants": False,
-    "skip_recipe": True,
+    "skip_recipe": False,
     "drop_unassigned_chiral": False,
     "chembl_backend": "downloader",
     "chembl_version": None,
@@ -42,6 +42,7 @@ STORE_TRUE_ARGS = [
     "chirality",
     "skip_not_aggregated",
     "aggregate_mutants",
+    "skip_recipe",
     "drop_unassigned_chiral",
 ]
 
@@ -315,7 +316,7 @@ def parse_arguments() -> argparse.Namespace:
             "The file will be saved with the asme output path, but with the `_recipe.json` suffix."
             "Defaults to True."
         ),
-        action="store_false",
+        action="store_true",
     )
     parser.add_argument(
         "-back",
@@ -400,7 +401,7 @@ def main(args: argparse.Namespace) -> None:
     df = aggregate_data(
         df=df,
         chirality=args.chirality,
-        metadata_cols=args.metadata_columns,
+        extra_multival_cols=args.metadata_columns,
         extra_id_cols=args.id_columns,
         aggregate_mutants=args.aggregate_mutants,
         output_path=args.output_path,
