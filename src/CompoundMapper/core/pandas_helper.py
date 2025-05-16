@@ -10,6 +10,28 @@ from scipy.stats import gmean, gstd, median_abs_deviation
 from ..logger import logger
 
 
+def pchembl_to_molar(pchembl_value: float, unit: str = "nM") -> float:
+    """Convert a pChEMBL value to molar units.
+
+    Args:
+        pchembl_value: pChEMBL value to be converted
+        unit: unit of the pChEMBL value. Defaults to "nM".
+
+    Returns:
+        float: pChEMBL value converted to molar units
+    """
+    if unit == "nM":
+        return 10 ** (-pchembl_value) * 10**9
+    elif unit in ["uM", "µM"]:
+        return 10 ** (6 - pchembl_value) * 10**6
+    elif unit == "mM":
+        return 10 ** (9 - pchembl_value) * 10**3
+    elif unit == "M":
+        return 10 ** (9 - pchembl_value)
+    else:
+        raise ValueError(f"Unit '{unit}' not recognized.")
+
+
 def format_value(x) -> str:
     """Helper function to format a value to a string with 4 decimal places. This function
     is used to store the original pChEMBL values as strings separated by ";".
