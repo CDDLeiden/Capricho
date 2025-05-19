@@ -577,7 +577,7 @@ def get_full_activity_data_sql(
         # "cs.molregno",
         # "cs.active_molregno",
         # "cs.parent_molregno",
-        "act.data_validity_comment",
+        "act.data_validity_comment AS data_validity_comment",
         "act.potential_duplicate",
         "d.chembl_id AS document_chembl_id",
         "d.doc_type",

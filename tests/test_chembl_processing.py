@@ -13,7 +13,7 @@ class TestChemblProcessing(unittest.TestCase):
                 "standard_units": ["nM", "µM", "uM"],
                 "expected_pchembl_value": [9.0, 6.7, 6.5],
                 "pchembl_value": [None, None, None],
-                "data_validity_description": [None, None, "Outside typical range"],
+                "data_validity_comment": [None, None, "Outside typical range"],
                 "potential_duplicate": [0, 0, 1],
                 "assay_type": ["B", "F", "B"],
                 "standard_type": ["IC50", "Ki", "EC50"],
