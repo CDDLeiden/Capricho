@@ -1,7 +1,7 @@
 """Module containing helper functions for manipulating pandas DataFrames"""
 
 import functools
-from typing import Literal, Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -173,43 +173,50 @@ def find_dict_in_dataframe(df):
 def add_comment(
     df: pd.DataFrame,
     comment: str,
-    criteria_func: callable,
-    target_column: str,
+    criteria_func: Optional[callable] = None,  # Made Optional, default to None
+    target_column: Optional[str] = None,  # Made Optional, default to None
     comment_type: Literal["p", "d"] = "d",
 ) -> pd.DataFrame:
-    """Mark rows in a DataFrame based on a given criteria, adding a comment to:
+    """Marks rows in a DataFrame based on a given criteria or the entire DataFrame, adding a comment to:
         - 'data_dropping_comment' if comment_type == 'd' (drop)
         - 'data_processing_comment' if comment_type == 'p' (process).
 
     Args:
-        df: the input DataFrame.
-        comment: the comment to add to 'data_dropping_comment' for marked rows.
-        criteria_func: A function that takes a pandas Series (or scalar) and returns a
-            boolean Series (or boolean). E.g.: pd.isna, lambda x: x == 'invalid'. It should
-            be designed to work element-wise or vectorized on the target_column's Series.
-        target_column (str): The name of the column to apply the criteria_func to.
-        comment
-        comment_type (str): The type of comment to add. 'p' for data processing comment,
-            'd' for data dropping comment. Defaults to 'd'.
+        df (pd.DataFrame): The input DataFrame.
+        comment (str): The comment to add to the comment column for marked rows.
+        criteria_func (callable, optional): A function that takes a pandas Series and returns a
+            boolean Series. E.g.: pd.isna, lambda x: x == 'invalid', lambda x: x < 0.
+            It's required if `target_column` is specified. If `target_column` is None,
+            this argument is ignored and the comment is applied to all rows.
+        target_column (str, optional): The name of the column to apply the `criteria_func` to.
+            If None, the `comment` is applied to all rows of the DataFrame.
+        comment_type (Literal["p", "d"]): The type of comment to add.
+            'p' for data processing comment, 'd' for data dropping comment. Defaults to 'd'.
 
     Returns:
-        pd.DataFrame: The DataFrame with the 'data_dropping_comment' added/updated.
+        pd.DataFrame: The DataFrame with the specified comment column added/updated.
     """
     if comment_type == "p":
-        column = "data_processing_comment"
+        column_name = "data_processing_comment"
     elif comment_type == "d":
-        column = "data_dropping_comment"
+        column_name = "data_dropping_comment"
     else:
         raise ValueError("comment_type must be either 'p' or 'd'.")
 
-    if column not in df.columns:
-        df[column] = ""
+    if column_name not in df.columns:  # make sure it exists, initialize empty string
+        df[column_name] = ""
 
-    if target_column not in df.columns:  # check if the target_column exists
-        raise ValueError(f"Column '{target_column}' not found in DataFrame.")
+    if target_column is not None:
+        if target_column not in df.columns:
+            raise ValueError(f"Column '{target_column}' not found in DataFrame for comment '{comment}'.")
+        if criteria_func is None:
+            raise ValueError("criteria_func must be provided when target_column is specified.")
 
-    # create a mask and add the comment to the 'data_dropping_comment' column with .loc
-    mask = criteria_func(df[target_column])
-    df.loc[mask, column] = df.loc[mask, column].apply(lambda x: f"{x}; {comment}" if x else comment)
+        mask = criteria_func(df[target_column])
+    else:  # if no target_column is specified, have a full True mask
+        if criteria_func is not None:
+            pass
+        mask = pd.Series(True, index=df.index)
 
+    df.loc[mask, column_name] = df.loc[mask, column_name].apply(lambda x: f"{x}; {comment}" if x else comment)
     return df
