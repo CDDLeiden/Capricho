@@ -8,13 +8,19 @@ from typing import List, Literal, Optional, Sequence, Tuple, Union
 import numpy as np
 import pandas as pd
 
+from ..core.pandas_helper import add_comment
 from ..logger import logger
 from .api.downloader import get_full_activity_data_sql
 from .api.webresource import get_full_activity_data
 from .exceptions import BioactivitiesNotFoundError
+from .filter_functions import (
+    flag_calculated_pchembl,
+    flag_potential_duplicate,
+    flag_with_data_validity_comment,
+)
 
 
-def convert_to_log10(df) -> pd.DataFrame:
+def convert_to_log10(df: pd.DataFrame, save_dropped: bool = False) -> pd.DataFrame:
     """Function to be applied to the whole DataFrame. Will convert the standard_value
     column to pchembl_value column, if the standard_units are in nM, µM or uM.
 
@@ -53,7 +59,11 @@ def convert_to_log10(df) -> pd.DataFrame:
 
     desired_units = ["nM", "µM", "uM", "mM"]  # noqa: F841
     # allow na values in case value is log transformed
-    tmp_df = df.query("standard_units.isin(@desired_units) | standard_units.isna()").copy()
+    tmp_df = (
+        df.query("standard_units.isin(@desired_units) | standard_units.isna()")
+        .copy()
+        .pipe(flag_calculated_pchembl)
+    )
     if "pchembl_value" not in tmp_df.columns:
         raise ValueError("pchembl_value column not found in input DataFrame.")
     elif (~tmp_df.pchembl_value.isna()).any():
@@ -74,8 +84,19 @@ def convert_to_log10(df) -> pd.DataFrame:
                 "standard_value",
             ]
             _info = pchembl_inf_or_nan[debug_cols]
-            logger.info(f"Found infinite or NaN values upon calculating pchembl values. Dropping:\n{_info}")
-            tmp_df = tmp_df.drop(pchembl_inf_or_nan.index)
+            comment = "Infinite or NaN pchembl_value after calculation"
+            if save_dropped:
+                logger.info(f"Flagging {len(pchembl_inf_or_nan)} rows: {comment}:\n{_info}")
+                tmp_df = add_comment(
+                    df=tmp_df,
+                    comment=comment,
+                    criteria_func=lambda x: x.index.isin(pchembl_inf_or_nan.index),
+                    target_column="pchembl_value",  # Dummy target, criteria_func handles selection
+                    comment_type="d",
+                )
+            else:
+                logger.info(f"Dropping {len(pchembl_inf_or_nan)} rows: {comment}:\n{_info}")
+                tmp_df = tmp_df.drop(pchembl_inf_or_nan.index)
     return tmp_df
 
 
@@ -85,6 +106,7 @@ def curate_activity_pairs(
     mol_id_col: str = "molecule_chembl_id",
     assay_id_col: str = "assay_chembl_id",
     activity_value_col: str = "pchembl_value",
+    save_dropped: bool = False,
 ) -> pd.DataFrame:
     """Curate activity pairs for the same molecule across different assays. Removes pairs
     of measurements if their pChEMBL values differ by 3.0.
@@ -144,10 +166,20 @@ def curate_activity_pairs(
                         )
 
     if rows_to_drop:
-        logger.info(
-            f"Activity Curation: Removing {len(rows_to_drop)} measurements due to pChEMBL value criteria."
-        )
-        df = df.drop(index=list(rows_to_drop))
+        comment = "potential unit annotation error - pChEMBL values differ by 3.0 for same molecule"
+        if save_dropped:
+            logger.info(f"Activity Curation: Flagging {len(rows_to_drop)} measurements due to {comment}.")
+            # Use a dummy target_column as criteria_func handles selection by index
+            df = add_comment(
+                df=df,
+                comment=comment,
+                criteria_func=lambda x: x.index.isin(rows_to_drop),
+                target_column=activity_value_col,  # Actual column doesn't matter here
+                comment_type="d",
+            )
+        else:
+            logger.info(f"Activity Curation: Removing {len(rows_to_drop)} measurements due to {comment}.")
+            df = df.drop(index=list(rows_to_drop))
     return df
 
 
@@ -156,6 +188,7 @@ def process_bioactivities(
     calculate_pchembl: bool = True,
     curate_activity_values: bool = False,
     require_document_date: bool = False,
+    save_dropped: bool = False,
 ) -> pd.DataFrame:
     """Processes the bioactivities DataFrame. Will convert the standard_value
     column to pchembl_value column if the standard_units are in mM, µM, uM, or nM. If the
@@ -174,14 +207,16 @@ def process_bioactivities(
     bioactivities_df = (
         bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
         .replace({None: np.nan})
-        .query("data_validity_comment.isna()")
-        .query("potential_duplicate == 0")
+        .pipe(flag_with_data_validity_comment)
+        # .query("data_validity_comment.isna()")
+        .pipe(flag_potential_duplicate)
+        # .query("potential_duplicate == 0")
         .drop(columns=["data_validity_comment", "potential_duplicate"])
     )
     with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
     if calculate_pchembl:
         without_pchembl = convert_to_log10(  # if pchembl value not present, calculate it
-            bioactivities_df.query("pchembl_value.isna()")
+            bioactivities_df.query("pchembl_value.isna()"), save_dropped=save_dropped
         )
         if not without_pchembl.empty:
             bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
@@ -224,6 +259,7 @@ def get_bioactivities_workflow(
     calculate_pchembl: bool = False,
     curate_activity_values: bool = False,
     require_document_date: bool = False,
+    save_dropped: bool = False,
     backend: Literal["downloader", "webresource"] = "downloader",
 ):
     """Perform the first step of the bioactivity data retrieval workflow. These are:
@@ -267,11 +303,13 @@ def get_bioactivities_workflow(
             chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
         calculate_pchembl: calculate pChEMBL values for bioactivities reported in nM, µM or uM `standard_unit`
             or -Log|Log `standard_type`. Defaults to False
+        save_dropped: If True, rows that would be dropped are kept and flagged with a comment.
+            A separate file with these dropped rows might be saved by the calling workflow. Defaults to False.
         backend: the backend to be used for fetching the data. If downloader, the ChEMBL sql database
             is downloaded and extracted first. Defaults to "downloader".
 
-    Raises:
-        BioactivitiesNotFoundError: If the retrieved bioactivity dataframe is empty.
+        Raises:
+            BioactivitiesNotFoundError: If the retrieved bioactivity dataframe is empty.
     """
     if backend == "downloader":
         bioactivities_df = get_full_activity_data_sql(
@@ -313,6 +351,7 @@ def get_bioactivities_workflow(
         calculate_pchembl=calculate_pchembl,
         curate_activity_values=curate_activity_values,
         require_document_date=require_document_date,
+        save_dropped=save_dropped,
     )
 
     if bioactivities_df.empty:
