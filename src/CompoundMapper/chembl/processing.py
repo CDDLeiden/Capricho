@@ -1,6 +1,8 @@
 """Module holding functionalities for the ChEMBL API."""
 
 import re
+from itertools import combinations
+from math import isclose
 from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -77,18 +79,98 @@ def convert_to_log10(df) -> pd.DataFrame:
     return tmp_df
 
 
-def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: bool = True) -> pd.DataFrame:
+# TODO: Consider whether we should do this across pairs identified from fingerprints or molecule IDs
+def curate_activity_pairs(
+    df: pd.DataFrame,
+    mol_id_col: str = "molecule_chembl_id",
+    assay_id_col: str = "assay_chembl_id",
+    activity_value_col: str = "pchembl_value",
+) -> pd.DataFrame:
+    """Curate activity pairs for the same molecule across different assays. Removes pairs
+    of measurements if their pChEMBL values differ by 3.0.
+
+    Filter inspired on Landrum & Riniker, 2024, where the authors state:
+
+    > Given the very low probability of two separate experiments producing exactly the same
+    results, the exact matches are most likely cases where values from a previous paper are
+    copied into a new one; this was discussed in the earlier work by Kramer et al. (10) and
+    spot-checked with a number of assay pairs here.
+
+    Args:
+        df: DataFrame with bioactivity data.
+        mol_id_col: column name for molecule IDs. Defaults to "molecule_chembl_id" for ChEMBL data.
+        assay_id_col: column name for assay IDs. Defaults to "assay_chembl_id" for ChEMBL data.
+        activity_id_col: column name for activity values. Defaults to "pchembl_value" for ChEMBL data.
+
+    Returns:
+        pd.DataFrame: The curated DataFrame.
+    """
+    if not {mol_id_col, assay_id_col, activity_value_col}.issubset(df.columns):
+        logger.warning(
+            "Skipping activity pair curation: Required columns "
+            f"({mol_id_col}, assay_id_col, 'pchembl_value') not found."
+        )
+        return df
+
+    rows_to_drop = set()
+    # Group by molecule
+    for molecule_id, group in df.groupby(mol_id_col):
+        # Get unique assays for this molecule
+        unique_assays = group[assay_id_col].unique()
+        if len(unique_assays) < 2:
+            continue  # Not enough assays to form a pair
+
+        # Iterate over all unique pairs of assays for this molecule
+        for assay1_id, assay2_id in combinations(unique_assays, 2):
+            measurements1 = group[group[assay_id_col] == assay1_id]
+            measurements2 = group[group[assay_id_col] == assay2_id]
+
+            # Iterate over all combinations of measurements between the two assays
+            for idx1, row1 in measurements1.iterrows():
+                for idx2, row2 in measurements2.iterrows():
+                    val1 = row1[activity_value_col]
+                    val2 = row2[activity_value_col]
+
+                    if pd.isna(val1) or pd.isna(val2):
+                        continue
+
+                    # Add a small epsilon for robust floating point comparison >= 3.0
+                    if isclose(abs(val1 - val2), 3.0, rel_tol=1e-9, abs_tol=1e-9):
+                        rows_to_drop.add(idx1)
+                        rows_to_drop.add(idx2)
+                        logger.debug(
+                            f"Marking rows for molecule {molecule_id}, assays {assay1_id} (value: {val1}) "
+                            f"and {assay2_id} (value: {val2}) for removal due to pChEMBL value similarity/difference."
+                        )
+
+    if rows_to_drop:
+        logger.info(
+            f"Activity Curation: Removing {len(rows_to_drop)} measurements due to pChEMBL value criteria."
+        )
+        df = df.drop(index=list(rows_to_drop))
+    return df
+
+
+def process_bioactivities(
+    bioactivities_df: pd.DataFrame,
+    calculate_pchembl: bool = True,
+    curate_activity_values: bool = False,
+    require_document_date: bool = False,
+) -> pd.DataFrame:
     """Processes the bioactivities DataFrame. Will convert the standard_value
     column to pchembl_value column if the standard_units are in mM, µM, uM, or nM. If the
     standard_units are in log, the original value in the pchembl_value is preserved.
 
     Args:
         bioactivities_df: bioactivity dataframe, e.g.: output from `get_activity_table`.
+        calculate_pchembl: Whether to calculate pChEMBL values.
+        curate_activity_values: Whether to apply activity curation based on pChEMBL values
+            diverging in exactly 3.0 (indicate possible annotation errors).
+        require_document_date: Whether to filter out activities without a document year.
 
     Returns:
         pd.DataFrame: the processed bioactivities DataFrame.
     """
-    print(bioactivities_df.columns)
     bioactivities_df = (
         bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
         .replace({None: np.nan})
@@ -105,6 +187,24 @@ def process_bioactivities(bioactivities_df: pd.DataFrame, calculate_pchembl: boo
             bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
     else:
         bioactivities_df = with_pchembl
+
+    if curate_activity_values:
+        bioactivities_df = curate_activity_pairs(bioactivities_df)
+
+    if require_document_date:
+        if "year" not in bioactivities_df.columns:
+            logger.warning(
+                "Document date curation enabled, but 'year' column not found. Skipping this curation."
+            )
+        else:
+            original_count = len(bioactivities_df)
+            bioactivities_df = bioactivities_df[bioactivities_df["year"].notna()]
+            removed_count = original_count - len(bioactivities_df)
+            if removed_count > 0:
+                logger.info(
+                    f"Document Date Curation: Removed {removed_count} measurements lacking a document year."
+                )
+
     return bioactivities_df.reset_index(drop=True)
 
 
@@ -122,6 +222,8 @@ def get_bioactivities_workflow(
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
     calculate_pchembl: bool = False,
+    curate_activity_values: bool = False,
+    require_document_date: bool = False,
     backend: Literal["downloader", "webresource"] = "downloader",
 ):
     """Perform the first step of the bioactivity data retrieval workflow. These are:
@@ -206,7 +308,12 @@ def get_bioactivities_workflow(
             f"document_chembl_ids={document_chembl_ids}, "
         )
 
-    bioactivities_df = process_bioactivities(bioactivities_df, calculate_pchembl=calculate_pchembl)
+    bioactivities_df = process_bioactivities(
+        bioactivities_df,
+        calculate_pchembl=calculate_pchembl,
+        curate_activity_values=curate_activity_values,
+        require_document_date=require_document_date,
+    )
 
     if bioactivities_df.empty:
         raise BioactivitiesNotFoundError(
