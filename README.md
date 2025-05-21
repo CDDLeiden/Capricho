@@ -14,8 +14,7 @@ Simplify fetching, standardizing, and aggregating bioactivity data, outputting a
     - Assay type filtering (Functional, Binding, ADME, Toxicity, Physicochemical)
     - Standard relation filtering
 - Configurable data aggregation options (see below)
-- Support for multiple ChEMBL versions
-- Recipe saving for reproducibility
+- Save a fetching and processing recipe for reproducibility
 
 Further, the package also methods for:
 - Multithreaded compound structure curation through pubchempy

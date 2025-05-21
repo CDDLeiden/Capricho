@@ -35,6 +35,7 @@ DEFAULTS = {
     "drop_unassigned_chiral": False,
     "chembl_backend": "downloader",
     "chembl_version": None,
+    "save_dropped": False,
 }
 
 STORE_TRUE_ARGS = [
@@ -44,6 +45,7 @@ STORE_TRUE_ARGS = [
     "aggregate_mutants",
     "skip_recipe",
     "drop_unassigned_chiral",
+    "save_dropped",
 ]
 
 STORE_FALSE_ARGS = ["skip_recipe"]
@@ -344,6 +346,16 @@ def parse_arguments() -> argparse.Namespace:
         default=DEFAULTS["chembl_version"],
         type=str,
     )
+    parser.add_argument(
+        "-sd",
+        "--save-dropped",
+        dest="save_dropped",
+        action="store_true",
+        help=(
+            "Save a separate dataframe containing rows that were flagged for dropping, "
+            "along with the reasons for flagging. Default is False."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -393,6 +405,7 @@ def main(args: argparse.Namespace) -> None:
         assay_types=args.assay_types,
         chembl_release=args.chembl_release,
         save_not_aggregated=(not args.skip_not_aggregated),
+        save_dropped=args.save_dropped,
         drop_unassigned_chiral=args.drop_unassigned_chiral,
         version=args.chembl_version,
         backend=args.chembl_backend,
