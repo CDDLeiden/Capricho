@@ -33,29 +33,44 @@ class TestRateLimitDecorator(unittest.TestCase):
         log_output = self.log_capture.getvalue()
         execution_times = []
         for line in log_output.split("\n"):
-            if "Updated last_called to" in line:
-                time_str = line.split("Updated last_called to")[1].split(".")[0]
+            if "starting execution at" in line:
+                time_str = line.split("starting execution at")[1].split(".")[0]
                 execution_times.append(float(time_str))
 
+        self.assertGreaterEqual(len(execution_times), num_calls, "Not enough execution start times logged")
+        # Sort execution times if necessary, though as_completed and single lock should order them
+        execution_times.sort()
+
         # Calculate time differences between executions
+        # Only relevant for (num_calls - 1) intervals
         time_diffs = [execution_times[i + 1] - execution_times[i] for i in range(len(execution_times) - 1)]
-        avg_time_diff = sum(time_diffs) / len(time_diffs)
+        avg_time_diff = sum(time_diffs) / len(time_diffs) if time_diffs else 0
 
         # Assertions
         self.assertEqual(len(results), num_calls, "All function calls should have completed")
+
+        # The total time should be approximately (num_calls - 1) * min_interval + (time for last call)
+        # For 40 calls and 0.2s interval, this is 39 * 0.2 = 7.8s plus function execution time.
+        # The current assertion (num_calls / 5) - 0.2 is (40/5) - 0.2 = 8 - 0.2 = 7.8s, which is correct.
         self.assertGreaterEqual(
-            total_time, (num_calls / 5) - 0.2, "Total time should be at least (num_calls / max_per_second)"
+            total_time,
+            (num_calls / 5) - 0.2,
+            "Total time should be at least (num_calls / max_per_second) minus one interval",
         )
         self.assertAlmostEqual(
             avg_time_diff,
             0.2,
-            delta=0.02,
+            delta=0.02,  # A slightly larger delta might still be reasonable given OS scheduling variations
             msg="Average time between executions should be close to 0.2 seconds",
         )
 
         # Check for rate limit messages in log
         rate_limit_messages = [line for line in log_output.split("\n") if "Rate limit exceeded" in line]
-        self.assertGreater(len(rate_limit_messages), 0, "There should be some rate limit messages in the log")
+        self.assertGreaterEqual(
+            len(rate_limit_messages),
+            num_calls - 1,
+            "There should be appropriate rate limit messages in the log",
+        )
 
         print(
             f"Test completed. Total time: {total_time:.2f}s, Average time between executions: {avg_time_diff:.4f}s"

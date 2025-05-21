@@ -20,37 +20,46 @@ def rate_limit(max_per_second=5):
     """
     min_interval = 1.0 / max_per_second
     lock = threading.Lock()
-    last_called = 0
 
-    logger.debug(f"Initializing rate limiter: max {max_per_second} calls per second")
+    last_allowed_start_time = 0
+
+    logger.debug(
+        f"Initializing rate limiter: max {max_per_second} calls per second, min interval {min_interval:.4f}s"
+    )
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            nonlocal last_called
+            nonlocal last_allowed_start_time
             with lock:
-                current_time = time.time()
-                elapsed = current_time - last_called
-                left_to_wait = min_interval - elapsed
+                current_attempt_time = time.time()
+                elapsed_since_last_allowed_start = current_attempt_time - last_allowed_start_time
+                time_to_wait = min_interval - elapsed_since_last_allowed_start
 
-                logger.trace(f"Function {func.__name__} called. Time since last call: {elapsed:.4f}s")
+                logger.trace(
+                    f"Function {func.__name__} called. Time since last allowed start: {elapsed_since_last_allowed_start:.4f}s"
+                )
 
-                if left_to_wait > 0:
-                    logger.trace(f"Rate limit exceeded. Waiting for {left_to_wait:.4f}s")
-                    time.sleep(left_to_wait)
+                if time_to_wait > 0:
+                    logger.trace(f"Rate limit exceeded. Waiting for {time_to_wait:.4f}s")
+                    time.sleep(time_to_wait)
+                    # The *actual* time this function is allowed to start is
+                    # current_attempt_time + time_to_wait
+                    last_allowed_start_time = current_attempt_time + time_to_wait
                 else:
                     logger.trace("Executing immediately")
+                    # No wait needed, so the current attempt time is the allowed start time
+                    last_allowed_start_time = current_attempt_time
 
                 try:
-                    logger.trace(f"Executing {func.__name__}")
+                    logger.trace(  # Log the exact time it's starting execution for test validation
+                        f"Function {func.__name__} starting execution at {last_allowed_start_time:.4f}"
+                    )
                     ret = func(*args, **kwargs)
                     logger.trace(f"Finished executing {func.__name__}")
                 except Exception as e:
                     logger.exception(f"Exception in {func.__name__}: {str(e)}")
                     raise
-
-                last_called = time.time()
-                logger.trace(f"Updated last_called to {last_called}")
             return ret
 
         return wrapper
