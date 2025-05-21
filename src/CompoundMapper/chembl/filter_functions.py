@@ -1,3 +1,5 @@
+"""Collection of functions to flag compounds based on specific criteria."""
+
 import pandas as pd
 
 from ..core.pandas_helper import add_comment
@@ -56,22 +58,45 @@ def flag_calculated_pchembl(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def rm_by_index(df, index, comment):
-    """
-    Flexible function to remove rows based on a list of pd.DataFrame indices.
-
-    Args:
-        df (pd.DataFrame): The dataframe to remove rows from.
-        index (list): The list of indices to remove.
-        comment (str): The comment to add to the removed rows.
-
-    Returns:
-        pd.DataFrame: The modified dataframe with the specified rows removed.
-    """
-    df = add_comment(
+def flag_salt_or_solvent_removal(df: pd.DataFrame) -> pd.DataFrame:
+    """Marks rows with a salt/mixture on the canonical SMILES (not modified by CompoundMapper)"""
+    return add_comment(
         df,
-        comment=comment,
-        index=index,
-        criteria_func=lambda x: x.index.isin(index),
+        comment="Salt/solvent removed",
+        criteria_func=lambda x: x.str.contains(".", regex=False),
+        target_column="canonical_smiles",
+        comment_type="p",
     )
-    return df
+
+
+def flag_duplication_removal(df: pd.DataFrame) -> pd.DataFrame:
+    """Marks rows with a salt/mixture after SMILES standardization & salt removal (will be dropped)"""
+    return add_comment(
+        df,
+        comment="Salt/solvent removed",
+        criteria_func=lambda x: x.str.contains(".", regex=False),
+        target_column="canonical_smiles",
+        comment_type="p",
+    )
+
+
+def flag_to_remove_mixture_compounds(df: pd.DataFrame) -> pd.DataFrame:
+    """Marks rows where 'mixture_compounds' is True."""
+    return add_comment(
+        df,
+        comment="Mixture in SMILES",
+        criteria_func=lambda x: x.str.contains(".", regex=False),
+        target_column="standard_smiles",
+        comment_type="d",
+    )
+
+
+def flag_undefined_stereochemistry(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark compounds with undefined stereochemistry based on a predefined boolean mask."""
+    return add_comment(
+        df,
+        comment="Undefined stereochemistry",
+        criteria_func=lambda x: x > 0,
+        target_column="undefined_stereocenters",
+        comment_type="d",
+    )
