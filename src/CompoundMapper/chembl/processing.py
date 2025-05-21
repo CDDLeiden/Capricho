@@ -83,7 +83,7 @@ def convert_to_log10(df: pd.DataFrame, save_dropped: bool = False) -> pd.DataFra
                 "standard_units",
                 "standard_value",
             ]
-            _info = pchembl_inf_or_nan[debug_cols]
+            _info = pchembl_inf_or_nan.loc[:6, debug_cols]
             comment = "Infinite or NaN pchembl_value after calculation"
             if save_dropped:
                 logger.info(f"Flagging {len(pchembl_inf_or_nan)} rows: {comment}:\n{_info}")
@@ -239,6 +239,11 @@ def process_bioactivities(
                 logger.info(
                     f"Document Date Curation: Removed {removed_count} measurements lacking a document year."
                 )
+
+    if not save_dropped:
+        bioactivities_df = bioactivities_df.assign(  # drop the columns that are flagged
+            data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)
+        ).query("data_dropping_comment.isna()")
 
     return bioactivities_df.reset_index(drop=True)
 
