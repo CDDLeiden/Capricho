@@ -12,12 +12,12 @@ from ..core.pandas_helper import add_comment
 from ..logger import logger
 from .api.downloader import get_full_activity_data_sql
 from .api.webresource import get_full_activity_data
-from .exceptions import BioactivitiesNotFoundError
-from .filter_functions import (
+from .data_flag_functions import (
     flag_calculated_pchembl,
     flag_potential_duplicate,
     flag_with_data_validity_comment,
 )
+from .exceptions import BioactivitiesNotFoundError
 
 
 def convert_to_log10(df: pd.DataFrame, save_dropped: bool = False) -> pd.DataFrame:
