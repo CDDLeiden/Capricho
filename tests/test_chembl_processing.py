@@ -32,7 +32,20 @@ class TestChemblProcessing(unittest.TestCase):
         )
 
     def test_process_bioactivities(self):
-        result = processing.process_bioactivities(self.sample_df)
+        result = processing.process_bioactivities(self.sample_df, calculate_pchembl=True, save_dropped=True)
+        self.assertEqual(
+            result["data_dropping_comment"].tolist(),
+            ["", "", "Data Validity Comment Present; Potential Duplicate"],
+        )
+        self.assertEqual(
+            result["data_processing_comment"].tolist(),
+            ["Calculated pChEMBL", "Calculated pChEMBL", "Calculated pChEMBL"],
+        )
+
+        result = result.assign(  # drop the columns that are flagged
+            data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)
+        ).query("data_dropping_comment.isna()")
+
         self.assertEqual(len(result), 2)  # One row should be filtered out
         self.assertNotIn("data_validity_description", result.columns)
         self.assertNotIn("potential_duplicate", result.columns)
