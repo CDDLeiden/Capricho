@@ -37,6 +37,8 @@ DEFAULTS = {
     "chembl_backend": "downloader",
     "chembl_version": None,
     "save_dropped": False,
+    "require_doc_date": False,
+    "max_assay_size": None,
 }
 
 STORE_TRUE_ARGS = [
@@ -48,6 +50,7 @@ STORE_TRUE_ARGS = [
     "drop_unassigned_chiral",
     "curate_annotation_errors",
     "save_dropped",
+    "require_doc_date",
 ]
 
 STORE_FALSE_ARGS = ["skip_recipe"]
@@ -368,6 +371,22 @@ def parse_arguments() -> argparse.Namespace:
             "along with the reasons for flagging. Default is False."
         ),
     )
+    parser.add_argument(
+        "--require-doc-date",
+        dest="require_doc_date",
+        action="store_true",
+        help=("Filter out bioactivities that do not have a document date. Default is False."),
+    )
+    parser.add_argument(
+        "--max-assay-size",
+        dest="max_assay_size",
+        type=int,
+        default=DEFAULTS["max_assay_size"],
+        help=(
+            "Maximum number of compounds in an assay. Assays exceeding this size will have their "
+            "activities flagged for removal. If left as default (None), this filter won't be applied."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -422,6 +441,8 @@ def main(args: argparse.Namespace) -> None:
         curate_annotation_errors=args.curate_annotation_errors,
         version=args.chembl_version,
         backend=args.chembl_backend,
+        require_doc_date=args.require_doc_date,
+        max_assay_size=args.max_assay_size,
     )
 
     df = aggregate_data(
@@ -457,6 +478,9 @@ def main(args: argparse.Namespace) -> None:
                 if DEFAULTS[k] != v:
                     command_vals.append(f"--{save_k} {' '.join([str(i) for i in v])}")
             elif isinstance(v, str):
+                if DEFAULTS[k] != v:
+                    command_vals.append(f"--{save_k} {v}")
+            elif isinstance(v, int):  # Added for max_assay_size
                 if DEFAULTS[k] != v:
                     command_vals.append(f"--{save_k} {v}")
 

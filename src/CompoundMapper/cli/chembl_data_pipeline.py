@@ -43,7 +43,8 @@ def get_standardize_and_clean_workflow(
     backend: Literal["downloader", "webresource"] = "downloader",
     curate_annotation_errors: bool = True,
     curate_assay_metadata: bool = False,
-    require_document_date: bool = False,
+    require_doc_date: bool = False,
+    max_assay_size: Optional[int] = None,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -74,7 +75,9 @@ def get_standardize_and_clean_workflow(
         curate_annotation_errors: Whether to apply activity curation based on pChEMBL values diverging
             in exactly 3.0 (indicate possible annotation errors). Defaults to True.
         curate_assay_metadata: Whether to apply assay metadata curation during aggregation.
-        require_document_date: Whether to filter out activities without a document year.
+        require_doc_date: Whether to filter out activities without a document year.
+        max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
+            have their activities flagged for removal. Defaults to None (no filtering).
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -104,12 +107,50 @@ def get_standardize_and_clean_workflow(
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
-        require_document_date=require_document_date,
+        require_document_date=require_doc_date,
         chembl_release=chembl_release,
         save_dropped=save_dropped,
         version=version,
         backend=backend,
     )
+
+    DEFAULT_ASSAY_CHEMBL_ID = "assay_chembl_id"
+    DEFAULT_MOLECULE_CHEMBL_ID = "molecule_chembl_id"
+    DATA_DROPPING_COMMENT = "data_dropping_comment"
+
+    # Filter assays by size
+    if max_assay_size is not None and not full_df.empty:
+        logger.info(f"Filtering assays with more than {max_assay_size} compounds.")
+        # Ensure the necessary columns exist before trying to group or filter
+        if DEFAULT_ASSAY_CHEMBL_ID in full_df.columns and DEFAULT_MOLECULE_CHEMBL_ID in full_df.columns:
+            assay_counts = full_df.groupby(DEFAULT_ASSAY_CHEMBL_ID)[DEFAULT_MOLECULE_CHEMBL_ID].nunique()
+            assays_to_filter = assay_counts[assay_counts > max_assay_size].index.tolist()
+
+            if assays_to_filter:
+                filter_mask = full_df[DEFAULT_ASSAY_CHEMBL_ID].isin(assays_to_filter)
+                num_activities_flagged = filter_mask.sum()
+                num_assays_flagged = len(assays_to_filter)
+
+                logger.info(
+                    f"Flagging {num_activities_flagged} activities from {num_assays_flagged} assays "
+                    f"exceeding max size of {max_assay_size}."
+                )
+                # Ensure DATA_DROPPING_COMMENT column exists
+                if DATA_DROPPING_COMMENT not in full_df.columns:
+                    full_df[DATA_DROPPING_COMMENT] = pd.Series(dtype="object")
+
+                comment = f"Assay size exceeds maximum (N > {max_assay_size})"
+                existing_comments = full_df.loc[filter_mask, DATA_DROPPING_COMMENT].fillna("")
+                new_comments = existing_comments.apply(lambda x: f"{x}; {comment}" if x else comment)
+                full_df.loc[filter_mask, DATA_DROPPING_COMMENT] = new_comments
+            else:
+                logger.info("No assays found exceeding the maximum size.")
+        else:
+            logger.warning(
+                f"Could not filter by assay size. Required columns "
+                f"'{DEFAULT_ASSAY_CHEMBL_ID}' or '{DEFAULT_MOLECULE_CHEMBL_ID}' not found in DataFrame."
+            )
+
     cols_to_remove_post_standardization = [
         "type",
         "relation",
