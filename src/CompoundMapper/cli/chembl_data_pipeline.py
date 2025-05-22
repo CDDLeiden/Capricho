@@ -41,7 +41,7 @@ def get_standardize_and_clean_workflow(
     drop_unassigned_chiral: bool = False,
     version: Optional[Union[int, str]] = None,
     backend: Literal["downloader", "webresource"] = "downloader",
-    curate_activity_values: bool = False,
+    curate_annotation_errors: bool = True,
     curate_assay_metadata: bool = False,
     require_document_date: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
@@ -71,7 +71,8 @@ def get_standardize_and_clean_workflow(
             chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
         backend: the backend to be used for fetching the data. If downloader, the ChEMBL sql database
             is downloaded and extracted first. Defaults to "downloader".
-        curate_activity_values: Whether to apply activity curation based on pChEMBL values.
+        curate_annotation_errors: Whether to apply activity curation based on pChEMBL values diverging
+            in exactly 3.0 (indicate possible annotation errors). Defaults to True.
         curate_assay_metadata: Whether to apply assay metadata curation during aggregation.
         require_document_date: Whether to filter out activities without a document year.
 
@@ -85,6 +86,8 @@ def get_standardize_and_clean_workflow(
     # -log | log transformed values reported as Log XC50, -Log XC50, etc, might not
     # have a pchembl value, but *could* still be used.  If standard_type contains `Log`,
     # the standard_value will be transferred to pchembl_value.
+    # TODO: I noticed some negative values reported in standard_value, maybe it's because
+    # the standard_type was Log? If so, we could try rescuing those values to pchembl_value
     if calculate_pchembl:
         biotypes = []
         for act in bioactivity_type:
@@ -100,7 +103,7 @@ def get_standardize_and_clean_workflow(
         confidence_scores=confidence_scores,
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
-        curate_activity_values=curate_activity_values,
+        curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_document_date,
         chembl_release=chembl_release,
         save_dropped=save_dropped,

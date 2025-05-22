@@ -186,7 +186,7 @@ def curate_activity_pairs(
 def process_bioactivities(
     bioactivities_df: pd.DataFrame,
     calculate_pchembl: bool = True,
-    curate_activity_values: bool = False,
+    curate_annotation_errors: bool = True,
     require_document_date: bool = False,
     save_dropped: bool = False,
 ) -> pd.DataFrame:
@@ -197,8 +197,8 @@ def process_bioactivities(
     Args:
         bioactivities_df: bioactivity dataframe, e.g.: output from `get_activity_table`.
         calculate_pchembl: Whether to calculate pChEMBL values.
-        curate_activity_values: Whether to apply activity curation based on pChEMBL values
-            diverging in exactly 3.0 (indicate possible annotation errors).
+        curate_annotation_errors: Whether to apply activity curation based on pChEMBL values
+            diverging in exactly 3.0 (indicate possible annotation errors). Defaults to True.
         require_document_date: Whether to filter out activities without a document year.
 
     Returns:
@@ -223,7 +223,7 @@ def process_bioactivities(
     else:
         bioactivities_df = with_pchembl
 
-    if curate_activity_values:
+    if curate_annotation_errors:
         bioactivities_df = curate_activity_pairs(bioactivities_df)
 
     if require_document_date:
@@ -262,7 +262,7 @@ def get_bioactivities_workflow(
     prefix: Optional[Sequence[str]] = None,
     version: Optional[Union[int, str]] = None,
     calculate_pchembl: bool = False,
-    curate_activity_values: bool = False,
+    curate_annotation_errors: bool = True,
     require_document_date: bool = False,
     save_dropped: bool = False,
     backend: Literal["downloader", "webresource"] = "downloader",
@@ -306,6 +306,8 @@ def get_bioactivities_workflow(
             on a custom directory. Defaults to None.
         version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
             chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
+        curate_annotation_errors: Whether to apply activity curation based on pChEMBL values diverging
+            in exactly 3.0 (indicate possible annotation errors). Defaults to True.
         calculate_pchembl: calculate pChEMBL values for bioactivities reported in nM, µM or uM `standard_unit`
             or -Log|Log `standard_type`. Defaults to False
         save_dropped: If True, rows that would be dropped are kept and flagged with a comment.
@@ -354,7 +356,7 @@ def get_bioactivities_workflow(
     bioactivities_df = process_bioactivities(
         bioactivities_df,
         calculate_pchembl=calculate_pchembl,
-        curate_activity_values=curate_activity_values,
+        curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_document_date,
         save_dropped=save_dropped,
     )

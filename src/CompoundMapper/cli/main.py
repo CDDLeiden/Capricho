@@ -33,6 +33,7 @@ DEFAULTS = {
     "aggregate_mutants": False,
     "skip_recipe": False,
     "drop_unassigned_chiral": False,
+    "curate_annotation_errors": False,
     "chembl_backend": "downloader",
     "chembl_version": None,
     "save_dropped": False,
@@ -45,6 +46,7 @@ STORE_TRUE_ARGS = [
     "aggregate_mutants",
     "skip_recipe",
     "drop_unassigned_chiral",
+    "curate_annotation_errors",
     "save_dropped",
 ]
 
@@ -240,6 +242,16 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
     )
     parser.add_argument(
+        "-cae",
+        "--curate-annotation-errors",
+        dest="curate_annotation_errors",
+        help=(
+            "Apply activity curation based on pChEMBL values diverging in exactly 3.0, "
+            "indicating possible annotation errors (e.g.: uM to nM and vice versa). Defaults to True."
+        ),
+        action="store_true",
+    )
+    parser.add_argument(
         "-rel",
         "--standard-relation",
         nargs="*",
@@ -407,6 +419,7 @@ def main(args: argparse.Namespace) -> None:
         save_not_aggregated=(not args.skip_not_aggregated),
         save_dropped=args.save_dropped,
         drop_unassigned_chiral=args.drop_unassigned_chiral,
+        curate_annotation_errors=args.curate_annotation_errors,
         version=args.chembl_version,
         backend=args.chembl_backend,
     )
