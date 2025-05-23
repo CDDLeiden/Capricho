@@ -2,7 +2,6 @@ from inspect import signature
 from pathlib import Path
 from typing import Literal, Optional, Union
 
-import numpy as np
 import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer
 
@@ -16,6 +15,12 @@ from ..chembl.data_flag_functions import (
 )
 from ..chembl.exceptions import BioactivitiesNotFoundError
 from ..chembl.processing import get_bioactivities_workflow
+from ..core.default_fields import (
+    DATA_DROPPING_COMMENT,
+    DEFAULT_ASSAY_CHEMBL_ID,
+    DEFAULT_ASSAY_MATCH_FIELDS,
+    DEFAULT_MOLECULE_CHEMBL_ID,
+)
 from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
@@ -42,7 +47,6 @@ def get_standardize_and_clean_workflow(
     version: Optional[Union[int, str]] = None,
     backend: Literal["downloader", "webresource"] = "downloader",
     curate_annotation_errors: bool = True,
-    curate_assay_metadata: bool = False,
     require_doc_date: bool = False,
     max_assay_size: Optional[int] = None,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
@@ -74,7 +78,6 @@ def get_standardize_and_clean_workflow(
             is downloaded and extracted first. Defaults to "downloader".
         curate_annotation_errors: Whether to apply activity curation based on pChEMBL values diverging
             in exactly 3.0 (indicate possible annotation errors). Defaults to True.
-        curate_assay_metadata: Whether to apply assay metadata curation during aggregation.
         require_doc_date: Whether to filter out activities without a document year.
         max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
             have their activities flagged for removal. Defaults to None (no filtering).
@@ -113,11 +116,6 @@ def get_standardize_and_clean_workflow(
         version=version,
         backend=backend,
     )
-
-    DEFAULT_ASSAY_CHEMBL_ID = "assay_chembl_id"
-    DEFAULT_MOLECULE_CHEMBL_ID = "molecule_chembl_id"
-    DATA_DROPPING_COMMENT = "data_dropping_comment"
-
     # Filter assays by size
     if max_assay_size is not None and not full_df.empty:
         logger.info(f"Filtering assays with more than {max_assay_size} compounds.")
@@ -204,8 +202,6 @@ def get_standardize_and_clean_workflow(
     if n_mixtures > 0:
         df = flag_to_remove_mixture_compounds(df)
         logger.info(f"Number of mixtures: {mask.sum()}")
-        # mixture_idxs = np.where(mask)[0]  # drop where smiles contain mixtures
-        # queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
 
     # Search for undefined stereocenters within the remaining data
     if drop_unassigned_chiral:
@@ -247,6 +243,7 @@ def get_standardize_and_clean_workflow(
             logger.info(f"Dropped {df_size - df.shape[0]} duplicates.")
 
     # drop the columns that are flagged
+    # TODO; might be useful to keep the data to investigate effect on aggregation
     df = df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None))
 
     if save_dropped and output_path is not None:
@@ -268,7 +265,7 @@ def aggregate_data(
     extra_id_cols: list[str] = [],
     extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
-    curate_assay_metadata: bool = False,
+    max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
 ):
     """Aggregate the data obtained from ChEMBL by:
@@ -291,8 +288,8 @@ def aggregate_data(
             separated by `;` in the final dataframe. Defaults to [].
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
-        curate_assay_metadata: If True, includes specific assay metadata fields in the
-            identification criteria for aggregation. Defaults to False.
+        max_assay_match: If True, includes assay metadata fields used by Landrum & Riniker, 2024
+            for the max assay match. Defaults to False.
         output_path: path to save the aggregated data
 
     Returns:
@@ -300,30 +297,24 @@ def aggregate_data(
     """
     current_extra_id_cols = list(extra_id_cols)  # Make a mutable copy
 
-    if curate_assay_metadata:
-        assay_metadata_id_cols = [
-            "assay_type",
-            "assay_organism",
-            "assay_category",
-            "assay_tax_id",
-            "assay_strain",
-            "assay_tissue",
-            "assay_cell_type",
-            "assay_subcellular_fraction",
-            "bao_format",
-        ]
-        # Ensure these columns exist in the DataFrame, warn if not
-        missing_metadata_cols = [col for col in assay_metadata_id_cols if col not in df.columns]
+    if max_assay_match:
+        logger.info(
+            f"Assay metadata matching for aggregation is enabled. Adding fields to ID columns: {DEFAULT_ASSAY_MATCH_FIELDS}"
+        )
+        # Ensure these columns exist in the DataFrame
+        missing_metadata_cols = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col not in df.columns]
         if missing_metadata_cols:
             logger.warning(
-                f"Assay metadata curation enabled, but the following columns are missing "
-                f"from the DataFrame and will be ignored for aggregation: {missing_metadata_cols}"
+                f"Assay metadata matching enabled for aggregation, but the following "
+                f"DEFAULT_ASSAY_MATCH_FIELDS are missing from the DataFrame and will be ignored: {missing_metadata_cols}"
             )
-            assay_metadata_id_cols = [col for col in assay_metadata_id_cols if col in df.columns]
+            fields_to_add = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col in df.columns]
+        else:  # Use only the fields that are actually present
+            fields_to_add = DEFAULT_ASSAY_MATCH_FIELDS
 
-        current_extra_id_cols.extend(assay_metadata_id_cols)
-        # Remove duplicates if any were already in extra_id_cols
+        current_extra_id_cols.extend(fields_to_add)
         current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
+        logger.info(f"Effective ID columns for aggregation: {current_extra_id_cols}")
 
     fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
         df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}

@@ -10,6 +10,7 @@ from chembl_downloader import latest
 from .. import __version__
 from ..chembl.api.downloader import check_and_download_chembl_db
 from ..chembl.api.sql_explorer import explorer_main
+from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
 from ..logger import logger, setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
@@ -39,6 +40,7 @@ DEFAULTS = {
     "save_dropped": False,
     "require_doc_date": False,
     "max_assay_size": None,
+    "max_assay_match": False,
 }
 
 STORE_TRUE_ARGS = [
@@ -51,6 +53,7 @@ STORE_TRUE_ARGS = [
     "curate_annotation_errors",
     "save_dropped",
     "require_doc_date",
+    "max_assay_match",
 ]
 
 STORE_FALSE_ARGS = ["skip_recipe"]
@@ -387,6 +390,17 @@ def parse_arguments() -> argparse.Namespace:
             "activities flagged for removal. If left as default (None), this filter won't be applied."
         ),
     )
+    parser.add_argument(
+        "--max-assay-match",
+        dest="max_assay_match",
+        action="store_true",
+        help=(
+            "Perform assay metadata matching. If True, assay metadata columns will be added to "
+            "`id_columns`, preventing compounds not matching the assay metadata from being "
+            "aggregated. Assay metadata columns that define this matching are: "
+            f"{', '.join(DEFAULT_ASSAY_MATCH_FIELDS)}. Default is False"
+        ),
+    )
 
     return parser.parse_args()
 
@@ -451,6 +465,7 @@ def main(args: argparse.Namespace) -> None:
         extra_multival_cols=args.metadata_columns,
         extra_id_cols=args.id_columns,
         aggregate_mutants=args.aggregate_mutants,
+        max_assay_match=args.max_assay_match,
         output_path=args.output_path,
     )
 
