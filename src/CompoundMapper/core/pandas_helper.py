@@ -8,6 +8,7 @@ import pandas as pd
 from scipy.stats import gmean, gstd, median_abs_deviation
 
 from ..logger import logger
+from .default_fields import DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT
 
 
 def pchembl_to_molar(pchembl_value: float, unit: str = "nM") -> float:
@@ -197,9 +198,9 @@ def add_comment(
         pd.DataFrame: The DataFrame with the specified comment column added/updated.
     """
     if comment_type == "p":
-        column_name = "data_processing_comment"
+        column_name = DATA_PROCESSING_COMMENT
     elif comment_type == "d":
-        column_name = "data_dropping_comment"
+        column_name = DATA_DROPPING_COMMENT
     else:
         raise ValueError("comment_type must be either 'p' or 'd'.")
 

@@ -21,3 +21,20 @@ multiple_value_cols = (
     "prodrug",
     "withdrawn_flag",
 )
+
+DEFAULT_ASSAY_MATCH_FIELDS = [
+    "assay_type",
+    "assay_organism",
+    "assay_category",
+    "assay_tax_id",
+    "assay_strain",
+    "assay_tissue",
+    "assay_cell_type",
+    "assay_subcellular_fraction",
+    "bao_format",
+]
+
+DEFAULT_ASSAY_CHEMBL_ID = "assay_chembl_id"
+DEFAULT_MOLECULE_CHEMBL_ID = "molecule_chembl_id"
+DATA_DROPPING_COMMENT = "data_dropping_comment"
+DATA_PROCESSING_COMMENT = "data_processing_comment"
