@@ -42,6 +42,7 @@ DEFAULTS = {
     "max_assay_size": None,
     "max_assay_match": False,
     "min_assay_overlap": 0,
+    "strict_mutant_removal": False,
 }
 
 STORE_TRUE_ARGS = [
@@ -55,6 +56,7 @@ STORE_TRUE_ARGS = [
     "save_dropped",
     "require_doc_date",
     "max_assay_match",
+    "strict_mutant_removal",
 ]
 
 STORE_FALSE_ARGS = ["skip_recipe"]
@@ -376,12 +378,14 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "-reqdoc",
         "--require-doc-date",
         dest="require_doc_date",
         action="store_true",
         help=("Filter out bioactivities that do not have a document date. Default is False."),
     )
     parser.add_argument(
+        "-mass",
         "--max-assay-size",
         dest="max_assay_size",
         type=int,
@@ -392,6 +396,7 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "-maxm",
         "--max-assay-match",
         dest="max_assay_match",
         action="store_true",
@@ -403,6 +408,7 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "-maso",
         "--min-assay-overlap",
         dest="min_assay_overlap",
         type=int,
@@ -412,6 +418,16 @@ def parse_arguments() -> argparse.Namespace:
             "for their activities to be considered. Activities from assay pairs not meeting "
             "this overlap will be flagged for removal. If left as default (None), "
             "this filter won't be applied."
+        ),
+    )
+    parser.add_argument(
+        "-smr",
+        "--strict-mutant-removal",
+        dest="strict_mutant_removal",
+        action="store_true",
+        help=(
+            "If True, assays with 'mutant', 'mutation', or 'variant' in their "
+            "description will be flagged for removal. Default is False."
         ),
     )
 
@@ -471,6 +487,7 @@ def main(args: argparse.Namespace) -> None:
         require_doc_date=args.require_doc_date,
         max_assay_size=args.max_assay_size,
         min_assay_overlap=args.min_assay_overlap,
+        strict_mutant_removal=args.strict_mutant_removal,
     )
 
     df = aggregate_data(

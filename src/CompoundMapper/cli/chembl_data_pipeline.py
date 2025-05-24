@@ -11,6 +11,7 @@ from ..chembl.data_flag_functions import (
     flag_missing_canonical_smiles,
     flag_missing_standard_smiles,
     flag_salt_or_solvent_removal,
+    flag_strict_mutant_assays,
     flag_to_remove_mixture_compounds,
     flag_undefined_stereochemistry,
 )
@@ -52,6 +53,7 @@ def get_standardize_and_clean_workflow(
     require_doc_date: bool = False,
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
+    strict_mutant_removal: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -85,7 +87,9 @@ def get_standardize_and_clean_workflow(
         max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
             have their activities flagged for removal. Defaults to None (no filtering).
         min_assay_overlap: Minimum number of overlapping compounds between two assays for the same target
-            for their activities to be considered. Defaults to None (no filtering).
+                for their activities to be considered. Defaults to None (no filtering).
+            strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
+                description will be flagged for removal. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -235,6 +239,15 @@ def get_standardize_and_clean_workflow(
             logger.debug(df[undefined_stereo_mask].iloc[:, :5])
         if df.empty:
             logger.warning("All data points have been dropped due to undefined stereocenters!!")
+            return pd.DataFrame()
+
+    # Strict mutant removal based on assay_description
+    if strict_mutant_removal:
+        df = flag_strict_mutant_assays(df, strict_mutant_removal=True)
+        if df.empty:
+            logger.warning(
+                "All data points have been dropped after strict mutant removal based on assay_description."
+            )
             return pd.DataFrame()
 
     # Documents - since much of ChEMBL is take from medchem literature, if there are two

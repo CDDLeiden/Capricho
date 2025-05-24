@@ -89,6 +89,50 @@ def flag_undefined_stereochemistry(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def flag_strict_mutant_assays(df: pd.DataFrame, strict_mutant_removal: bool = False) -> pd.DataFrame:
+    """Marks assays for removal if their description contains mutant-related keywords
+    and strict_mutant_removal is True.
+    """
+    if not strict_mutant_removal:
+        logger.debug("Strict mutant removal is False. Skipping assay description-based mutant flagging.")
+        return df
+
+    if "assay_description" not in df.columns:
+        logger.warning(
+            "Column 'assay_description' not found in DataFrame. " "Skipping strict mutant assay flagging."
+        )
+        return df
+
+    keywords = ["mutant", "mutation", "variant"]
+    keyword_pattern = "|".join(keywords)
+
+    criteria = (  # noqa: E731 - lambda function saved in a variable here just for clarity
+        lambda series: series.astype(str).str.lower().str.contains(keyword_pattern, regex=True, na=False)
+    )
+
+    # Calculate the mask for logging purposes before applying add_comment
+    mask_to_flag = criteria(df["assay_description"])
+    num_to_flag = mask_to_flag.sum()
+
+    if num_to_flag > 0:
+        logger.info(
+            f"Flagging {num_to_flag} assays for removal based on strict mutant removal criteria "
+            f"(keywords: {', '.join(keywords)} in 'assay_description')."
+        )
+        df = add_comment(
+            df,
+            comment="Strict mutant removal: keyword in assay_description",
+            criteria_func=criteria,
+            target_column="assay_description",
+            comment_type="d",
+        )
+    else:
+        logger.info(
+            "No assays to flag for removal based on strict mutant removal criteria in 'assay_description'."
+        )
+    return df
+
+
 def flag_insufficient_assay_overlap(
     df: pd.DataFrame,
     min_overlap: int = 0,
