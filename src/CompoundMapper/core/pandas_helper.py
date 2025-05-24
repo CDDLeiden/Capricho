@@ -219,5 +219,7 @@ def add_comment(
             pass
         mask = pd.Series(True, index=df.index)
 
-    df.loc[mask, column_name] = df.loc[mask, column_name].apply(lambda x: f"{x}; {comment}" if x else comment)
+    df.loc[mask, column_name] = df.loc[mask, column_name].apply(
+        lambda x: f"{x} & {comment}" if x else comment
+    )
     return df

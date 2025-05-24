@@ -10,7 +10,11 @@ from chembl_downloader import latest
 from .. import __version__
 from ..chembl.api.downloader import check_and_download_chembl_db
 from ..chembl.api.sql_explorer import explorer_main
-from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
+from ..core.default_fields import (
+    DATA_DROPPING_COMMENT,
+    DATA_PROCESSING_COMMENT,
+    DEFAULT_ASSAY_MATCH_FIELDS,
+)
 from ..logger import logger, setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
@@ -43,6 +47,7 @@ DEFAULTS = {
     "max_assay_match": False,
     "min_assay_overlap": 0,
     "strict_mutant_removal": False,
+    "keep_flagged_data": False,
 }
 
 STORE_TRUE_ARGS = [
@@ -57,6 +62,7 @@ STORE_TRUE_ARGS = [
     "require_doc_date",
     "max_assay_match",
     "strict_mutant_removal",
+    "keep_flagged_data",
 ]
 
 STORE_FALSE_ARGS = ["skip_recipe"]
@@ -430,6 +436,17 @@ def parse_arguments() -> argparse.Namespace:
             "description will be flagged for removal. Default is False."
         ),
     )
+    parser.add_argument(
+        "-kfd",
+        "--keep-flagged-data",
+        dest="keep_flagged_data",
+        action="store_true",
+        help=(
+            "If True, data points flagged for dropping will be retained in the main dataset. "
+            "The `data_dropping_comment` column will still be populated. "
+            "A warning will be logged. Default is False."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -488,7 +505,11 @@ def main(args: argparse.Namespace) -> None:
         max_assay_size=args.max_assay_size,
         min_assay_overlap=args.min_assay_overlap,
         strict_mutant_removal=args.strict_mutant_removal,
+        keep_flagged_data=args.keep_flagged_data,
     )
+
+    if args.keep_flagged_data:
+        args.metadata_columns.extend([DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT])
 
     df = aggregate_data(
         df=df,

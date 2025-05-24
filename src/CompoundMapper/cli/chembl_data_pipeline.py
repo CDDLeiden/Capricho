@@ -54,6 +54,7 @@ def get_standardize_and_clean_workflow(
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
     strict_mutant_removal: bool = False,
+    keep_flagged_data: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -90,6 +91,9 @@ def get_standardize_and_clean_workflow(
                 for their activities to be considered. Defaults to None (no filtering).
             strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
                 description will be flagged for removal. Defaults to False.
+        keep_flagged_data: If True, data points flagged for dropping (due to various quality
+            checks) will be retained in the main DataFrame. The `data_dropping_comment` column
+            will still be populated. A warning will be logged. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -148,7 +152,7 @@ def get_standardize_and_clean_workflow(
 
                 comment = f"Assay size exceeds maximum (N > {max_assay_size})"
                 existing_comments = full_df.loc[filter_mask, DATA_DROPPING_COMMENT].fillna("")
-                new_comments = existing_comments.apply(lambda x: f"{x}; {comment}" if x else comment)
+                new_comments = existing_comments.apply(lambda x: f"{x} & {comment}" if x else comment)
                 full_df.loc[filter_mask, DATA_DROPPING_COMMENT] = new_comments
             else:
                 logger.info("No assays found exceeding the maximum size.")
@@ -273,16 +277,27 @@ def get_standardize_and_clean_workflow(
         if df_size != df.shape[0]:
             logger.info(f"Dropped {df_size - df.shape[0]} duplicates.")
 
-    # drop the columns that are flagged
-    # TODO; might be useful to keep the data to investigate effect on aggregation
-    df = df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None))
-
     if save_dropped and output_path is not None:
-        df.query("~data_dropping_comment.isna()").to_csv(
-            output_path.with_stem(f"{output_path.stem}_removed"), index=False
+        df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
+            "~data_dropping_comment.isna()"
+        ).to_csv(output_path.with_stem(f"{output_path.stem}_removed"), index=False)
+
+    if keep_flagged_data:
+        logger.warning(
+            "Retaining flagged data points in the main dataset. "
+            "This dataset includes entries that would normally be dropped due to quality flags "
+            "and is generally not recommended. The 'data_dropping_comment' column indicates the reasons."
+        )
+        missing_smiles_patt = "Missing (standard )SMILES|Missing SMILES"
+        df = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
+            "~data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)"
+        ).query("~pchembl_value.isna()")
+
+    else:
+        df = df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
+            "data_dropping_comment.isna()"
         )
 
-    df = df.query("data_dropping_comment.isna()")
     if save_not_aggregated and output_path is not None:
         df.to_csv(output_path.with_stem(f"{output_path.stem}_not_aggregated"), index=False)
 
