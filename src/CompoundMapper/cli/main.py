@@ -41,6 +41,7 @@ DEFAULTS = {
     "require_doc_date": False,
     "max_assay_size": None,
     "max_assay_match": False,
+    "min_assay_overlap": 0,
 }
 
 STORE_TRUE_ARGS = [
@@ -401,6 +402,18 @@ def parse_arguments() -> argparse.Namespace:
             f"{', '.join(DEFAULT_ASSAY_MATCH_FIELDS)}. Default is False"
         ),
     )
+    parser.add_argument(
+        "--min-assay-overlap",
+        dest="min_assay_overlap",
+        type=int,
+        default=DEFAULTS["min_assay_overlap"],
+        help=(
+            "Minimum number of overlapping compounds between two assays for the same target "
+            "for their activities to be considered. Activities from assay pairs not meeting "
+            "this overlap will be flagged for removal. If left as default (None), "
+            "this filter won't be applied."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -457,6 +470,7 @@ def main(args: argparse.Namespace) -> None:
         backend=args.chembl_backend,
         require_doc_date=args.require_doc_date,
         max_assay_size=args.max_assay_size,
+        min_assay_overlap=args.min_assay_overlap,
     )
 
     df = aggregate_data(
@@ -495,7 +509,7 @@ def main(args: argparse.Namespace) -> None:
             elif isinstance(v, str):
                 if DEFAULTS[k] != v:
                     command_vals.append(f"--{save_k} {v}")
-            elif isinstance(v, int):  # Added for max_assay_size
+            elif isinstance(v, int):  # Added for max_assay_size and min_assay_overlap
                 if DEFAULTS[k] != v:
                     command_vals.append(f"--{save_k} {v}")
 

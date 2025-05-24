@@ -34,7 +34,11 @@ DEFAULT_ASSAY_MATCH_FIELDS = [
     "bao_format",
 ]
 
-DEFAULT_ASSAY_CHEMBL_ID = "assay_chembl_id"
-DEFAULT_MOLECULE_CHEMBL_ID = "molecule_chembl_id"
+ACTIVITY_ID = "activity_id"
+MOLECULE_ID = "molecule_chembl_id"
+ASSAY_ID = "assay_chembl_id"
+TARGET_ID = "target_chembl_id"
+DOCUMENT_ID = "document_chembl_id"
+
 DATA_DROPPING_COMMENT = "data_dropping_comment"
 DATA_PROCESSING_COMMENT = "data_processing_comment"

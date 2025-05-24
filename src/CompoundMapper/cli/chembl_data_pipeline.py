@@ -7,6 +7,7 @@ from chemFilters.chem.standardizers import ChemStandardizer
 
 from ..chembl.data_flag_functions import (
     flag_duplication,
+    flag_insufficient_assay_overlap,
     flag_missing_canonical_smiles,
     flag_missing_standard_smiles,
     flag_salt_or_solvent_removal,
@@ -16,10 +17,11 @@ from ..chembl.data_flag_functions import (
 from ..chembl.exceptions import BioactivitiesNotFoundError
 from ..chembl.processing import get_bioactivities_workflow
 from ..core.default_fields import (
+    ASSAY_ID,
     DATA_DROPPING_COMMENT,
-    DEFAULT_ASSAY_CHEMBL_ID,
     DEFAULT_ASSAY_MATCH_FIELDS,
-    DEFAULT_MOLECULE_CHEMBL_ID,
+    MOLECULE_ID,
+    TARGET_ID,
 )
 from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
@@ -49,6 +51,7 @@ def get_standardize_and_clean_workflow(
     curate_annotation_errors: bool = True,
     require_doc_date: bool = False,
     max_assay_size: Optional[int] = None,
+    min_assay_overlap: int = 0,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -81,6 +84,8 @@ def get_standardize_and_clean_workflow(
         require_doc_date: Whether to filter out activities without a document year.
         max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
             have their activities flagged for removal. Defaults to None (no filtering).
+        min_assay_overlap: Minimum number of overlapping compounds between two assays for the same target
+            for their activities to be considered. Defaults to None (no filtering).
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -120,12 +125,12 @@ def get_standardize_and_clean_workflow(
     if max_assay_size is not None and not full_df.empty:
         logger.info(f"Filtering assays with more than {max_assay_size} compounds.")
         # Ensure the necessary columns exist before trying to group or filter
-        if DEFAULT_ASSAY_CHEMBL_ID in full_df.columns and DEFAULT_MOLECULE_CHEMBL_ID in full_df.columns:
-            assay_counts = full_df.groupby(DEFAULT_ASSAY_CHEMBL_ID)[DEFAULT_MOLECULE_CHEMBL_ID].nunique()
+        if ASSAY_ID in full_df.columns and MOLECULE_ID in full_df.columns:
+            assay_counts = full_df.groupby(ASSAY_ID)[MOLECULE_ID].nunique()
             assays_to_filter = assay_counts[assay_counts > max_assay_size].index.tolist()
 
             if assays_to_filter:
-                filter_mask = full_df[DEFAULT_ASSAY_CHEMBL_ID].isin(assays_to_filter)
+                filter_mask = full_df[ASSAY_ID].isin(assays_to_filter)
                 num_activities_flagged = filter_mask.sum()
                 num_assays_flagged = len(assays_to_filter)
 
@@ -146,8 +151,21 @@ def get_standardize_and_clean_workflow(
         else:
             logger.warning(
                 f"Could not filter by assay size. Required columns "
-                f"'{DEFAULT_ASSAY_CHEMBL_ID}' or '{DEFAULT_MOLECULE_CHEMBL_ID}' not found in DataFrame."
+                f"'{ASSAY_ID}' or '{MOLECULE_ID}' not found in DataFrame."
             )
+
+    # Filter by minimum assay overlap
+    if min_assay_overlap > 0 and not full_df.empty:
+        logger.info(f"Filtering assays based on minimum overlap of {min_assay_overlap} compounds.")
+        full_df = flag_insufficient_assay_overlap(
+            df=full_df,
+            min_overlap=min_assay_overlap,
+            molecule_col=MOLECULE_ID,
+            assay_col=ASSAY_ID,
+            target_col=TARGET_ID,
+            comment_col=DATA_DROPPING_COMMENT,
+            logger=logger,
+        )
 
     cols_to_remove_post_standardization = [
         "type",

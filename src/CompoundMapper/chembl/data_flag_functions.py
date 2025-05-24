@@ -12,7 +12,14 @@ used to annotate processing steps that occurred during the data processing pipel
 
 import pandas as pd
 
+from ..core.default_fields import (
+    ASSAY_ID,
+    DATA_DROPPING_COMMENT,
+    MOLECULE_ID,
+    TARGET_ID,
+)
 from ..core.pandas_helper import add_comment
+from ..logger import logger
 
 
 ### Marking readouts that will be DROPPED by CompoundMapper ###
@@ -80,6 +87,104 @@ def flag_undefined_stereochemistry(df: pd.DataFrame) -> pd.DataFrame:
         target_column="undefined_stereocenters",
         comment_type="d",
     )
+
+
+def flag_insufficient_assay_overlap(
+    df: pd.DataFrame,
+    min_overlap: int = 0,
+    molecule_col: str = MOLECULE_ID,
+    assay_col: str = ASSAY_ID,
+    target_col: str = TARGET_ID,
+    comment_col: str = DATA_DROPPING_COMMENT,
+) -> pd.DataFrame:
+    """Mark activities from assay pairs (for the same target) that don't meet the minimum
+    compound overlap criterium, useful for analysis assessing the comparability of assays
+    reported in ChEMBL. Depending on the target, this filter can remove a significant
+    amount of activities from the dataset, but it is useful to assess the comparability of
+    the assays reported in the database.
+
+    Args:
+        df: DataFrame to be processed.
+        min_overlap: Minimum number of overlapping compounds required. Defaults to 0
+        molecule_col: Name of the molecule identifier column. Defaults to molecule_chembl_id.
+        assay_col: Name of the assay identifier column. Defaults to assay_chembl_id.
+        target_col: Name of the target identifier column. Defaults to target_chembl_id.
+        comment_col: Name of the column to store dropping comments. Defaults to data_dropping_comment.
+
+    Returns:
+        pd.DataFrame: DataFrame with activities from low-overlap assay pairs flagged.
+    """
+    if min_overlap is None:
+        raise ValueError("min_overlap must be provided and cannot be None.")
+        return df
+    elif min_overlap == 0:
+        logger.info("min_overlap set to 0. Skipping insufficient assay overlap filtering.")
+        return df
+
+    if not all(col in df.columns for col in [molecule_col, assay_col, target_col]):
+        logger.warning(
+            f"One or more required columns ({molecule_col}, {assay_col}, {target_col}) "
+            "not found in DataFrame. Skipping insufficient assay overlap filtering."
+        )
+        return df
+
+    if df.empty:
+        logger.info("DataFrame is empty. Skipping insufficient assay overlap filtering.")
+        return df
+
+    if comment_col not in df.columns:  # Ensure comment_col exists
+        df[comment_col] = pd.Series(dtype="object")
+
+    assays_to_flag_globally = set()  # Keep track of assays that are part of any failing pair
+
+    for target_id, group_df in df.groupby(target_col):
+        unique_assays_in_target = group_df[assay_col].unique()
+        if len(unique_assays_in_target) < 2:
+            continue  # Not enough assays for this target to form a pair
+
+        # Create a mapping of assay_id to set of molecule_ids for this target
+        assay_to_molecules = {}
+        for assay_id in unique_assays_in_target:
+            assay_to_molecules[assay_id] = set(
+                group_df[group_df[assay_col] == assay_id][molecule_col].unique()
+            )
+
+        # Iterate through unique pairs of assays for the current target
+        from itertools import combinations
+
+        for assay1_id, assay2_id in combinations(unique_assays_in_target, 2):
+            molecules1 = assay_to_molecules.get(assay1_id, set())
+            molecules2 = assay_to_molecules.get(assay2_id, set())
+
+            overlap_count = len(molecules1.intersection(molecules2))
+
+            if overlap_count < min_overlap:
+                assays_to_flag_globally.add(assay1_id)
+                assays_to_flag_globally.add(assay2_id)
+                logger.debug(
+                    f"Target {target_id}: Assays {assay1_id} and {assay2_id} have overlap {overlap_count} "
+                    f"(less than {min_overlap}). They will be flagged."
+                )
+
+    if assays_to_flag_globally:
+        filter_mask = df[assay_col].isin(list(assays_to_flag_globally))
+        num_activities_flagged = filter_mask.sum()
+        num_assays_flagged = len(assays_to_flag_globally)
+
+        logger.info(
+            f"Flagging {num_activities_flagged} activities from {num_assays_flagged} unique assays "
+            f"that were part of pairs not meeting the minimum overlap of {min_overlap} compounds."
+        )
+
+        comment_text = f"Insufficient assay overlap (min_overlap={min_overlap})"
+
+        existing_comments = df.loc[filter_mask, comment_col].fillna("")
+        new_comments = existing_comments.apply(lambda x: f"{x}; {comment_text}" if x else comment_text)
+        df.loc[filter_mask, comment_col] = new_comments
+    else:
+        logger.info(f"No assay pairs found below the minimum overlap of {min_overlap} compounds.")
+
+    return df
 
 
 ### Marking readouts that were PROCESSED by CompoundMapper ###
