@@ -83,7 +83,7 @@ def convert_to_log10(df: pd.DataFrame, save_dropped: bool = False) -> pd.DataFra
                 "standard_units",
                 "standard_value",
             ]
-            _info = pchembl_inf_or_nan.loc[:6, debug_cols]
+            _info = pchembl_inf_or_nan.loc[pchembl_inf_or_nan.index[:6], debug_cols]
             comment = "Infinite or NaN pchembl_value after calculation"
             if save_dropped:
                 logger.info(f"Flagging {len(pchembl_inf_or_nan)} rows: {comment}:\n{_info}")
