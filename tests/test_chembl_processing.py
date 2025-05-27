@@ -35,7 +35,7 @@ class TestChemblProcessing(unittest.TestCase):
         result = processing.process_bioactivities(self.sample_df, calculate_pchembl=True, save_dropped=True)
         self.assertEqual(
             result["data_dropping_comment"].tolist(),
-            ["", "", "Data Validity Comment Present; Potential Duplicate"],
+            ["", "", "Data Validity Comment Present & Potential Duplicate"],
         )
         self.assertEqual(
             result["data_processing_comment"].tolist(),

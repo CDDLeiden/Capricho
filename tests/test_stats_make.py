@@ -302,7 +302,11 @@ class TestActivityCuration(unittest.TestCase):
 
         print("\nCaptured Log Output:\n", log_output)
 
-        self.assertIn("Curation: Removing 11 measurements due to potential unit annotation error", log_output)
+        self.assertIn(
+            "Activity Curation: Removing 11 measurements. potential unit annotation error "
+            "- pChEMBL values differ by 3.0 for same molecule",
+            log_output,
+        )
 
         pd.testing.assert_frame_equal(
             processed_df.reset_index(drop=True),
