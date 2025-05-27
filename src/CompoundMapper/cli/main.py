@@ -341,8 +341,8 @@ def parse_arguments() -> argparse.Namespace:
         "--skip-recipe",
         dest="skip_recipe",
         help=(
-            "Saves a json file with the parameters used to fetch the data. Useful for reproducibility. "
-            "The file will be saved with the asme output path, but with the `_recipe.json` suffix."
+            "Skip saving the json file with the parameters used to fetch the data. "
+            "The file will be saved with the asme output path, but with the `_recipe.json` suffix. "
             "Defaults to True."
         ),
         action="store_true",
@@ -564,3 +564,7 @@ def main(args: argparse.Namespace) -> None:
 def main_exe() -> None:
     args = parse_arguments()
     main(args)
+
+
+if __name__ == "__main__":
+    main_exe()
