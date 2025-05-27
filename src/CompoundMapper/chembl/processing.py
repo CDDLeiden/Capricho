@@ -108,8 +108,8 @@ def curate_activity_pairs(
     activity_value_col: str = "pchembl_value",
     save_dropped: bool = False,
 ) -> pd.DataFrame:
-    """Curate activity pairs for the same molecule across different assays. Removes pairs
-    of measurements if their pChEMBL values differ by 3.0.
+    """Curate activity pairs for the same molecule across different assays. Removes or flags pairs
+    of measurements if their activity values (e.g., pChEMBL values) differ by approximately 3.0.
 
     Filter inspired on Landrum & Riniker, 2024, where the authors state:
 
@@ -122,7 +122,8 @@ def curate_activity_pairs(
         df: DataFrame with bioactivity data.
         mol_id_col: column name for molecule IDs. Defaults to "molecule_chembl_id" for ChEMBL data.
         assay_id_col: column name for assay IDs. Defaults to "assay_chembl_id" for ChEMBL data.
-        activity_id_col: column name for activity values. Defaults to "pchembl_value" for ChEMBL data.
+        activity_value_col: column name for activity values. Defaults to "pchembl_value" for ChEMBL data.
+        save_dropped: If True, flags rows by adding a comment. If False, drops rows.
 
     Returns:
         pd.DataFrame: The curated DataFrame.
@@ -130,56 +131,98 @@ def curate_activity_pairs(
     if not {mol_id_col, assay_id_col, activity_value_col}.issubset(df.columns):
         logger.warning(
             "Skipping activity pair curation: Required columns "
-            f"({mol_id_col}, assay_id_col, 'pchembl_value') not found."
+            f"({mol_id_col}, {assay_id_col}, {activity_value_col}) not found."
         )
         return df
 
-    rows_to_drop = set()
-    # Group by molecule
-    for molecule_id, group in df.groupby(mol_id_col):
-        # Get unique assays for this molecule
-        unique_assays = group[assay_id_col].unique()
-        if len(unique_assays) < 2:
-            continue  # Not enough assays to form a pair
+    if df.empty:
+        logger.info("Input DataFrame is empty. Skipping activity pair curation.")
+        return df
 
-        # Iterate over all unique pairs of assays for this molecule
-        for assay1_id, assay2_id in combinations(unique_assays, 2):
-            measurements1 = group[group[assay_id_col] == assay1_id]
-            measurements2 = group[group[assay_id_col] == assay2_id]
+    # Prepare DataFrame for merge by adding original index as a new column
+    df_for_merge = df.copy()
 
-            # Iterate over all combinations of measurements between the two assays
-            for idx1, row1 in measurements1.iterrows():
-                for idx2, row2 in measurements2.iterrows():
-                    val1 = row1[activity_value_col]
-                    val2 = row2[activity_value_col]
+    # Create a unique name for the temporary column holding original index values
+    temp_orig_idx_col = "__original_index__"
+    _i = 0
+    while temp_orig_idx_col in df_for_merge.columns:
+        temp_orig_idx_col = f"__original_index__{_i}"
+        _i += 1
+    df_for_merge[temp_orig_idx_col] = df.index  # Use original df.index
 
-                    if pd.isna(val1) or pd.isna(val2):
-                        continue
+    # Self-merge on molecule ID
+    merged_df = pd.merge(df_for_merge, df_for_merge, on=mol_id_col, suffixes=("_L", "_R"))
 
-                    # Add a small epsilon for robust floating point comparison >= 3.0
-                    if isclose(abs(val1 - val2), 3.0, rel_tol=1e-9, abs_tol=1e-9):
-                        rows_to_drop.add(idx1)
-                        rows_to_drop.add(idx2)
-                        logger.debug(
-                            f"Marking rows for molecule {molecule_id}, assays {assay1_id} (value: {val1}) "
-                            f"and {assay2_id} (value: {val2}) for removal due to pChEMBL value similarity/difference."
-                        )
+    # Define column names for easier access
+    orig_idx_col_L = temp_orig_idx_col + "_L"
+    orig_idx_col_R = temp_orig_idx_col + "_R"
+    assay_col_L = assay_id_col + "_L"
+    assay_col_R = assay_id_col + "_R"
+    activity_col_L = activity_value_col + "_L"
+    activity_col_R = activity_value_col + "_R"
 
-    if rows_to_drop:
+    # Filter for pairs:
+    # 1. From different assays
+    condition_diff_assays = merged_df[assay_col_L] != merged_df[assay_col_R]
+    # 2. Unique pairs of original rows (avoid self-comparison and duplicate (rowA,rowB)/(rowB,rowA) pairs)
+    condition_unique_rows = merged_df[orig_idx_col_L] < merged_df[orig_idx_col_R]
+
+    valid_pairs = merged_df[condition_diff_assays & condition_unique_rows].copy()
+
+    if valid_pairs.empty:
+        logger.info(
+            "No potential activity pairs found after initial structural filtering (diff assays, unique rows)."
+        )
+        return df
+
+    # Handle NaNs in activity values for the pairs
+    valid_pairs.dropna(subset=[activity_col_L, activity_col_R], inplace=True)
+
+    if valid_pairs.empty:
+        logger.info("No valid pairs with non-NaN activity values found for curation.")
+        return df
+
+    # Calculate absolute difference in activity values
+    valid_pairs["abs_diff"] = np.abs(valid_pairs[activity_col_L] - valid_pairs[activity_col_R])
+
+    # Check if the absolute difference is close to 3.0
+    is_close_to_3 = np.isclose(valid_pairs["abs_diff"], 3.0, rtol=1e-9, atol=1e-9)
+    problematic_pairs = valid_pairs[is_close_to_3]
+
+    rows_to_flag_indices = set()
+    if not problematic_pairs.empty:
+        indices_L = problematic_pairs[orig_idx_col_L]
+        indices_R = problematic_pairs[orig_idx_col_R]
+        rows_to_flag_indices.update(indices_L.unique())
+        rows_to_flag_indices.update(indices_R.unique())
+
+        for _, row_pair in problematic_pairs.iterrows():  # iterrows on small problematic_pairs df for logging
+            logger.debug(
+                f"Marking/flagging rows for molecule {row_pair[mol_id_col]} (indices: {row_pair[orig_idx_col_L]}, {row_pair[orig_idx_col_R]}), "
+                f"assays {row_pair[assay_col_L]} (value: {row_pair[activity_col_L]}) and "
+                f"{row_pair[assay_col_R]} (value: {row_pair[activity_col_R]}) "
+                f"due to activity value difference ~3.0."
+            )
+
+    if rows_to_flag_indices:
         comment = "potential unit annotation error - pChEMBL values differ by 3.0 for same molecule"
+        final_indices_to_action = list(rows_to_flag_indices)
+
         if save_dropped:
-            logger.info(f"Activity Curation: Flagging {len(rows_to_drop)} measurements due to {comment}.")
-            # Use a dummy target_column as criteria_func handles selection by index
+            logger.info(f"Activity Curation: Flagging {len(final_indices_to_action)} measurements. {comment}")
             df = add_comment(
                 df=df,
                 comment=comment,
-                criteria_func=lambda x: x.index.isin(rows_to_drop),
-                target_column=activity_value_col,  # Actual column doesn't matter here
+                criteria_func=lambda x: x.index.isin(final_indices_to_action),
+                target_column=activity_value_col,
                 comment_type="d",
             )
         else:
-            logger.info(f"Activity Curation: Removing {len(rows_to_drop)} measurements due to {comment}.")
-            df = df.drop(index=list(rows_to_drop))
+            logger.info(f"Activity Curation: Removing {len(final_indices_to_action)} measurements. {comment}")
+            df = df.drop(index=final_indices_to_action)
+    else:
+        logger.info("No activity pairs found meeting the curation criteria (activity diff ~3.0).")
+
     return df
 
 
