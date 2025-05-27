@@ -207,6 +207,9 @@ def add_comment(
     if column_name not in df.columns:  # make sure it exists, initialize empty string
         df[column_name] = ""
 
+    # Preventively fill NaN values in the comment column to avoid "nan" string concatenation
+    df[column_name] = df[column_name].fillna("")
+
     if target_column is not None:
         if target_column not in df.columns:
             raise ValueError(f"Column '{target_column}' not found in DataFrame for comment '{comment}'.")
