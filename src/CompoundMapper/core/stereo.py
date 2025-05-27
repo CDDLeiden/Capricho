@@ -24,6 +24,9 @@ def find_undefined_stereocenters(input: Union[Chem.Mol | str]) -> List[int]:
     elif isinstance(input, Chem.Mol):
         mol = input
 
+    if mol is None:
+        return []
+
     try:
         chiral_centers = Chem.FindMolChiralCenters(mol, includeUnassigned=True, useLegacyImplementation=False)
     except TypeError as e:
