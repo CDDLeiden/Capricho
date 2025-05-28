@@ -4,6 +4,8 @@ from typing import List, Union
 
 from rdkit import Chem
 
+from ..logger import logger
+
 
 def find_undefined_stereocenters(input: Union[Chem.Mol | str]) -> List[int]:
     """
@@ -31,6 +33,9 @@ def find_undefined_stereocenters(input: Union[Chem.Mol | str]) -> List[int]:
         chiral_centers = Chem.FindMolChiralCenters(mol, includeUnassigned=True, useLegacyImplementation=False)
     except TypeError as e:
         raise TypeError(f"Something wront with input: {input}") from e
+    except RuntimeError as e:
+        logger.error(f"Error finding chiral centers in molecule: {input}. Error: {e}")
+        return []
 
     undefined_stereo = []  # find atoms with undefined stereochemistry
     for atom_idx, chirality in chiral_centers:
