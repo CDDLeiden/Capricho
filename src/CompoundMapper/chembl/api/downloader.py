@@ -504,42 +504,52 @@ def get_full_activity_data_sql(
         pd.DataFrame: a DataFrame with the bioactivity data.
     """
     downloader_configs = check_and_download_chembl_db(prefix=prefix, version=version)
-    where_conditions = []  # store the WHERE conditions
+    where_conditions_main = []
 
-    # handle optional filters for molecule, target, assay, and document IDs
     if molecule_chembl_ids is not None:
-        if isinstance(molecule_chembl_ids, str):
-            molecule_ids = [molecule_chembl_ids]
-        else:
-            molecule_ids = molecule_chembl_ids
-        m_placeholders = ", ".join([f"'{id}'" for id in molecule_ids])
-        where_conditions.append(f"md.chembl_id IN ({m_placeholders})")
+        ids = [molecule_chembl_ids] if isinstance(molecule_chembl_ids, str) else molecule_chembl_ids
+        placeholders = ", ".join([f"'{id}'" for id in ids])
+        where_conditions_main.append(f"md.chembl_id IN ({placeholders})")
 
     if target_chembl_ids is not None:
-        if isinstance(target_chembl_ids, str):
-            target_ids = [target_chembl_ids]
-        else:
-            target_ids = target_chembl_ids
-        t_placeholders = ", ".join([f"'{id}'" for id in target_ids])
-        where_conditions.append(f"td.chembl_id IN ({t_placeholders})")
+        ids = [target_chembl_ids] if isinstance(target_chembl_ids, str) else target_chembl_ids
+        placeholders = ", ".join([f"'{id}'" for id in ids])
+        where_conditions_main.append(f"td.chembl_id IN ({placeholders})")
 
     if document_chembl_ids is not None:
-        if isinstance(document_chembl_ids, str):
-            document_ids = [document_chembl_ids]
-        else:
-            document_ids = document_chembl_ids
-        d_placeholders = ", ".join([f"'{id}'" for id in document_ids])
-        where_conditions.append(f"d.chembl_id IN ({d_placeholders})")
+        ids = [document_chembl_ids] if isinstance(document_chembl_ids, str) else document_chembl_ids
+        placeholders = ", ".join([f"'{id}'" for id in ids])
+        where_conditions_main.append(f"d.chembl_id IN ({placeholders})")
 
     if assay_chembl_ids is not None:
-        if isinstance(assay_chembl_ids, str):
-            assay_ids = [assay_chembl_ids]
-        else:
-            assay_ids = assay_chembl_ids
-        a_placeholders = ", ".join([f"'{id}'" for id in assay_ids])
-        where_conditions.append(f"a.chembl_id IN ({a_placeholders})")
+        ids = [assay_chembl_ids] if isinstance(assay_chembl_ids, str) else assay_chembl_ids
+        placeholders = ", ".join([f"'{id}'" for id in ids])
+        where_conditions_main.append(f"a.chembl_id IN ({placeholders})")
 
-    # Build field list
+    where_conditions_main.append("act.standard_value IS NOT NULL")
+    where_conditions_main.append("act.standard_relation IS NOT NULL")
+
+    if standard_relation:
+        placeholders = ", ".join([f"'{rel}'" for rel in standard_relation])
+        where_conditions_main.append(f"act.standard_relation IN ({placeholders})")
+
+    if standard_type:
+        placeholders = ", ".join([f"'{stype}'" for stype in standard_type])
+        where_conditions_main.append(f"act.standard_type IN ({placeholders})")
+
+    if confidence_scores:
+        placeholders = ", ".join([f"{score}" for score in confidence_scores])
+        where_conditions_main.append(f"a.confidence_score IN ({placeholders})")
+
+    if assay_types:
+        placeholders = ", ".join([f"'{atype}'" for atype in assay_types])
+        where_conditions_main.append(f"a.assay_type IN ({placeholders})")
+
+    if chembl_release:
+        where_conditions_main.append(
+            f"(d.chembl_release_id IS NULL OR d.chembl_release_id <= {chembl_release})"
+        )
+
     base_fields = [
         "act.activity_id",
         "a.chembl_id AS assay_chembl_id",
@@ -574,9 +584,6 @@ def get_full_activity_data_sql(
         "td.organism AS target_organism",
         "cs.canonical_smiles",
         "cs.standard_inchi_key",
-        # "cs.molregno",
-        # "cs.active_molregno",
-        # "cs.parent_molregno",
         "act.data_validity_comment AS data_validity_comment",
         "act.potential_duplicate",
         "d.chembl_id AS document_chembl_id",
@@ -590,51 +597,89 @@ def get_full_activity_data_sql(
         "vs.mutation",
         "d.chembl_release_id AS chembl_release",
     ]
+    all_fields = base_fields + (additional_fields if additional_fields else [])
 
-    if additional_fields:
-        all_fields = base_fields + additional_fields
-    else:
-        all_fields = base_fields
+    # Add the assay_size field, using COALESCE to ensure 0 for assays with no matching count
+    all_fields.append("COALESCE(assay_molecule_counts.num_distinct_molecules, 0) AS assay_size")
 
-    fields_clause = ",\n            ".join(all_fields)
+    from_join_clauses_main = [
+        "molecule_dictionary md",
+        "JOIN compound_structures cs ON md.molregno = cs.molregno",
+        "JOIN activities act ON md.molregno = act.molregno",
+        "JOIN docs d ON act.doc_id = d.doc_id",
+        "JOIN assays a ON act.assay_id = a.assay_id",
+        "LEFT JOIN variant_sequences vs ON a.variant_id = vs.variant_id",
+        "JOIN target_dictionary td ON a.tid = td.tid",
+    ]
 
-    where_conditions.append("act.standard_value IS NOT NULL")
-    where_conditions.append("act.standard_relation IS NOT NULL")
+    # --- Subquery for Assay Size Calculation (assay_molecule_counts) ---
+    subquery_from_parts_count = [
+        "activities act_count",
+        "JOIN assays a_count ON act_count.assay_id = a_count.assay_id",
+        "JOIN target_dictionary td_count ON a_count.tid = td_count.tid",
+    ]
 
+    # Mirror relevant main query filters for assay size calculation
+    subquery_where_parts_count = []
     if standard_relation:
-        relation_placeholders = ", ".join([f"'{rel}'" for rel in standard_relation])
-        where_conditions.append(f"act.standard_relation IN ({relation_placeholders})")
+        relation_placeholders_count = ", ".join([f"'{rel}'" for rel in standard_relation])
+        subquery_where_parts_count.append(f"act_count.standard_relation IN ({relation_placeholders_count})")
 
     if standard_type:
-        type_placeholders = ", ".join([f"'{type}'" for type in standard_type])
-        where_conditions.append(f"act.standard_type IN ({type_placeholders})")
+        type_placeholders_count = ", ".join([f"'{stype}'" for stype in standard_type])
+        subquery_where_parts_count.append(f"act_count.standard_type IN ({type_placeholders_count})")
 
     if confidence_scores:
-        confidence_placeholders = ", ".join([f"{score}" for score in confidence_scores])
-        where_conditions.append(f"a.confidence_score IN ({confidence_placeholders})")
+        confidence_placeholders_count = ", ".join([f"{score}" for score in confidence_scores])
+        subquery_where_parts_count.append(f"a_count.confidence_score IN ({confidence_placeholders_count})")
 
     if assay_types:
-        atype_placeholders = ", ".join([f"'{type}'" for type in assay_types])
-        where_conditions.append(f"a.assay_type IN ({atype_placeholders})")
+        atype_placeholders_count = ", ".join([f"'{atype}'" for atype in assay_types])
+        subquery_where_parts_count.append(f"a_count.assay_type IN ({atype_placeholders_count})")
 
     if chembl_release:
-        where_conditions.append(f"(d.chembl_release_id IS NULL OR d.chembl_release_id <= {chembl_release})")
+        subquery_from_parts_count.append("JOIN docs d_count ON act_count.doc_id = d_count.doc_id")
+        subquery_where_parts_count.append(
+            f"(d_count.chembl_release_id IS NULL OR d_count.chembl_release_id <= {chembl_release})"
+        )
 
-    where_clause = " AND\n            ".join(where_conditions)
+    subquery_from_clause_count_str = "\n                ".join(subquery_from_parts_count)
+    subquery_where_clause_count_str = " AND\n                ".join(subquery_where_parts_count)
 
-    query_str = dedent(  # Build complete query
+    assay_size_subquery_str = dedent(
+        f"""\
+        (
+            SELECT
+                act_count.assay_id,
+                COUNT(DISTINCT act_count.molregno) as num_distinct_molecules
+            FROM
+                {subquery_from_clause_count_str}
+            WHERE
+                {subquery_where_clause_count_str}
+            GROUP BY
+                act_count.assay_id
+        ) assay_molecule_counts"""
+    )
+
+    # LEFT JOIN the subquery to the main query
+    from_join_clauses_main.append(
+        f"LEFT JOIN {assay_size_subquery_str} ON a.assay_id = assay_molecule_counts.assay_id"
+    )
+
+    fields_clause_str = ",\n            ".join(all_fields)
+    from_join_clause_main_str = "\n        ".join(from_join_clauses_main)
+    where_clause_main_str = (
+        " AND\n            ".join(where_conditions_main) if where_conditions_main else "1=1"
+    )
+
+    query_str = dedent(
         f"""\
         SELECT
-            {fields_clause}
-        FROM molecule_dictionary md
-        JOIN compound_structures cs ON md.molregno = cs.molregno
-        JOIN activities act ON md.molregno = act.molregno
-        JOIN docs d ON act.doc_id = d.doc_id
-        JOIN assays a ON act.assay_id = a.assay_id
-        LEFT JOIN variant_sequences vs ON a.variant_id = vs.variant_id
-        JOIN target_dictionary td ON a.tid = td.tid
+            {fields_clause_str}
+        FROM
+            {from_join_clause_main_str}
         WHERE
-            {where_clause}
+            {where_clause_main_str}
         ORDER BY
             md.chembl_id, act.activity_id, act.standard_value
     """
