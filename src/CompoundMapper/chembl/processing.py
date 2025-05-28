@@ -267,7 +267,7 @@ def process_bioactivities(
         bioactivities_df = with_pchembl
 
     if curate_annotation_errors:
-        bioactivities_df = curate_activity_pairs(bioactivities_df)
+        bioactivities_df = curate_activity_pairs(bioactivities_df, save_dropped=save_dropped)
 
     if require_document_date:
         if "year" not in bioactivities_df.columns:
