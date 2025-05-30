@@ -3,11 +3,13 @@ from pathlib import Path
 from typing import Literal, Optional, Union
 
 import pandas as pd
-from chemFilters.chem.standardizers import ChemStandardizer
+from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
 
 from ..chembl.data_flag_functions import (
     flag_duplication,
     flag_insufficient_assay_overlap,
+    flag_max_assay_size,
+    flag_min_assay_size,
     flag_missing_canonical_smiles,
     flag_missing_standard_smiles,
     flag_salt_or_solvent_removal,
@@ -20,6 +22,7 @@ from ..chembl.processing import get_bioactivities_workflow
 from ..core.default_fields import (
     ASSAY_ID,
     DATA_DROPPING_COMMENT,
+    DATA_PROCESSING_COMMENT,
     DEFAULT_ASSAY_MATCH_FIELDS,
     MOLECULE_ID,
     TARGET_ID,
@@ -51,6 +54,7 @@ def get_standardize_and_clean_workflow(
     backend: Literal["downloader", "webresource"] = "downloader",
     curate_annotation_errors: bool = True,
     require_doc_date: bool = False,
+    min_assay_size: Optional[int] = None,
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
     strict_mutant_removal: bool = False,
@@ -85,6 +89,8 @@ def get_standardize_and_clean_workflow(
         curate_annotation_errors: Whether to apply activity curation based on pChEMBL values diverging
             in exactly 3.0 (indicate possible annotation errors). Defaults to True.
         require_doc_date: Whether to filter out activities without a document year.
+        max_assay_size: Minimum number of compounds in an assay. Assays smaller than this size will
+            have their activities flagged for removal. Defaults to None (no filtering).
         max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
             have their activities flagged for removal. Defaults to None (no filtering).
         min_assay_overlap: Minimum number of overlapping compounds between two assays for the same target
@@ -130,37 +136,14 @@ def get_standardize_and_clean_workflow(
         backend=backend,
     )
     # Filter assays by size
-    if max_assay_size is not None and not full_df.empty:
-        logger.info(f"Filtering assays with more than {max_assay_size} compounds.")
-        # Ensure the necessary columns exist before trying to group or filter
-        if ASSAY_ID in full_df.columns and MOLECULE_ID in full_df.columns:
-            assay_counts = full_df.groupby(ASSAY_ID)[MOLECULE_ID].nunique()
-            assays_to_filter = assay_counts[assay_counts > max_assay_size].index.tolist()
-
-            if assays_to_filter:
-                filter_mask = full_df[ASSAY_ID].isin(assays_to_filter)
-                num_activities_flagged = filter_mask.sum()
-                num_assays_flagged = len(assays_to_filter)
-
-                logger.info(
-                    f"Flagging {num_activities_flagged} activities from {num_assays_flagged} assays "
-                    f"exceeding max size of {max_assay_size}."
-                )
-                # Ensure DATA_DROPPING_COMMENT column exists
-                if DATA_DROPPING_COMMENT not in full_df.columns:
-                    full_df[DATA_DROPPING_COMMENT] = pd.Series(dtype="object")
-
-                comment = f"Assay size exceeds maximum (N > {max_assay_size})"
-                existing_comments = full_df.loc[filter_mask, DATA_DROPPING_COMMENT].fillna("")
-                new_comments = existing_comments.apply(lambda x: f"{x} & {comment}" if x else comment)
-                full_df.loc[filter_mask, DATA_DROPPING_COMMENT] = new_comments
-            else:
-                logger.info("No assays found exceeding the maximum size.")
-        else:
-            logger.warning(
-                f"Could not filter by assay size. Required columns "
-                f"'{ASSAY_ID}' or '{MOLECULE_ID}' not found in DataFrame."
-            )
+    if min_assay_size is not None or max_assay_size is not None:
+        logger.info(
+            f"Filtering assays by size: min={min_assay_size}, max={max_assay_size}. "
+            "Assays with insufficient size will be flagged for removal."
+        )
+        full_df = full_df.pipe(flag_min_assay_size, min_assay_size=min_assay_size).pipe(
+            flag_max_assay_size, max_assay_size=max_assay_size
+        )
 
     # Filter by minimum assay overlap
     if min_assay_overlap > 0 and not full_df.empty:
@@ -172,7 +155,6 @@ def get_standardize_and_clean_workflow(
             assay_col=ASSAY_ID,
             target_col=TARGET_ID,
             comment_col=DATA_DROPPING_COMMENT,
-            logger=logger,
         )
 
     cols_to_remove_post_standardization = [
@@ -212,6 +194,9 @@ def get_standardize_and_clean_workflow(
         .copy()
     )
 
+    # make sure we don't have Nan, can result from merging pChEMBL-lacking calculated values
+    df[DATA_PROCESSING_COMMENT] = df[DATA_PROCESSING_COMMENT].fillna("")
+
     # Raise error if df is empty after critical processing steps AND we are not saving dropped rows
     if not save_dropped and df.empty:
         func_params = signature(get_standardize_and_clean_workflow).parameters
@@ -230,7 +215,7 @@ def get_standardize_and_clean_workflow(
         logger.info(f"Number of mixtures: {mask.sum()}")
 
     # Search for undefined stereocenters within the remaining data
-    if drop_unassigned_chiral:
+    if drop_unassigned_chiral:  # here we have the problem with the "." SMILES
         df = df.assign(
             undefined_stereocenters=lambda x: x["standard_smiles"]
             .apply(find_undefined_stereocenters)
@@ -288,10 +273,12 @@ def get_standardize_and_clean_workflow(
             "This dataset includes entries that would normally be dropped due to quality flags "
             "and is generally not recommended. The 'data_dropping_comment' column indicates the reasons."
         )
-        missing_smiles_patt = "Missing (standard )SMILES|Missing SMILES"
-        df = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
-            "~data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)"
-        ).query("~pchembl_value.isna()")
+        missing_smiles_patt = r"Missing (standard )SMILES|Missing SMILES|Mixture in SMILES"
+        df = (  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
+            df.query("~data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)")
+            .query("~pchembl_value.isna()")
+            .query("~standard_smiles.str.contains('^\.+$', regex=True)")
+        )
 
     else:
         df = df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
@@ -313,6 +300,7 @@ def aggregate_data(
     aggregate_mutants: bool = False,
     max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
+    compound_pairing: Literal["mixed_fp", "connectivity"] = "mixed_fp",
 ):
     """Aggregate the data obtained from ChEMBL by:
     1) Calculate fingerprints and use those to identify same-structure compounds;
@@ -362,11 +350,22 @@ def aggregate_data(
         current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
         logger.info(f"Effective ID columns for aggregation: {current_extra_id_cols}")
 
-    fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
-        df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
-    )
-    df = df.assign(fps=fps)
-    repeats_idxs = repeated_indices_from_array_series(df["fps"])
+    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+
+    if compound_pairing == "mixed_fp":
+        fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
+            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+        )
+        df = df.assign(id_array=fps)
+    elif compound_pairing == "connectivity":
+        df = df.assign(id_array=lambda x: connectivity_writer(x["standard_smiles"].tolist()))
+    else:
+        raise ValueError(
+            f"Invalid compound_pairing value: {compound_pairing}. " "Expected 'mixed_fp' or 'connectivity'."
+        )
+    # Here we have a repeat index for compounds across all fetched data. Processing which repeats
+    # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
+    repeats_idxs = repeated_indices_from_array_series(df["id_array"])
 
     include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *extra_multival_cols]
 
@@ -379,6 +378,36 @@ def aggregate_data(
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
     )
+    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+    duplicated = final_data.duplicated(subset=["target_chembl_id", "connectivity"])
+    if duplicated.any():
+        dupli_subset = (
+            final_data[duplicated]
+            .loc[
+                :,
+                [
+                    "connectivity",
+                    "molecule_chembl_id",
+                    "assay_chembl_id",
+                    "target_chembl_id",
+                    "pchembl_value_mean",
+                ],
+            ]
+            .sort_values(
+                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
+                ascending=[True, True, False],
+            )
+        )
+        _limit = 15  # limit in the string length for the warning
+        truncated_df = dupli_subset.applymap(
+            lambda x: str(x)[:_limit] + "..." if len(str(x)) > _limit else str(x)
+        ).head(10)
+        logger.warning(
+            "There two or more compounds with the same connectivity and target_chembl_id. "
+            "Your aggregation criteria was likely strict, so it's expected. Please look into "
+            "the following entries prior to modeling:\n"
+            f"{truncated_df.to_string(index=False)}"
+        )
 
     if output_path is not None:
         final_data.to_csv(output_path, index=False)
