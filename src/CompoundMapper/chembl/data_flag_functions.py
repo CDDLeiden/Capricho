@@ -89,8 +89,48 @@ def flag_undefined_stereochemistry(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def flag_min_assay_size(df: pd.DataFrame, min_assay_size: int = 0) -> pd.DataFrame:
+    """Mark assays for removal based on size lower than the specified minimum assay size."""
+    assert min_assay_size >= 0, "Minimum assay size must be a non-negative integer."
+
+    if "assay_size" not in df.columns:
+        logger.error("Column 'assay_size' not found in DataFrame. Skipping minimum assay size filtering.")
+        return df
+    if min_assay_size == 0:
+        logger.info("Minimum assay size is set to 0. Skipping filtering based on assay size.")
+        return df
+    else:
+        return add_comment(
+            df,
+            comment=f"Assay size < {min_assay_size} (minimum assay size)",
+            criteria_func=lambda x: x < min_assay_size,
+            target_column="assay_size",
+            comment_type="d",
+        )
+
+
+def flag_max_assay_size(df: pd.DataFrame, max_assay_size: int = 1000) -> pd.DataFrame:
+    """Mark assays for removal based on size greater than the specified maximum assay size."""
+    assert max_assay_size > 0, "Maximum assay size must be a positive integer."
+
+    if "assay_size" not in df.columns:
+        logger.error("Column 'assay_size' not found in DataFrame. Skipping maximum assay size filtering.")
+        return df
+    if max_assay_size == 0:
+        logger.info("Maximum assay size is set to 0. Skipping filtering based on assay size.")
+        return df
+    else:
+        return add_comment(
+            df,
+            comment=f"Assay size > {max_assay_size} (maximum assay size)",
+            criteria_func=lambda x: x > max_assay_size,
+            target_column="assay_size",
+            comment_type="d",
+        )
+
+
 def flag_strict_mutant_assays(df: pd.DataFrame, strict_mutant_removal: bool = False) -> pd.DataFrame:
-    """Marks assays for removal if their description contains mutant-related keywords
+    """Mark assays for removal if their description contains mutant-related keywords
     and strict_mutant_removal is True.
     """
     if not strict_mutant_removal:
