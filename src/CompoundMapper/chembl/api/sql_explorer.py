@@ -220,8 +220,8 @@ def explorer_main(
                 print(f"  • {suggestion}")
 
             print("\nTo explore a specific table:")
-            print("  python chembl_schema_explorer.py --table <table_name>")
+            print("  getchembl explore --table <table_name>")
             print("\nTo list all tables:")
-            print("  python chembl_schema_explorer.py --list-tables")
+            print("  getchembl explore --list-tables")
             print("\nTo search for columns:")
-            print("  python chembl_schema_explorer.py --search-column <pattern>")
+            print("  getchembl explore --search-column <pattern>")

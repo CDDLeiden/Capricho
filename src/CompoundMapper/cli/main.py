@@ -10,6 +10,11 @@ from chembl_downloader import latest
 from .. import __version__
 from ..chembl.api.downloader import check_and_download_chembl_db
 from ..chembl.api.sql_explorer import explorer_main
+from ..core.default_fields import (
+    DATA_DROPPING_COMMENT,
+    DATA_PROCESSING_COMMENT,
+    DEFAULT_ASSAY_MATCH_FIELDS,
+)
 from ..logger import logger, setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
@@ -31,10 +36,20 @@ DEFAULTS = {
     "id_columns": [],
     "skip_not_aggregated": False,
     "aggregate_mutants": False,
-    "skip_recipe": True,
+    "skip_recipe": False,
     "drop_unassigned_chiral": False,
+    "curate_annotation_errors": False,
     "chembl_backend": "downloader",
     "chembl_version": None,
+    "save_dropped": False,
+    "require_doc_date": False,
+    "max_assay_size": None,
+    "min_assay_size": None,
+    "max_assay_match": False,
+    "min_assay_overlap": 0,
+    "strict_mutant_removal": False,
+    "keep_flagged_data": False,
+    "compound_equality": "fingerprint",  # 'fingerprint' or 'connectivity'
 }
 
 STORE_TRUE_ARGS = [
@@ -42,7 +57,14 @@ STORE_TRUE_ARGS = [
     "chirality",
     "skip_not_aggregated",
     "aggregate_mutants",
+    "skip_recipe",
     "drop_unassigned_chiral",
+    "curate_annotation_errors",
+    "save_dropped",
+    "require_doc_date",
+    "max_assay_match",
+    "strict_mutant_removal",
+    "keep_flagged_data",
 ]
 
 STORE_FALSE_ARGS = ["skip_recipe"]
@@ -237,6 +259,16 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
     )
     parser.add_argument(
+        "-cae",
+        "--curate-annotation-errors",
+        dest="curate_annotation_errors",
+        help=(
+            "Apply activity curation based on pChEMBL values diverging in exactly 3.0, "
+            "indicating possible annotation errors (e.g.: uM to nM and vice versa). Defaults to True."
+        ),
+        action="store_true",
+    )
+    parser.add_argument(
         "-rel",
         "--standard-relation",
         nargs="*",
@@ -311,11 +343,11 @@ def parse_arguments() -> argparse.Namespace:
         "--skip-recipe",
         dest="skip_recipe",
         help=(
-            "Saves a json file with the parameters used to fetch the data. Useful for reproducibility. "
-            "The file will be saved with the asme output path, but with the `_recipe.json` suffix."
+            "Skip saving the json file with the parameters used to fetch the data. "
+            "The file will be saved with the asme output path, but with the `_recipe.json` suffix. "
             "Defaults to True."
         ),
-        action="store_false",
+        action="store_true",
     )
     parser.add_argument(
         "-back",
@@ -342,6 +374,104 @@ def parse_arguments() -> argparse.Namespace:
         ),
         default=DEFAULTS["chembl_version"],
         type=str,
+    )
+    parser.add_argument(
+        "-sd",
+        "--save-dropped",
+        dest="save_dropped",
+        action="store_true",
+        help=(
+            "Save a separate dataframe containing rows that were flagged for dropping, "
+            "along with the reasons for flagging. Default is False."
+        ),
+    )
+    parser.add_argument(
+        "-reqdoc",
+        "--require-doc-date",
+        dest="require_doc_date",
+        action="store_true",
+        help=("Filter out bioactivities that do not have a document date. Default is False."),
+    )
+    parser.add_argument(
+        "-maxas",
+        "--max-assay-size",
+        dest="max_assay_size",
+        type=int,
+        default=DEFAULTS["max_assay_size"],
+        help=(
+            "Maximum number of compounds in an assay. Assays exceeding this size will have their "
+            "activities flagged for removal. If left as default (None), this filter won't be applied."
+        ),
+    )
+    parser.add_argument(
+        "-minas",
+        "--min-assay-size",
+        dest="min_assay_size",
+        type=int,
+        default=DEFAULTS["min_assay_size"],
+        help=(
+            "Minimum number of compounds in an assay. Assays exceeding this size will have their "
+            "activities flagged for removal. If left as default (None), this filter won't be applied."
+        ),
+    )
+    parser.add_argument(
+        "-maxm",
+        "--max-assay-match",
+        dest="max_assay_match",
+        action="store_true",
+        help=(
+            "Perform assay metadata matching. If True, assay metadata columns will be added to "
+            "`id_columns`, preventing compounds not matching the assay metadata from being "
+            "aggregated. Assay metadata columns that define this matching are: "
+            f"{', '.join(DEFAULT_ASSAY_MATCH_FIELDS)}. Default is False"
+        ),
+    )
+    parser.add_argument(
+        "-maso",
+        "--min-assay-overlap",
+        dest="min_assay_overlap",
+        type=int,
+        default=DEFAULTS["min_assay_overlap"],
+        help=(
+            "Minimum number of overlapping compounds between two assays for the same target "
+            "for their activities to be considered. Activities from assay pairs not meeting "
+            "this overlap will be flagged for removal. If left as default (None), "
+            "this filter won't be applied."
+        ),
+    )
+    parser.add_argument(
+        "-smr",
+        "--strict-mutant-removal",
+        dest="strict_mutant_removal",
+        action="store_true",
+        help=(
+            "If True, assays with 'mutant', 'mutation', or 'variant' in their "
+            "description will be flagged for removal. Default is False."
+        ),
+    )
+    parser.add_argument(
+        "-kfd",
+        "--keep-flagged-data",
+        dest="keep_flagged_data",
+        action="store_true",
+        help=(
+            "If True, data points flagged for dropping will be retained in the main dataset. "
+            "The `data_dropping_comment` column will still be populated. "
+            "A warning will be logged. Default is False."
+        ),
+    )
+    parser.add_argument(
+        "-cpd-eq",
+        "--compound-equality",
+        dest="compound_equality",
+        choices=["fingerprint", "connectivity"],
+        default=DEFAULTS["compound_equality"],
+        type=str,
+        help=(
+            "Method for compound equality determination. In case of 'fingerprint', a mixed fingerprint "
+            "composed of ECFP4 and RDKit fingerprints will be used for determining compound equality. "
+            "Defaults to 'fingerprint'."
+        ),
     )
 
     return parser.parse_args()
@@ -392,17 +522,29 @@ def main(args: argparse.Namespace) -> None:
         assay_types=args.assay_types,
         chembl_release=args.chembl_release,
         save_not_aggregated=(not args.skip_not_aggregated),
+        save_dropped=args.save_dropped,
         drop_unassigned_chiral=args.drop_unassigned_chiral,
+        curate_annotation_errors=args.curate_annotation_errors,
         version=args.chembl_version,
         backend=args.chembl_backend,
+        require_doc_date=args.require_doc_date,
+        min_assay_size=args.min_assay_size,
+        max_assay_size=args.max_assay_size,
+        min_assay_overlap=args.min_assay_overlap,
+        strict_mutant_removal=args.strict_mutant_removal,
+        keep_flagged_data=args.keep_flagged_data,
     )
+
+    if args.keep_flagged_data:
+        args.metadata_columns.extend([DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT])
 
     df = aggregate_data(
         df=df,
         chirality=args.chirality,
-        metadata_cols=args.metadata_columns,
+        extra_multival_cols=args.metadata_columns,
         extra_id_cols=args.id_columns,
         aggregate_mutants=args.aggregate_mutants,
+        max_assay_match=args.max_assay_match,
         output_path=args.output_path,
     )
 
@@ -432,6 +574,9 @@ def main(args: argparse.Namespace) -> None:
             elif isinstance(v, str):
                 if DEFAULTS[k] != v:
                     command_vals.append(f"--{save_k} {v}")
+            elif isinstance(v, int):  # Added for max_assay_size and min_assay_overlap
+                if DEFAULTS[k] != v:
+                    command_vals.append(f"--{save_k} {v}")
 
         command = "getchembl " + " ".join(command_vals)
         configs.update({"CompoundMapper version": __version__})
@@ -446,3 +591,7 @@ def main(args: argparse.Namespace) -> None:
 def main_exe() -> None:
     args = parse_arguments()
     main(args)
+
+
+if __name__ == "__main__":
+    main_exe()

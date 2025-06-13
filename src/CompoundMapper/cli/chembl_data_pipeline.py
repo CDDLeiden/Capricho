@@ -2,12 +2,31 @@ from inspect import signature
 from pathlib import Path
 from typing import Literal, Optional, Union
 
-import numpy as np
 import pandas as pd
-from chemFilters.chem.standardizers import ChemStandardizer
+from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
 
+from ..chembl.data_flag_functions import (
+    flag_duplication,
+    flag_insufficient_assay_overlap,
+    flag_max_assay_size,
+    flag_min_assay_size,
+    flag_missing_canonical_smiles,
+    flag_missing_standard_smiles,
+    flag_salt_or_solvent_removal,
+    flag_strict_mutant_assays,
+    flag_to_remove_mixture_compounds,
+    flag_undefined_stereochemistry,
+)
 from ..chembl.exceptions import BioactivitiesNotFoundError
 from ..chembl.processing import get_bioactivities_workflow
+from ..core.default_fields import (
+    ASSAY_ID,
+    DATA_DROPPING_COMMENT,
+    DATA_PROCESSING_COMMENT,
+    DEFAULT_ASSAY_MATCH_FIELDS,
+    MOLECULE_ID,
+    TARGET_ID,
+)
 from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
@@ -28,11 +47,19 @@ def get_standardize_and_clean_workflow(
     assay_types: list[str],
     chembl_release: Optional[int],
     save_not_aggregated: bool = True,
+    save_dropped: bool = False,
     save_duplicated: bool = False,
     drop_unassigned_chiral: bool = False,
     version: Optional[Union[int, str]] = None,
     backend: Literal["downloader", "webresource"] = "downloader",
-) -> None:
+    curate_annotation_errors: bool = True,
+    require_doc_date: bool = False,
+    min_assay_size: Optional[int] = None,
+    max_assay_size: Optional[int] = None,
+    min_assay_overlap: int = 0,
+    strict_mutant_removal: bool = False,
+    keep_flagged_data: bool = False,
+) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
     are removed from the dataset. Duplicate data is also removed and the remaining data
@@ -52,12 +79,27 @@ def get_standardize_and_clean_workflow(
             Defaults to "=".
         chembl_release: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
+        save_dropped: whether to save a separate dataframe containing rows that were flagged for dropping.
         save_duplicated: whether to save the duplicated data (if any) to a separate csv file
         drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
         version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
             chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
         backend: the backend to be used for fetching the data. If downloader, the ChEMBL sql database
             is downloaded and extracted first. Defaults to "downloader".
+        curate_annotation_errors: Whether to apply activity curation based on pChEMBL values diverging
+            in exactly 3.0 (indicate possible annotation errors). Defaults to True.
+        require_doc_date: Whether to filter out activities without a document year.
+        max_assay_size: Minimum number of compounds in an assay. Assays smaller than this size will
+            have their activities flagged for removal. Defaults to None (no filtering).
+        max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
+            have their activities flagged for removal. Defaults to None (no filtering).
+        min_assay_overlap: Minimum number of overlapping compounds between two assays for the same target
+                for their activities to be considered. Defaults to None (no filtering).
+            strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
+                description will be flagged for removal. Defaults to False.
+        keep_flagged_data: If True, data points flagged for dropping (due to various quality
+            checks) will be retained in the main DataFrame. The `data_dropping_comment` column
+            will still be populated. A warning will be logged. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -69,6 +111,8 @@ def get_standardize_and_clean_workflow(
     # -log | log transformed values reported as Log XC50, -Log XC50, etc, might not
     # have a pchembl value, but *could* still be used.  If standard_type contains `Log`,
     # the standard_value will be transferred to pchembl_value.
+    # TODO: I noticed some negative values reported in standard_value, maybe it's because
+    # the standard_type was Log? If so, we could try rescuing those values to pchembl_value
     if calculate_pchembl:
         biotypes = []
         for act in bioactivity_type:
@@ -84,12 +128,36 @@ def get_standardize_and_clean_workflow(
         confidence_scores=confidence_scores,
         assay_types=assay_types,
         calculate_pchembl=calculate_pchembl,
+        curate_annotation_errors=curate_annotation_errors,
+        require_document_date=require_doc_date,
         chembl_release=chembl_release,
+        save_dropped=save_dropped,
         version=version,
         backend=backend,
     )
+    # Filter assays by size
+    if min_assay_size is not None or max_assay_size is not None:
+        logger.info(
+            f"Filtering assays by size: min={min_assay_size}, max={max_assay_size}. "
+            "Assays with insufficient size will be flagged for removal."
+        )
+        full_df = full_df.pipe(flag_min_assay_size, min_assay_size=min_assay_size).pipe(
+            flag_max_assay_size, max_assay_size=max_assay_size
+        )
 
-    todrop_cols = [  # cols that won't be used; we'll use `standard_<colname>` instead
+    # Filter by minimum assay overlap
+    if min_assay_overlap > 0 and not full_df.empty:
+        logger.info(f"Filtering assays based on minimum overlap of {min_assay_overlap} compounds.")
+        full_df = flag_insufficient_assay_overlap(
+            df=full_df,
+            min_overlap=min_assay_overlap,
+            molecule_col=MOLECULE_ID,
+            assay_col=ASSAY_ID,
+            target_col=TARGET_ID,
+            comment_col=DATA_DROPPING_COMMENT,
+        )
+
+    cols_to_remove_post_standardization = [
         "type",
         "relation",
         "units",
@@ -99,8 +167,8 @@ def get_standardize_and_clean_workflow(
         # "description",
     ]
 
-    logger.debug(f"All fetched bioactivity types: {full_df.standard_type.unique().tolist()}")
-    logger.debug(f"Keeping only: {biotypes}")
+    logger.debug(f"All fetched bioactivity types from ChEMBL: {full_df.standard_type.unique().tolist()}")
+    logger.debug(f"Filtering for bioactivity types: {biotypes}")
 
     # drop rows without chemical structures
     no_smiles_mask = full_df.canonical_smiles.isna()
@@ -110,55 +178,71 @@ def get_standardize_and_clean_workflow(
         full_df = full_df.drop(index=_info.index).reset_index(drop=True)
 
     stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
-    queried_df = (
+    df = (
         full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string
+        .pipe(flag_missing_canonical_smiles)
         .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
-        .dropna(subset=["standard_smiles"])  # drop if no structure is found
-        .query("standard_smiles.notna()")
+        .pipe(flag_missing_standard_smiles)
+        # .dropna(subset=["standard_smiles"])  # drop if no structure is found
+        .pipe(flag_salt_or_solvent_removal)
         .assign(final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures))
         .drop(columns="standard_smiles")
         .rename(columns={"final_smiles": "standard_smiles"})
-        .drop(columns=[c for c in todrop_cols if c in full_df.columns])
+        .drop(columns=[c for c in cols_to_remove_post_standardization if c in full_df.columns])
         .reset_index(drop=True)
         .copy()
     )
-    # drop rows with missing pchembl values
-    no_pchembl_idxs = queried_df.query("pchembl_value.isna()").index
-    logger.info(f"Dropping {len(no_pchembl_idxs)} rows missing pchembl values.")
-    queried_df = queried_df.drop(index=no_pchembl_idxs).reset_index(drop=True)
 
-    if queried_df.empty:
+    # make sure we don't have Nan, can result from merging pChEMBL-lacking calculated values
+    df[DATA_PROCESSING_COMMENT] = df[DATA_PROCESSING_COMMENT].fillna("")
+
+    # Raise error if df is empty after critical processing steps AND we are not saving dropped rows
+    if not save_dropped and df.empty:
         func_params = signature(get_standardize_and_clean_workflow).parameters
         local_vars = locals()
-        parameters = {name: local_vars[name] for name in func_params}
-        raise BioactivitiesNotFoundError(parameters=parameters)
+        # Filter out df from params to avoid large object in error message
+        error_params = {
+            k: v for k, v in local_vars.items() if k in func_params and k != "full_df" and k != "queried_df"
+        }
+        raise BioactivitiesNotFoundError(parameters=error_params)
 
-    # find remaining mixtures in the data
-    mask = queried_df["standard_smiles"].str.contains(".", regex=False)
+    # find mixtures in the data
+    mask = df["standard_smiles"].str.contains(".", regex=False)
     n_mixtures = mask.sum()
     if n_mixtures > 0:
+        df = flag_to_remove_mixture_compounds(df)
         logger.info(f"Number of mixtures: {mask.sum()}")
-        mixture_idxs = np.where(mask)[0]  # drop where smiles contain mixtures
-        queried_df = queried_df.drop(index=mixture_idxs).reset_index(drop=True)
 
     # Search for undefined stereocenters within the remaining data
-    if drop_unassigned_chiral:
-        queried_df["undefined_stereocenters"] = (
-            queried_df["standard_smiles"].apply(find_undefined_stereocenters).apply(len)
-        )
-        logger.trace(f'Unassigned stereocenters: {queried_df["undefined_stereocenters"].unique().tolist()}')
-        undefined_stereo_mask = queried_df["undefined_stereocenters"] > 0
+    if drop_unassigned_chiral:  # here we have the problem with the "." SMILES
+        df = df.assign(
+            undefined_stereocenters=lambda x: x["standard_smiles"]
+            .apply(find_undefined_stereocenters)
+            .apply(len)
+        ).pipe(flag_undefined_stereochemistry)
+        logger.trace(f'Unassigned stereocenters: {df["undefined_stereocenters"].unique().tolist()}')
+        undefined_stereo_mask = df["undefined_stereocenters"] > 0
         if undefined_stereo_mask.any():
-            logger.info(f"Dropping {undefined_stereo_mask.sum()} rows with undefined stereocenters.")
-            logger.debug(queried_df[undefined_stereo_mask].iloc[:, :5])
-            queried_df = queried_df.drop(index=queried_df[undefined_stereo_mask].index).reset_index(drop=True)
-        if queried_df.empty:
+            logger.info(f"Flagging {undefined_stereo_mask.sum()} rows with undefined stereocenters.")
+            logger.debug(df[undefined_stereo_mask].iloc[:, :5])
+        if df.empty:
             logger.warning("All data points have been dropped due to undefined stereocenters!!")
             return pd.DataFrame()
 
-    # Handle duplicated data
-    df_size = queried_df.shape[0]
+    # Strict mutant removal based on assay_description
+    if strict_mutant_removal:
+        df = flag_strict_mutant_assays(df, strict_mutant_removal=True)
+        if df.empty:
+            logger.warning(
+                "All data points have been dropped after strict mutant removal based on assay_description."
+            )
+            return pd.DataFrame()
+
+    # Documents - since much of ChEMBL is take from medchem literature, if there are two
+    # assays from the same document that have the same readout and are measured against
+    # the same target, we can be pretty sure tha they are *not* equivalent;
+    df_size = df.shape[0]
     col_subset = [  # Drop different assays that have the same exact pchembl value - probably duplicate
         "molecule_chembl_id",
         "standard_smiles",
@@ -168,31 +252,43 @@ def get_standardize_and_clean_workflow(
         "target_chembl_id",
         "target_organism",
     ]
-    duplicated = queried_df.duplicated(subset=col_subset, keep=False)
+    # Handle duplicated data
+    duplicated = df.duplicated(subset=col_subset, keep=False)
+    df = flag_duplication(df, dupli_id_subset=col_subset)
     if duplicated.any():
-        queried_df.drop_duplicates(
-            subset=col_subset,
-            keep="first",
-            inplace=True,
-        )
+        df.drop_duplicates(subset=col_subset, keep="first", inplace=True)
         if save_duplicated and output_path is not None:
-            queried_df[duplicated].to_csv(
-                output_path.with_stem(f"{output_path.stem}_duplicated"), index=False
-            )
-        if df_size != queried_df.shape[0]:
-            logger.info(f"Dropped {df_size - queried_df.shape[0]} duplicates.")
+            df[duplicated].to_csv(output_path.with_stem(f"{output_path.stem}_duplicated"), index=False)
+        if df_size != df.shape[0]:
+            logger.info(f"Dropped {df_size - df.shape[0]} duplicates.")
 
-    # TODO: in the future, implement the following performed in Greg Landrum's max curation paper:
-    # Drop both the assays where we have exactly 3 pchembl value difference - somebody probably did a uM / nM confusion
+    if save_dropped and output_path is not None:
+        df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
+            "~data_dropping_comment.isna()"
+        ).to_csv(output_path.with_stem(f"{output_path.stem}_removed"), index=False)
 
-    # Documents - since much of ChEMBL is take from medchem literature, if there are two
-    # assays from the same document that have the same readout and are measured against
-    # the same target, we can be pretty sure tha they are *not* equivalent;
+    if keep_flagged_data:
+        logger.warning(
+            "Retaining flagged data points in the main dataset. "
+            "This dataset includes entries that would normally be dropped due to quality flags "
+            "and is generally not recommended. The 'data_dropping_comment' column indicates the reasons."
+        )
+        missing_smiles_patt = r"Missing (standard )SMILES|Missing SMILES|Mixture in SMILES"
+        df = (  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
+            df.query("~data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)")
+            .query("~pchembl_value.isna()")
+            .query("~standard_smiles.str.contains('^\.+$', regex=True)")
+        )
+
+    else:
+        df = df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
+            "data_dropping_comment.isna()"
+        )
 
     if save_not_aggregated and output_path is not None:
-        queried_df.to_csv(output_path.with_stem(f"{output_path.stem}_not_aggregated"), index=False)
+        df.to_csv(output_path.with_stem(f"{output_path.stem}_not_aggregated"), index=False)
 
-    return queried_df
+    return df
 
 
 def aggregate_data(
@@ -200,8 +296,11 @@ def aggregate_data(
     chirality: bool,
     metadata_cols: list[str] = [],
     extra_id_cols: list[str] = [],
+    extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
+    max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
+    compound_pairing: Literal["mixed_fp", "connectivity"] = "mixed_fp",
 ):
     """Aggregate the data obtained from ChEMBL by:
     1) Calculate fingerprints and use those to identify same-structure compounds;
@@ -215,35 +314,100 @@ def aggregate_data(
 
         df: dataframe output from `CompoundMapper.cli.workflow.fetch_standardize_and_clean_workflow`
         chirality: toggle chiral-sensitive fingerprints for identifying same molecules
-        metadata_cols: additional metadata columns to keep in the final dataframe. Metadata will
-            be saved separated by a semicolon whenever aggregation is performed.
         extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
             `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
             if the compound is the same and the assay is the same.
+        extra_multival_cols: list of extra columns that you'd like to keep as aggregated
+            values in the final dataframe. Caveat: these columns will be displayes as (str)
+            separated by `;` in the final dataframe. Defaults to [].
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
+        max_assay_match: If True, includes assay metadata fields used by Landrum & Riniker, 2024
+            for the max assay match. Defaults to False.
         output_path: path to save the aggregated data
 
     Returns:
         pd.DataFrame: the aggregated data
     """
-    fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
-        df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
-    )
-    df = df.assign(fps=fps)
-    repeats_idxs = repeated_indices_from_array_series(df["fps"])
+    current_extra_id_cols = list(extra_id_cols)  # Make a mutable copy
 
-    include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *metadata_cols]
+    if max_assay_match:
+        logger.info(
+            f"Assay metadata matching for aggregation is enabled. Adding fields to ID columns: {DEFAULT_ASSAY_MATCH_FIELDS}"
+        )
+        # Ensure these columns exist in the DataFrame
+        missing_metadata_cols = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col not in df.columns]
+        if missing_metadata_cols:
+            logger.warning(
+                f"Assay metadata matching enabled for aggregation, but the following "
+                f"DEFAULT_ASSAY_MATCH_FIELDS are missing from the DataFrame and will be ignored: {missing_metadata_cols}"
+            )
+            fields_to_add = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col in df.columns]
+        else:  # Use only the fields that are actually present
+            fields_to_add = DEFAULT_ASSAY_MATCH_FIELDS
+
+        current_extra_id_cols.extend(fields_to_add)
+        current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
+        logger.info(f"Effective ID columns for aggregation: {current_extra_id_cols}")
+
+    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+
+    if compound_pairing == "mixed_fp":
+        fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
+            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+        )
+        df = df.assign(id_array=fps)
+    elif compound_pairing == "connectivity":
+        df = df.assign(id_array=lambda x: connectivity_writer(x["standard_smiles"].tolist()))
+    else:
+        raise ValueError(
+            f"Invalid compound_pairing value: {compound_pairing}. " "Expected 'mixed_fp' or 'connectivity'."
+        )
+    # Here we have a repeat index for compounds across all fetched data. Processing which repeats
+    # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
+    repeats_idxs = repeated_indices_from_array_series(df["id_array"])
+
+    include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *extra_multival_cols]
 
     final_data = process_repeat_mols(
         df,
         repeats_idxs,
         solve_strat="keep",
-        extra_id_cols=extra_id_cols,
+        extra_id_cols=current_extra_id_cols,  # Use the potentially extended list
         chirality=chirality,
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
     )
+    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+    duplicated = final_data.duplicated(subset=["target_chembl_id", "connectivity"])
+    if duplicated.any():
+        dupli_subset = (
+            final_data[duplicated]
+            .loc[
+                :,
+                [
+                    "connectivity",
+                    "molecule_chembl_id",
+                    "assay_chembl_id",
+                    "target_chembl_id",
+                    "pchembl_value_mean",
+                ],
+            ]
+            .sort_values(
+                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
+                ascending=[True, True, False],
+            )
+        )
+        _limit = 15  # limit in the string length for the warning
+        truncated_df = dupli_subset.applymap(
+            lambda x: str(x)[:_limit] + "..." if len(str(x)) > _limit else str(x)
+        ).head(10)
+        logger.warning(
+            "There two or more compounds with the same connectivity and target_chembl_id. "
+            "Your aggregation criteria was likely strict, so it's expected. Please look into "
+            "the following entries prior to modeling:\n"
+            f"{truncated_df.to_string(index=False)}"
+        )
 
     if output_path is not None:
         final_data.to_csv(output_path, index=False)

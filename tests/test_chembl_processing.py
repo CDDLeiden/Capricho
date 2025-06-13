@@ -13,7 +13,7 @@ class TestChemblProcessing(unittest.TestCase):
                 "standard_units": ["nM", "µM", "uM"],
                 "expected_pchembl_value": [9.0, 6.7, 6.5],
                 "pchembl_value": [None, None, None],
-                "data_validity_description": [None, None, "Outside typical range"],
+                "data_validity_comment": [None, None, "Outside typical range"],
                 "potential_duplicate": [0, 0, 1],
                 "assay_type": ["B", "F", "B"],
                 "standard_type": ["IC50", "Ki", "EC50"],
@@ -32,7 +32,20 @@ class TestChemblProcessing(unittest.TestCase):
         )
 
     def test_process_bioactivities(self):
-        result = processing.process_bioactivities(self.sample_df)
+        result = processing.process_bioactivities(self.sample_df, calculate_pchembl=True, save_dropped=True)
+        self.assertEqual(
+            result["data_dropping_comment"].tolist(),
+            ["", "", "Data Validity Comment Present & Potential Duplicate"],
+        )
+        self.assertEqual(
+            result["data_processing_comment"].tolist(),
+            ["Calculated pChEMBL", "Calculated pChEMBL", "Calculated pChEMBL"],
+        )
+
+        result = result.assign(  # drop the columns that are flagged
+            data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)
+        ).query("data_dropping_comment.isna()")
+
         self.assertEqual(len(result), 2)  # One row should be filtered out
         self.assertNotIn("data_validity_description", result.columns)
         self.assertNotIn("potential_duplicate", result.columns)

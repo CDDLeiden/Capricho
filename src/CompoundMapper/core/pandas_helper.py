@@ -1,13 +1,36 @@
 """Module containing helper functions for manipulating pandas DataFrames"""
 
 import functools
-from typing import Union
+from typing import Literal, Optional, Union
 
 import numpy as np
 import pandas as pd
 from scipy.stats import gmean, gstd, median_abs_deviation
 
 from ..logger import logger
+from .default_fields import DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT
+
+
+def pchembl_to_molar(pchembl_value: float, unit: str = "nM") -> float:
+    """Convert a pChEMBL value to molar units.
+
+    Args:
+        pchembl_value: pChEMBL value to be converted
+        unit: unit of the pChEMBL value. Defaults to "nM".
+
+    Returns:
+        float: pChEMBL value converted to molar units
+    """
+    if unit == "nM":
+        return 10 ** (-pchembl_value) * 10**9
+    elif unit in ["uM", "µM"]:
+        return 10 ** (6 - pchembl_value) * 10**6
+    elif unit == "mM":
+        return 10 ** (9 - pchembl_value) * 10**3
+    elif unit == "M":
+        return 10 ** (9 - pchembl_value)
+    else:
+        raise ValueError(f"Unit '{unit}' not recognized.")
 
 
 def format_value(x) -> str:
@@ -146,3 +169,60 @@ def find_dict_in_dataframe(df):
             cols_w_dicts.append(col)
     if cols_w_dicts:
         return cols_w_dicts
+
+
+def add_comment(
+    df: pd.DataFrame,
+    comment: str,
+    criteria_func: Optional[callable] = None,  # Made Optional, default to None
+    target_column: Optional[str] = None,  # Made Optional, default to None
+    comment_type: Literal["p", "d"] = "d",
+) -> pd.DataFrame:
+    """Marks rows in a DataFrame based on a given criteria or the entire DataFrame, adding a comment to:
+        - 'data_dropping_comment' if comment_type == 'd' (drop)
+        - 'data_processing_comment' if comment_type == 'p' (process).
+
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        comment (str): The comment to add to the comment column for marked rows.
+        criteria_func (callable, optional): A function that takes a pandas Series and returns a
+            boolean Series. E.g.: pd.isna, lambda x: x == 'invalid', lambda x: x < 0.
+            It's required if `target_column` is specified. If `target_column` is None,
+            this argument is ignored and the comment is applied to all rows.
+        target_column (str, optional): The name of the column to apply the `criteria_func` to.
+            If None, the `comment` is applied to all rows of the DataFrame.
+        comment_type (Literal["p", "d"]): The type of comment to add.
+            'p' for data processing comment, 'd' for data dropping comment. Defaults to 'd'.
+
+    Returns:
+        pd.DataFrame: The DataFrame with the specified comment column added/updated.
+    """
+    if comment_type == "p":
+        column_name = DATA_PROCESSING_COMMENT
+    elif comment_type == "d":
+        column_name = DATA_DROPPING_COMMENT
+    else:
+        raise ValueError("comment_type must be either 'p' or 'd'.")
+
+    if column_name not in df.columns:  # make sure it exists, initialize empty string
+        df[column_name] = ""
+
+    # Preventively fill NaN values in the comment column to avoid "nan" string concatenation
+    df[column_name] = df[column_name].fillna("")
+
+    if target_column is not None:
+        if target_column not in df.columns:
+            raise ValueError(f"Column '{target_column}' not found in DataFrame for comment '{comment}'.")
+        if criteria_func is None:
+            raise ValueError("criteria_func must be provided when target_column is specified.")
+
+        mask = criteria_func(df[target_column])
+    else:  # if no target_column is specified, have a full True mask
+        if criteria_func is not None:
+            pass
+        mask = pd.Series(True, index=df.index)
+
+    df.loc[mask, column_name] = df.loc[mask, column_name].apply(
+        lambda x: f"{x} & {comment}" if x else comment
+    )
+    return df

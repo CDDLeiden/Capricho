@@ -7,7 +7,7 @@ import numpy as np
 MIXTURE_REGEX = re.compile(
     r"^("  # start of the string
     r"Na\+?|Cl\-?|Br\-?|K\+?|F\-?|I\-?|Ca\+{2}?|Mg\+{2}?|Zn\+{2}?|OH\-?|"  # Salts
-    r"\[Na\+\]?|\[K\+\]?|\[Cl-\]?|\[Br-\]?|\[I-\]?|\[Zn\+2\]?|"  # Salts
+    r"\[Na\+\]?|\[K\+\]?|\[Cl-\]?|\[Br-\]?|\[I-\]?|\[Zn\+2\]?|\[Li\+\]?|"  # Salts
     r"CCCC\(=O\)\[O-\]|"  # Butyrate
     r"CCCCC\(=O\)\[O-\]|"  # Pentanoate
     r"C1=CC=C\(C=C1\)C\(=O\)\[O-\]|"  # Benzoate
