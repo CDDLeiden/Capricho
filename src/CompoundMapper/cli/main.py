@@ -535,9 +535,6 @@ def main(args: argparse.Namespace) -> None:
         keep_flagged_data=args.keep_flagged_data,
     )
 
-    if args.keep_flagged_data:
-        args.metadata_columns.extend([DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT])
-
     df = aggregate_data(
         df=df,
         chirality=args.chirality,

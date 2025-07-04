@@ -373,7 +373,17 @@ def aggregate_data(
     # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
     repeats_idxs = repeated_indices_from_array_series(df["id_array"])
 
-    include_metadata = ["doc_type", "doi", "journal", "year", "chembl_release", *extra_multival_cols]
+    include_metadata = [
+        "id_array",
+        "doc_type",
+        "doi",
+        "journal",
+        "year",
+        "chembl_release",
+        *extra_multival_cols,
+        DATA_DROPPING_COMMENT,
+        DATA_PROCESSING_COMMENT,
+    ]
 
     final_data = process_repeat_mols(
         df,
@@ -384,7 +394,14 @@ def aggregate_data(
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
     )
-    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+
+    # if compound_equality == "connectivty", should be already in `id_array`
+    final_data = final_data.assign(
+        connectivity=lambda x, compound_equality=compound_equality: (
+            connectivity_writer(x["smiles"].tolist()) if compound_equality == "mixed_fp" else x["id_array"]
+        )
+    ).drop(columns=["id_array"])
+
     duplicated = final_data.duplicated(subset=["target_chembl_id", "connectivity"])
     if duplicated.any():
         dupli_subset = (
