@@ -32,6 +32,7 @@ class TestFetchFromChEMBL(unittest.TestCase):
             chirality=True,
             metadata_cols=[],
             output_path=None,
+            compound_equality="connectivity",
         )
         with tempfile.TemporaryDirectory() as tmpdirname:
             outfile = Path(tmpdirname) / "ADORA3_data.csv"
@@ -42,7 +43,7 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.aggr_df.sort_values(["activity_id"], inplace=True, ignore_index=True)
 
         # assert if the columns are the same
-        np.testing.assert_array_equal(aggr_df.columns, self.aggr_df.columns)
+        np.testing.assert_array_equal(self.aggr_df.columns, aggr_df.columns)
 
         # Compare if the bioactivity data is the same
         np.testing.assert_array_equal(aggr_df.pchembl_value.values, self.aggr_df.pchembl_value.values)

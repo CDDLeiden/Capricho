@@ -1,0 +1,56 @@
+{
+  "command": "getchembl --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --curate-annotation-errors --chembl-release 31 --chembl-version 35 --save-dropped --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal --keep-flagged-data",
+  "molecule_ids": null,
+  "target_ids": [
+    "CHEMBL256"
+  ],
+  "assay_ids": null,
+  "document_ids": null,
+  "calculate_pchembl": true,
+  "output_path": "ADORA3_data.csv",
+  "confidence_scores": [
+    7,
+    8,
+    9
+  ],
+  "bioactivity_type": [
+    "Potency",
+    "Kd",
+    "Ki",
+    "IC50",
+    "AC50",
+    "EC50"
+  ],
+  "chirality": false,
+  "drop_unassigned_chiral": false,
+  "curate_annotation_errors": true,
+  "standard_relation": [
+    "="
+  ],
+  "assay_types": [
+    "B",
+    "F"
+  ],
+  "log_level": "info",
+  "chembl_release": 31,
+  "metadata_columns": [
+    "data_dropping_comment",
+    "data_processing_comment"
+  ],
+  "id_columns": [],
+  "skip_not_aggregated": false,
+  "aggregate_mutants": false,
+  "skip_recipe": false,
+  "chembl_backend": "downloader",
+  "chembl_version": null,
+  "save_dropped": true,
+  "require_doc_date": true,
+  "max_assay_size": 100,
+  "min_assay_size": 20,
+  "max_assay_match": false,
+  "min_assay_overlap": 0,
+  "strict_mutant_removal": true,
+  "keep_flagged_data": true,
+  "compound_equality": "connectivity",
+  "CompoundMapper version": "0.1.dev172+gb503afd.d20250623"
+}
