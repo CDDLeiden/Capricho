@@ -193,6 +193,7 @@ def get_standardize_and_clean_workflow(
         .reset_index(drop=True)
         .copy()
     )
+    # TODO: The curate bioactivity errors steps need to be performed here, after the standardization
 
     # make sure we don't have Nan, can result from merging pChEMBL-lacking calculated values
     df[DATA_PROCESSING_COMMENT] = df[DATA_PROCESSING_COMMENT].fillna("")
@@ -300,7 +301,7 @@ def aggregate_data(
     aggregate_mutants: bool = False,
     max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
-    compound_pairing: Literal["mixed_fp", "connectivity"] = "mixed_fp",
+    compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
 ):
     """Aggregate the data obtained from ChEMBL by:
     1) Calculate fingerprints and use those to identify same-structure compounds;
@@ -325,6 +326,9 @@ def aggregate_data(
         max_assay_match: If True, includes assay metadata fields used by Landrum & Riniker, 2024
             for the max assay match. Defaults to False.
         output_path: path to save the aggregated data
+        compound_equality: How to identify same compounds in the dataset. If "mixed_fp", uses
+            mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
+            uses the first part of the InChI key (connectivity) to identify same compounds. Defaults to "connectivity".
 
     Returns:
         pd.DataFrame: the aggregated data
@@ -352,17 +356,19 @@ def aggregate_data(
 
     connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
 
-    if compound_pairing == "mixed_fp":
+    if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
             df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
         )
         df = df.assign(id_array=fps)
-    elif compound_pairing == "connectivity":
+    elif compound_equality == "connectivity":
         df = df.assign(id_array=lambda x: connectivity_writer(x["standard_smiles"].tolist()))
+    # TODO: if other sensible cpd equality choices come along in the future, we can add here...
     else:
         raise ValueError(
-            f"Invalid compound_pairing value: {compound_pairing}. " "Expected 'mixed_fp' or 'connectivity'."
+            f"Invalid compound_pairing value: {compound_equality}. " "Expected 'mixed_fp' or 'connectivity'."
         )
+
     # Here we have a repeat index for compounds across all fetched data. Processing which repeats
     # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
     repeats_idxs = repeated_indices_from_array_series(df["id_array"])

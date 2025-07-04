@@ -49,7 +49,7 @@ DEFAULTS = {
     "min_assay_overlap": 0,
     "strict_mutant_removal": False,
     "keep_flagged_data": False,
-    "compound_equality": "fingerprint",  # 'fingerprint' or 'connectivity'
+    "compound_equality": "connectivity",
 }
 
 STORE_TRUE_ARGS = [
@@ -464,13 +464,13 @@ def parse_arguments() -> argparse.Namespace:
         "-cpd-eq",
         "--compound-equality",
         dest="compound_equality",
-        choices=["fingerprint", "connectivity"],
+        choices=["mixed_fp", "connectivity"],
         default=DEFAULTS["compound_equality"],
         type=str,
         help=(
-            "Method for compound equality determination. In case of 'fingerprint', a mixed fingerprint "
+            "Method for compound equality determination. In case of 'mixed_fp', a mixed fingerprint "
             "composed of ECFP4 and RDKit fingerprints will be used for determining compound equality. "
-            "Defaults to 'fingerprint'."
+            "Defaults to 'connectivity'."
         ),
     )
 
@@ -546,6 +546,7 @@ def main(args: argparse.Namespace) -> None:
         aggregate_mutants=args.aggregate_mutants,
         max_assay_match=args.max_assay_match,
         output_path=args.output_path,
+        compound_equality=args.compound_equality,
     )
 
     # Save the recipe
