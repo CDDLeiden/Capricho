@@ -500,6 +500,8 @@ def main(args: argparse.Namespace) -> None:
     output_path = Path(args.output_path)
     if not output_path.parent.exists():
         output_path.mkdir()
+    if output_path.suffix != ".csv":
+        output_path = output_path.with_suffix(".csv")
 
     if args.chirality and not args.drop_unassigned_chiral:
         logger.warning(
