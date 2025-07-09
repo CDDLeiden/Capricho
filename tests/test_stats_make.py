@@ -4,8 +4,7 @@ from io import StringIO
 import pandas as pd
 from loguru import logger as loguru_logger
 
-from CompoundMapper.chembl.processing import curate_activity_pairs  # Added import
-from CompoundMapper.core.stats_make import process_repeat_mols
+from CompoundMapper.chembl.processing import curate_activity_pairs
 
 N_CPDS = 19  # number of compounds in the test data
 
