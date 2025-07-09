@@ -374,7 +374,6 @@ def aggregate_data(
     repeats_idxs = repeated_indices_from_array_series(df["id_array"])
 
     include_metadata = [
-        "id_array",
         "doc_type",
         "doi",
         "journal",
@@ -395,12 +394,14 @@ def aggregate_data(
         aggregate_mutants=aggregate_mutants,
     )
 
-    # if compound_equality == "connectivty", should be already in `id_array`
-    final_data = final_data.assign(
-        connectivity=lambda x, compound_equality=compound_equality: (
-            connectivity_writer(x["smiles"].tolist()) if compound_equality == "mixed_fp" else x["id_array"]
-        )
-    ).drop(columns=["id_array"])
+    # TODO: we calculate connectivities twice if compound_equality == 'connectivity', which
+    # is not ideal. I tried creating a SMILES mapping, but we also canonicalize them inside
+    # `process_repeat_mols`, so it doesn't work. Would be nice to fix this in the future
+    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+
+    # reorder the columns so that connectivity comes first
+    cols = ["connectivity"] + final_data.columns.difference(["connectivity"]).tolist()
+    final_data = final_data[cols]
 
     duplicated = final_data.duplicated(subset=["target_chembl_id", "connectivity"])
     if duplicated.any():
