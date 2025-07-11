@@ -33,16 +33,13 @@
   ],
   "log_level": "info",
   "chembl_release": 31,
-  "metadata_columns": [
-    "data_dropping_comment",
-    "data_processing_comment"
-  ],
+  "metadata_columns": [],
   "id_columns": [],
   "skip_not_aggregated": false,
   "aggregate_mutants": false,
   "skip_recipe": false,
   "chembl_backend": "downloader",
-  "chembl_version": null,
+  "chembl_version": "35",
   "save_dropped": true,
   "require_doc_date": true,
   "max_assay_size": 100,
