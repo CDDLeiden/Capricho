@@ -10,11 +10,7 @@ from chembl_downloader import latest
 from .. import __version__
 from ..chembl.api.downloader import check_and_download_chembl_db
 from ..chembl.api.sql_explorer import explorer_main
-from ..core.default_fields import (
-    DATA_DROPPING_COMMENT,
-    DATA_PROCESSING_COMMENT,
-    DEFAULT_ASSAY_MATCH_FIELDS,
-)
+from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
 from ..logger import logger, setup_logger
 from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
@@ -307,7 +303,7 @@ def parse_arguments() -> argparse.Namespace:
         "--metadata-columns",
         nargs="*",
         default=DEFAULTS["metadata_columns"],
-        help="Extra metadata columns to keep in the final dataframe, aggregated by ';'. Defaults to [].",
+        help="Extra metadata columns to keep in the final dataframe, aggregated by '|'. Defaults to [].",
         type=str,
     )
     parser.add_argument(
@@ -318,7 +314,7 @@ def parse_arguments() -> argparse.Namespace:
         help=(
             "Extra columns to use as identifiers for the aggregation. Passing `assay_chembl_id` to this "
             "argument, for example, will only aggregate the data if the compound is the same and the assay "
-            "is the same. Saved data will still contain the original data separated by ';'. Defaults to []."
+            "is the same. Saved data will still contain the original data separated by '|'. Defaults to []."
         ),
         type=str,
     )
