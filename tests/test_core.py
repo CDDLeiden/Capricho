@@ -15,7 +15,7 @@ class TestPandasHelper(unittest.TestCase):
 
     def test_aggr_val_series(self):
         series = pd.Series([1, 2.5, 3, 4.7])
-        self.assertEqual(pandas_helper.aggr_val_series(series), "1.00;2.50;3.00;4.70")
+        self.assertEqual(pandas_helper.aggr_val_series(series), "1.00|2.50|3.00|4.70")
 
     def test_get_mad(self):
         values = [1, 2, 3, 4, 5]
@@ -26,12 +26,12 @@ class TestPandasHelper(unittest.TestCase):
         df = pd.DataFrame({"A": [1, 1, 2, 2], "B": [1, 2, 3, 4]})
         grouped = df.groupby("A")
         result = pandas_helper.apply_func_grpd(grouped, pandas_helper.aggr_val_series, ["A"], "B")
-        expected = pd.DataFrame({"A": [1, 2], "B": ["1;2", "3;4"]})
+        expected = pd.DataFrame({"A": [1, 2], "B": ["1|2", "3|4"]})
         pd.testing.assert_frame_equal(result, expected)
 
     def test_assign_stats(self):
-        df = pd.DataFrame({"value": ["1;2;3", "4;5;6"]})
-        result = pandas_helper.assign_stats(df, sep=";", value_col="value")
+        df = pd.DataFrame({"value": ["1|2|3", "4|5|6"]})
+        result = pandas_helper.assign_stats(df, sep="|", value_col="value")
         self.assertIn("value_mean", result.columns)
         self.assertIn("value_std", result.columns)
         self.assertIn("value_median", result.columns)
