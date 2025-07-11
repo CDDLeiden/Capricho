@@ -274,7 +274,7 @@ def get_standardize_and_clean_workflow(
             "This dataset includes entries that would normally be dropped due to quality flags "
             "and is generally not recommended. The 'data_dropping_comment' column indicates the reasons."
         )
-        missing_smiles_patt = r"Missing (standard )SMILES|Missing SMILES|Mixture in SMILES"
+        missing_smiles_patt = r"Missing Standard SMILES|Missing SMILES|Mixture in SMILES"
         df = (  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
             df.query("~data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)")
             .query("~pchembl_value.isna()")
