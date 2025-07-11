@@ -35,7 +35,7 @@ def pchembl_to_molar(pchembl_value: float, unit: str = "nM") -> float:
 
 def format_value(x) -> str:
     """Helper function to format a value to a string with 4 decimal places. This function
-    is used to store the original pChEMBL values as strings separated by ";".
+    is used to store the original pChEMBL values as strings separated by "|".
 
     Args:
         x: Value to be formatted

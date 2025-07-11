@@ -1,8 +1,6 @@
 """Module holding functionalities for the ChEMBL API."""
 
 import re
-from itertools import combinations
-from math import isclose
 from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
