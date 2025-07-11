@@ -54,8 +54,8 @@ def format_value(x) -> str:
 
 
 def aggr_val_series(series: pd.Series) -> str:
-    """ "Aggregate a pandas Series into a string with values separated by a semicolon."""
-    return ";".join([format_value(x) for x in series])
+    """Aggregate a pandas Series into a string with values separated by pipe."""
+    return "|".join([format_value(x) for x in series])
 
 
 def get_mad(values) -> Union[float, np.float64]:
@@ -120,13 +120,13 @@ def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataF
     return pd.concat(results, ignore_index=False, axis=1).reset_index()
 
 
-def assign_stats(df: pd.DataFrame, sep=";", value_col="pchembl_value", use_geometric=False) -> pd.DataFrame:
+def assign_stats(df: pd.DataFrame, sep="|", value_col="pchembl_value", use_geometric=False) -> pd.DataFrame:
     """Assign statistics to a DataFrame based on a column with multiple values separated by
-    a particular separator, e.g. ';'.
+    a particular separator, e.g. `|` (pipe).
 
     Args:
         df: pd.DataFrame to be processed.
-        sep: string separating the values. Defaults to ';'.
+        sep: string separating the values. Defaults to `|` (pipe).
         value_col: column containing the values to be processed. Defaults to "pchembl_value".
         use_geometric: if True, treats values as -log[unit] and converts them into the original
             scale to calculate the statistics. If False, transformation doesn't take place.
@@ -174,13 +174,13 @@ def find_dict_in_dataframe(df):
 def add_comment(
     df: pd.DataFrame,
     comment: str,
-    criteria_func: Optional[callable] = None,  # Made Optional, default to None
-    target_column: Optional[str] = None,  # Made Optional, default to None
+    criteria_func: Optional[callable] = None,
+    target_column: Optional[str] = None,
     comment_type: Literal["p", "d"] = "d",
 ) -> pd.DataFrame:
     """Marks rows in a DataFrame based on a given criteria or the entire DataFrame, adding a comment to:
-        - 'data_dropping_comment' if comment_type == 'd' (drop)
-        - 'data_processing_comment' if comment_type == 'p' (process).
+        - `data_dropping_comment` if comment_type == `d` (drop)
+        - `data_processing_comment` if comment_type == `p` (process).
 
     Args:
         df (pd.DataFrame): The input DataFrame.
@@ -208,7 +208,8 @@ def add_comment(
         df[column_name] = ""
 
     # Preventively fill NaN values in the comment column to avoid "nan" string concatenation
-    df[column_name] = df[column_name].fillna("")
+    null_mask = df[column_name].isna()
+    df.loc[null_mask, column_name] = ""
 
     if target_column is not None:
         if target_column not in df.columns:

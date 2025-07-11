@@ -17,7 +17,7 @@ def repeated_indices_from_IDs_df(df: pd.DataFrame, columns: list) -> List[List[i
     Args:
         df (pd.DataFrame): The DataFrame to search for repeats.
         columns (list): List of column names with external (non-chembl) IDs to identify
-            repeats across.; E.g.: ["JUMP_ID", "target_chembl_id"]
+            repeats across. E.g.: ["JUMP_ID", "target_chembl_id"]
 
     Returns:
         list: A list of lists containing indices of repeated rows based on specified columns.
@@ -106,7 +106,7 @@ def process_repeat_mols(
             dataframe. Defaults to [].
         extra_multival_cols: list of extra columns that you'd like to keep as aggregated
             values in the final dataframe. Caveat: these columns will be displayes as (str)
-            separated by `;` in the final dataframe. Defaults to [].
+            separated by `|` (pipe) in the final dataframe. Defaults to [].
         chirality: boolean flag to indicate whether the fingerprints used to check for
             identical compounds is chirality-sensitive or not. Defaults to False
 
@@ -126,8 +126,8 @@ def process_repeat_mols(
         numeric_activity = (
             # concatenate grouped values and convert to numeric arrays
             repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
-            .apply(lambda x: ";".join(x))
-            .str.split(";")
+            .apply(lambda x: "|".join(x))
+            .str.split("|")
             .apply(lambda x: np.array(x).astype(float))
         )
     else:
@@ -137,7 +137,7 @@ def process_repeat_mols(
         )
         numeric_activity = (
             repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
-            .apply(lambda x: ";".join(x))
+            .apply(lambda x: "|".join(x))
             .apply(lambda x: np.array(x).astype(float))
         )
 
@@ -154,20 +154,28 @@ def process_repeat_mols(
         logger.info(f"{points_dropped} points will be removed from the dataset")
 
     id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
-    multival_cols = [
-        *multiple_value_cols,
-        *extra_multival_cols,
-    ]
+    multiple_value_cols = [col for col in multiple_value_cols if col not in id_cols]
+    multival_cols = [*multiple_value_cols, *extra_multival_cols]
+
     if aggregate_mutants:
         multival_cols = [*multival_cols, "mutation"]
     else:
         id_cols = [*id_cols, "mutation"]
-    repeat_subset[multival_cols] = repeat_subset[multival_cols].replace({None: "None"})
+    repeat_subset.loc[:, multival_cols].replace({None: "None"}, inplace=True)
     if pd.__version__ >= "1.5.0":
         grouped = repeat_subset.groupby(id_cols, group_keys=True)
     else:
         grouped = repeat_subset.groupby(id_cols)
-    updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
+
+    try:
+        updated_vals = apply_func_grpd(grouped, aggr_val_series, id_cols, *multival_cols)
+    except TypeError as e:
+        logger.error(
+            f"Error while aggregating values for columns {multival_cols}. "
+            f"Data shouldn't contain NaN values, check the columns: {df.isna().sum()}"
+        )
+        raise e
+
     updated_df = assign_stats(updated_vals, value_col="pchembl_value").merge(df, on=id_cols, how="left")
     rename_cols = {c: c.rstrip("_x") for c in updated_df.columns if c.endswith("_x")}
     todrop_cols = [c for c in updated_df.columns if c.endswith("_y")]
@@ -189,7 +197,7 @@ def process_repeat_mols(
         ignore_index=True,
     )
     # the `smiles` column will be the final smiles column; to be used for modeling
-    smiles = df["standard_smiles"].apply(lambda smi: smi if ";" not in smi else smi.split(";")[0])
+    smiles = df["standard_smiles"].apply(lambda smi: smi if "|" not in smi else smi.split("|")[0])
     logger.info("Canonicalizing smiles...")
     df = df.assign(smiles=smiles_canonizer(smiles))
 
