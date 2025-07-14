@@ -12,6 +12,7 @@ used to annotate processing steps that occurred during the data processing pipel
 
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 from ..core.default_fields import (
@@ -324,16 +325,17 @@ def flag_inter_document_duplication(
     """
     dupli_mask = conflicting_duplicates(df, key_subset=key_subset, diff_subset=diff_subset)
     n_duplicates = dupli_mask.sum()
+    dupli_idxs = np.compress(dupli_mask.values, dupli_mask.index)
     if n_duplicates > 0:
         logger.info(
-            f"Fagged {n_duplicates - df.shape[0]} duplicates with same Mol identifiers accross different Documents."
+            f"Flagged {n_duplicates} duplicates with same Mol identifiers accross different Documents."
         )
     return (
         df.assign(temp_dupli_flag=dupli_mask)
         .pipe(
             add_comment,
-            comment="pChEMBL Duplication Accross Documents",
-            criteria_func=lambda x: x,
+            comment="pChEMBL Duplication Across Documents",
+            criteria_func=lambda x, idxs=dupli_idxs: x.index.isin(idxs),
             target_column="temp_dupli_flag",
             comment_type="p",
         )
