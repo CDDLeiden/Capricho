@@ -204,22 +204,26 @@ def curate_activity_pairs(
 
     if rows_to_flag_indices:
         comment = "Unit Annotation Error"
-        final_indices_to_action = list(rows_to_flag_indices)
+        to_rm_idxs = list(rows_to_flag_indices)
 
         if save_dropped:
-            logger.info(f"Activity Curation: Flagging {len(final_indices_to_action)} measurements. {comment}")
+            logger.info(
+                f"Activity Curation: Flagging {len(to_rm_idxs)} measurements due to {comment.lower()}"
+            )
             df = add_comment(
                 df=df,
                 comment=comment,
-                criteria_func=lambda x: x.index.isin(final_indices_to_action),
+                criteria_func=lambda x: x.index.isin(to_rm_idxs),
                 target_column=activity_value_col,
                 comment_type="d",
             )
         else:
-            logger.info(f"Activity Curation: Removing {len(final_indices_to_action)} measurements. {comment}")
-            df = df.drop(index=final_indices_to_action)
+            logger.info(
+                f"Activity Curation: Removing {len(to_rm_idxs)} measurements due to {comment.lower()}"
+            )
+            df = df.drop(index=to_rm_idxs)
     else:
-        logger.info("No activity pairs found meeting the curation criteria (activity diff ~3.0).")
+        logger.info("No activity pairs found meeting the curation criteria (activity diff ~3.0 | ~6.0).")
 
     return df
 

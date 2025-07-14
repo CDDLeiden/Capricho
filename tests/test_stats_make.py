@@ -302,8 +302,7 @@ class TestActivityCuration(unittest.TestCase):
         print("\nCaptured Log Output:\n", log_output)
 
         self.assertIn(
-            "Activity Curation: Removing 11 measurements. potential unit annotation error "
-            "- pChEMBL values differ by 3.0 for same molecule",
+            "Activity Curation: Removing 11 measurements due to unit annotation error",
             log_output,
         )
 
