@@ -335,18 +335,23 @@ class TestActivityCuration(unittest.TestCase):
 
         processed_df = curate_activity_pairs(df_initial.copy())
 
+        # Here we drop the flagged rows just for testing purpose (compare to expected_df_curated)
+        dropped_df = processed_df[processed_df["data_dropping_comment"].replace({"": None}).isna()].drop(
+            columns=["data_dropping_comment"]
+        )
+
         log_output = captured_logs.getvalue()
         loguru_logger.remove(sink_id)
 
         print("\nCaptured Log Output:\n", log_output)
 
         self.assertIn(
-            "Activity Curation: Removing 14 measurements due to unit annotation error",
+            "Activity Curation: Flagging 14 measurements due to unit annotation error",
             log_output,
         )
 
         pd.testing.assert_frame_equal(
-            processed_df.reset_index(drop=True),
+            dropped_df.reset_index(drop=True),
             expected_df_curated.reset_index(drop=True),
             check_dtype=False,  # Allow different int types (e.g. int32 vs int64)
             check_like=True,  # Ignore column order as long as labels match
