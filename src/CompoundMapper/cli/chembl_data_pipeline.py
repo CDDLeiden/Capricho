@@ -28,6 +28,7 @@ from ..core.default_fields import (
     TARGET_ID,
 )
 from ..core.fp_utils import calculate_mixed_FPs
+from ..core.pandas_helper import save_dataframe
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
 from ..core.stereo import find_undefined_stereocenters
@@ -47,7 +48,6 @@ def get_standardize_and_clean_workflow(
     assay_types: list[str],
     chembl_release: Optional[int],
     save_not_aggregated: bool = True,
-    save_dropped: bool = False,
     drop_unassigned_chiral: bool = False,
     version: Optional[Union[int, str]] = None,
     backend: Literal["downloader", "webresource"] = "downloader",
@@ -57,7 +57,6 @@ def get_standardize_and_clean_workflow(
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
     strict_mutant_removal: bool = False,
-    keep_flagged_data: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -78,7 +77,6 @@ def get_standardize_and_clean_workflow(
             Defaults to "=".
         chembl_release: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
-        save_dropped: whether to save a separate dataframe containing rows that were flagged for dropping.
         drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
         version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
             chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
@@ -95,9 +93,6 @@ def get_standardize_and_clean_workflow(
                 for their activities to be considered. Defaults to None (no filtering).
             strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
                 description will be flagged for removal. Defaults to False.
-        keep_flagged_data: If True, data points flagged for dropping (due to various quality
-            checks) will be retained in the main DataFrame. The `data_dropping_comment` column
-            will still be populated. A warning will be logged. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -129,7 +124,6 @@ def get_standardize_and_clean_workflow(
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
         chembl_release=chembl_release,
-        save_dropped=save_dropped,
         version=version,
         backend=backend,
     )
@@ -196,8 +190,8 @@ def get_standardize_and_clean_workflow(
     # make sure we don't have Nan, can result from merging pChEMBL-lacking calculated values
     df[DATA_PROCESSING_COMMENT] = df[DATA_PROCESSING_COMMENT].fillna("")
 
-    # Raise error if df is empty after critical processing steps AND we are not saving dropped rows
-    if not save_dropped and df.empty:
+    # Raise error if df is empty after critical processing steps
+    if df.empty:
         func_params = signature(get_standardize_and_clean_workflow).parameters
         local_vars = locals()
         # Filter out df from params to avoid large object in error message
@@ -244,32 +238,21 @@ def get_standardize_and_clean_workflow(
     # by two assays performed in the same paper !
     df = flag_inter_document_duplication(df)
 
-    if save_dropped and output_path is not None:
-        df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
-            "~data_dropping_comment.isna()"
-        ).to_csv(output_path.with_stem(f"{output_path.stem}_removed"), index=False)
-
-    if keep_flagged_data:
-        logger.warning(
-            "Retaining flagged data points in the main dataset. "
-            "This dataset includes entries that would normally be dropped due to quality flags "
-            "and is generally not recommended. The 'data_dropping_comment' column indicates the reasons."
-        )
-        missing_smiles_patt = r"Missing Standard SMILES|Missing SMILES|Mixture in SMILES"
-        df = (  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
-            df.query("~data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)")
-            .query("~pchembl_value.isna()")
-            .query("~standard_smiles.str.contains('^\.+$', regex=True)")
-        )
-
-    else:
-        df = df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
-            "data_dropping_comment.isna()"
-        )
+    # This part needs to be removed prior to data aggregation. Here, we have either
+    # inorganic compounds (SMILES removed from the salt removal step), mixtures (SMILES with "."), or
+    # compounds with missing pchembl values, which are needed for the statistics
+    missing_smiles_patt = r"Missing Standard SMILES|Missing SMILES|Mixture in SMILES"
+    removed_subset = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
+        "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True) | "
+        "pchembl_value.isna() | "
+        "standard_smiles.str.contains('^\.+$', regex=True)"
+    ).copy()
+    if output_path is not None:
+        save_dataframe(removed_subset, output_path.with_stem(f"{output_path.stem}_removed_subset"))
+    df = df.drop(index=removed_subset.index)
 
     if save_not_aggregated and output_path is not None:
-        df.to_csv(output_path.with_stem(f"{output_path.stem}_not_aggregated"), index=False)
-
+        save_dataframe(df, output_path.with_stem(f"{output_path.stem}_not_aggregated"))
     return df
 
 
@@ -314,7 +297,7 @@ def aggregate_data(
     Returns:
         pd.DataFrame: the aggregated data
     """
-    current_extra_id_cols = list(extra_id_cols)  # Make a mutable copy
+    current_extra_id_cols = list(extra_id_cols)  # mutable copy
 
     if max_assay_match:
         logger.info(
@@ -333,7 +316,7 @@ def aggregate_data(
 
         current_extra_id_cols.extend(fields_to_add)
         current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
-        logger.info(f"Effective ID columns for aggregation: {current_extra_id_cols}")
+        logger.info(f"ID columns for aggregation: {current_extra_id_cols}")
 
     connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
 
@@ -380,8 +363,9 @@ def aggregate_data(
     # `process_repeat_mols`, so it doesn't work. Would be nice to fix this in the future
     final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
-    # reorder the columns so that connectivity comes first
-    cols = ["connectivity"] + final_data.columns.difference(["connectivity"]).tolist()
+    # reorder the columns so that connectivity comes first and processing & droppiong comes last
+    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
+    cols = ["connectivity", *final_data.columns.difference(["connectivity"] + xtra_cols).tolist(), *xtra_cols]
     final_data = final_data[cols]
 
     duplicated = final_data.duplicated(subset=["target_chembl_id", "connectivity"])
@@ -415,6 +399,6 @@ def aggregate_data(
         )
 
     if output_path is not None:
-        final_data.to_csv(output_path, index=False)
+        save_dataframe(final_data, output_path)
 
     return final_data

@@ -372,16 +372,6 @@ def parse_arguments() -> argparse.Namespace:
         type=str,
     )
     parser.add_argument(
-        "-sd",
-        "--save-dropped",
-        dest="save_dropped",
-        action="store_true",
-        help=(
-            "Save a separate dataframe containing rows that were flagged for dropping, "
-            "along with the reasons for flagging. Default is False."
-        ),
-    )
-    parser.add_argument(
         "-reqdoc",
         "--require-doc-date",
         dest="require_doc_date",
@@ -446,17 +436,6 @@ def parse_arguments() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "-kfd",
-        "--keep-flagged-data",
-        dest="keep_flagged_data",
-        action="store_true",
-        help=(
-            "If True, data points flagged for dropping will be retained in the main dataset. "
-            "The `data_dropping_comment` column will still be populated. "
-            "A warning will be logged. Default is False."
-        ),
-    )
-    parser.add_argument(
         "-cpd-eq",
         "--compound-equality",
         dest="compound_equality",
@@ -496,8 +475,13 @@ def main(args: argparse.Namespace) -> None:
     output_path = Path(args.output_path)
     if not output_path.parent.exists():
         output_path.mkdir()
-    if output_path.suffix != ".csv":
+    if output_path.suffix == "":
         output_path = output_path.with_suffix(".csv")
+    assert output_path.suffix.split(".")[1] in [
+        "csv",
+        "tsv",
+        "parquet",
+    ], "Output file must be a .csv, .tsv, or a .parquet file."
 
     if args.chirality and not args.drop_unassigned_chiral:
         logger.warning(
@@ -513,14 +497,13 @@ def main(args: argparse.Namespace) -> None:
         assay_ids=args.assay_ids,
         document_ids=args.document_ids,
         calculate_pchembl=args.calculate_pchembl,
-        output_path=args.output_path,
+        output_path=output_path,
         confidence_scores=args.confidence_scores,
         bioactivity_type=args.bioactivity_type,
         standard_relation=args.standard_relation,
         assay_types=args.assay_types,
         chembl_release=args.chembl_release,
         save_not_aggregated=(not args.skip_not_aggregated),
-        save_dropped=args.save_dropped,
         drop_unassigned_chiral=args.drop_unassigned_chiral,
         curate_annotation_errors=args.curate_annotation_errors,
         version=args.chembl_version,
@@ -530,7 +513,6 @@ def main(args: argparse.Namespace) -> None:
         max_assay_size=args.max_assay_size,
         min_assay_overlap=args.min_assay_overlap,
         strict_mutant_removal=args.strict_mutant_removal,
-        keep_flagged_data=args.keep_flagged_data,
     )
 
     df = aggregate_data(
@@ -540,7 +522,7 @@ def main(args: argparse.Namespace) -> None:
         extra_id_cols=args.id_columns,
         aggregate_mutants=args.aggregate_mutants,
         max_assay_match=args.max_assay_match,
-        output_path=args.output_path,
+        output_path=output_path,
         compound_equality=args.compound_equality,
     )
 
