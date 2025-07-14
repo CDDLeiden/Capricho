@@ -48,7 +48,6 @@ def get_standardize_and_clean_workflow(
     chembl_release: Optional[int],
     save_not_aggregated: bool = True,
     save_dropped: bool = False,
-    save_duplicated: bool = False,
     drop_unassigned_chiral: bool = False,
     version: Optional[Union[int, str]] = None,
     backend: Literal["downloader", "webresource"] = "downloader",
@@ -80,7 +79,6 @@ def get_standardize_and_clean_workflow(
         chembl_release: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
         save_dropped: whether to save a separate dataframe containing rows that were flagged for dropping.
-        save_duplicated: whether to save the duplicated data (if any) to a separate csv file
         drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
         version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
             chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
