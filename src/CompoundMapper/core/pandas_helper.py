@@ -1,6 +1,7 @@
 """Module containing helper functions for manipulating pandas DataFrames"""
 
 import functools
+from pathlib import Path
 from typing import Literal, Optional, Union
 
 import numpy as np
@@ -9,6 +10,52 @@ from scipy.stats import gmean, gstd, median_abs_deviation
 
 from ..logger import logger
 from .default_fields import DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT
+
+
+def save_dataframe(
+    df: pd.DataFrame,
+    path: Union[Path, str],
+    compression: Optional[str] = "infer",
+) -> None:
+    """Saves a DataFrame to a file with optional compression.
+
+    This function determines the file format from the file extension and uses
+    the appropriate pandas function to save the DataFrame.
+
+    Args:
+        df: The DataFrame to be saved.
+        path: The file path where the DataFrame will be saved. The file
+              extension determines the format (.csv, .tsv, .parquet).
+        compression: The compression format to use. For CSV/TSV, the default
+            is 'infer', which deduces the compression from the file extension
+            (e.g., '.gz', '.zip'). For Parquet, if 'infer' is passed, it
+            defaults to 'snappy'. Use None for no compression.
+    """
+    if isinstance(path, str):
+        path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_suffix = path.suffix
+
+    if ".csv" in path.name or ".tsv" in path.name:
+        sep = "\t" if ".tsv" in path.name else ","
+        # For CSV and TSV, pandas can infer compression from the extension. [3, 4]
+        df.to_csv(path, sep=sep, index=False, compression=compression)
+    elif ".parquet" in path.name:
+        if compression == "infer":
+            if path.suffix.endswith(".gz"):
+                compression_to_use = "gzip"
+            else:
+                compression_to_use = "snappy"
+                path = path.with_suffix(".snappy.parquet")
+        else:
+            compression_to_use = compression
+        df.to_parquet(path, index=False, compression=compression_to_use)
+    else:
+        raise ValueError(
+            f"Unsupported file format: '{file_suffix}'. Supported formats are "
+            "'.csv', '.tsv', and '.parquet'."
+        )
 
 
 def conflicting_duplicates(df, key_subset, diff_subset: Optional[list[str]] = None) -> pd.Series:
