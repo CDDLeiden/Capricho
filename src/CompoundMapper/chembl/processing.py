@@ -203,7 +203,7 @@ def curate_activity_pairs(
             )
 
     if rows_to_flag_indices:
-        comment = "potential unit annotation error - pChEMBL values differ by 3.0 for same molecule"
+        comment = "Unit Annotation Error"
         final_indices_to_action = list(rows_to_flag_indices)
 
         if save_dropped:
