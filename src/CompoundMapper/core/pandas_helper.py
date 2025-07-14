@@ -11,6 +11,27 @@ from ..logger import logger
 from .default_fields import DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT
 
 
+def conflicting_duplicates(df, key_subset, diff_subset: Optional[list[str]] = None) -> pd.Series:
+    """Return a boolean Series like `df.duplicated(...)`, where True marks rows
+    that have the same values in `key_subset` but different values in `diff_subset`.
+    If diff_subset is None, it behaves like `df.duplicated(subset=key_subset, keep=False)`.
+
+    Args:
+        df: pd.DataFrame to check for duplicates
+        key_subset: list of columns to check for duplication
+        diff_subset: list of columns that must be different within groups of duplicates.
+
+    Returns:
+        pd.Series: Boolean Series indicating rows with conflicting duplicates
+    """
+    if diff_subset is None:
+        return df.duplicated(subset=key_subset, keep=False)
+    nunique_diff = df.groupby(key_subset)[diff_subset].nunique(dropna=False)
+    conflicting_keys = nunique_diff[(nunique_diff > 1).any(axis=1)].index
+    mask = df.set_index(key_subset).index.isin(conflicting_keys)
+    return pd.Series(mask, index=df.index)
+
+
 def pchembl_to_molar(pchembl_value: float, unit: str = "nM") -> float:
     """Convert a pChEMBL value to molar units.
 
@@ -53,9 +74,9 @@ def format_value(x) -> str:
         return x
 
 
-def aggr_val_series(series: pd.Series) -> str:
-    """Aggregate a pandas Series into a string with values separated by pipe."""
-    return "|".join([format_value(x) for x in series])
+def aggr_val_series(series: pd.Series, sep: str = "|") -> str:
+    """Aggregate a pd.Series into a string with values separated by a string (default: pipe)."""
+    return sep.join([format_value(x) for x in series])
 
 
 def get_mad(values) -> Union[float, np.float64]:
