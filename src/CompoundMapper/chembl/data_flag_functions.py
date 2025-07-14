@@ -10,6 +10,8 @@ used to annotate processing steps that occurred during the data processing pipel
 
 """
 
+from typing import Optional
+
 import pandas as pd
 
 from ..core.default_fields import (
@@ -18,7 +20,7 @@ from ..core.default_fields import (
     MOLECULE_ID,
     TARGET_ID,
 )
-from ..core.pandas_helper import add_comment
+from ..core.pandas_helper import add_comment, conflicting_duplicates
 from ..logger import logger
 
 
@@ -82,7 +84,7 @@ def flag_undefined_stereochemistry(df: pd.DataFrame) -> pd.DataFrame:
     """Mark compounds with undefined stereochemistry based on a predefined boolean mask."""
     return add_comment(
         df,
-        comment="Undefined stereochemistry",
+        comment="Undefined Stereochemistry",
         criteria_func=lambda x: x > 0,
         target_column="undefined_stereocenters",
         comment_type="d",
@@ -102,7 +104,7 @@ def flag_min_assay_size(df: pd.DataFrame, min_assay_size: int = 0) -> pd.DataFra
     else:
         return add_comment(
             df,
-            comment=f"Assay size < {min_assay_size} (minimum assay size)",
+            comment=f"Assay size < {min_assay_size}",
             criteria_func=lambda x: x < min_assay_size,
             target_column="assay_size",
             comment_type="d",
@@ -122,7 +124,7 @@ def flag_max_assay_size(df: pd.DataFrame, max_assay_size: int = 1000) -> pd.Data
     else:
         return add_comment(
             df,
-            comment=f"Assay size > {max_assay_size} (maximum assay size)",
+            comment=f"Assay size > {max_assay_size}",
             criteria_func=lambda x: x > max_assay_size,
             target_column="assay_size",
             comment_type="d",
@@ -161,7 +163,7 @@ def flag_strict_mutant_assays(df: pd.DataFrame, strict_mutant_removal: bool = Fa
         )
         df = add_comment(
             df,
-            comment="Strict mutant removal: keyword in assay_description",
+            comment="Mutation keyword in assay description",
             criteria_func=criteria,
             target_column="assay_description",
             comment_type="d",
@@ -292,22 +294,45 @@ def flag_salt_or_solvent_removal(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def flag_duplication(df: pd.DataFrame, dupli_id_subset: list[str]) -> pd.DataFrame:
+def flag_inter_document_duplication(
+    df: pd.DataFrame,
+    key_subset: list[str] = [
+        "molecule_chembl_id",
+        "standard_smiles",
+        "canonical_smiles",
+        "pchembl_value",
+        "standard_relation",
+        "target_chembl_id",
+        "target_organism",
+    ],
+    diff_subset: Optional[list[str]] = ["document_chembl_id"],
+) -> pd.DataFrame:
     """Marks rows with a potential duplication after SMILES standardization & salt removal.
 
     Args:
         df: DataFrame to be processed.
-        dupli_id_subset: subset of columns to be used for identifying duplicates.
+        key_subset: metadata columns used for identifying duplicates. Defaults to a
+            list of columns typically used to identify a compound readout.
+        diff_subset: optional metadata columns used to identify duplicates across
+            different documents. If None, it identifies only based on `key_subset`.
+            Defaults to a list containing 'document_chembl_id', which is used to identify
+            duplicates across different documents.
 
     Returns:
         pd.DataFrame: DataFrame with duplicates marked in `data_processing_comment`
                       (or `data_dropping_comment` if comment_type='d' was used).
     """
+    dupli_mask = conflicting_duplicates(df, key_subset=key_subset, diff_subset=diff_subset)
+    n_duplicates = dupli_mask.sum()
+    if n_duplicates > 0:
+        logger.info(
+            f"Fagged {n_duplicates - df.shape[0]} duplicates with same Mol identifiers accross different Documents."
+        )
     return (
-        df.assign(temp_dupli_flag=lambda x: x.duplicated(subset=dupli_id_subset, keep=False))
+        df.assign(temp_dupli_flag=dupli_mask)
         .pipe(
             add_comment,
-            comment="Potential Duplication - same pChEMBL value reported for the same compound",
+            comment="pChEMBL Duplication Accross Documents",
             criteria_func=lambda x: x,
             target_column="temp_dupli_flag",
             comment_type="p",

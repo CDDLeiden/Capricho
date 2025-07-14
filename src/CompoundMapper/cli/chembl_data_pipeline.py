@@ -6,8 +6,8 @@ import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
 
 from ..chembl.data_flag_functions import (
-    flag_duplication,
     flag_insufficient_assay_overlap,
+    flag_inter_document_duplication,
     flag_max_assay_size,
     flag_min_assay_size,
     flag_missing_canonical_smiles,
@@ -240,28 +240,11 @@ def get_standardize_and_clean_workflow(
             )
             return pd.DataFrame()
 
-    # Documents - since much of ChEMBL is take from medchem literature, if there are two
-    # assays from the same document that have the same readout and are measured against
-    # the same target, we can be pretty sure tha they are *not* equivalent;
-    df_size = df.shape[0]
-    col_subset = [  # Drop different assays that have the same exact pchembl value - probably duplicate
-        "molecule_chembl_id",
-        "standard_smiles",
-        "canonical_smiles",
-        "pchembl_value",
-        "standard_relation",
-        "target_chembl_id",
-        "target_organism",
-    ]
-    # Handle duplicated data
-    duplicated = df.duplicated(subset=col_subset, keep=False)
-    df = flag_duplication(df, dupli_id_subset=col_subset)
-    if duplicated.any():
-        df.drop_duplicates(subset=col_subset, keep="first", inplace=True)
-        if save_duplicated and output_path is not None:
-            df[duplicated].to_csv(output_path.with_stem(f"{output_path.stem}_duplicated"), index=False)
-        if df_size != df.shape[0]:
-            logger.info(f"Dropped {df_size - df.shape[0]} duplicates.")
+    # for the duplication we try to find the same molecule identifiers (molID, SMILES) and
+    # activity outcomes (targetID, organismID, standard_value, standard_relation), but reported
+    # in different ChEMBL documents (different papers) so we can keep same-readouts reported
+    # by two assays performed in the same paper !
+    df = flag_inter_document_duplication(df)
 
     if save_dropped and output_path is not None:
         df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
