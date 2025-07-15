@@ -245,7 +245,7 @@ def get_standardize_and_clean_workflow(
     removed_subset = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
         "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True) | "
         "pchembl_value.isna() | "
-        "standard_smiles.str.contains('^\.+$', regex=True)"
+        r"standard_smiles.str.contains('^\.+$', regex=True)"
     ).copy()
     if output_path is not None:
         suffixes = "".join(output_path.suffixes)
