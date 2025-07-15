@@ -40,13 +40,14 @@ def get_standardize_and_clean_workflow(
     target_ids: list[str],
     assay_ids: list[str],
     document_ids: list[str],
-    calculate_pchembl: bool,
-    output_path: Optional[Union[str, Path]],
-    confidence_scores: list[str],
-    bioactivity_type: list[str],
-    standard_relation: list[str],  # TODO: later support data with  >, <, >=, <=...
-    assay_types: list[str],
-    chembl_release: Optional[int],
+    chirality: bool = True,
+    calculate_pchembl: bool = False,
+    output_path: Optional[Union[str, Path]] = None,
+    confidence_scores: list[str] = [7, 8, 9],
+    bioactivity_type: list[str] = ["IC50", "EC50", "AC50", "Ki", "Kd"],
+    standard_relation: list[str] = ["="],  # TODO: later support data with  >, <, >=, <=...
+    assay_types: list[str] = ["B", "F"],
+    chembl_release: Optional[int] = None,
     save_not_aggregated: bool = True,
     drop_unassigned_chiral: bool = False,
     version: Optional[Union[int, str]] = None,
@@ -70,6 +71,8 @@ def get_standardize_and_clean_workflow(
         document_ids: list of ChEMBL document IDs to filter data from
         calculate_pchembl: whether to calculate pchembl values when not found for assay
             results reported in nanomolar/micromolar units
+        chirality: setting this to False will remove stereochemistry information from the
+            SMILES on top of the standardization. Defaults to True.
         output_path: path to save the resulting csv file
         confidence_scores: list of confidence scores (assay-related) to filter data from
         bioactivity_type: list of bioactivity types (assay-related) to filter data from
@@ -169,7 +172,7 @@ def get_standardize_and_clean_workflow(
         logger.info(f"Dropping rows with missing canonical smiles:\n{_info}")
         full_df = full_df.drop(index=_info.index).reset_index(drop=True)
 
-    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
+    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False, isomeric=chirality)
     df = (
         full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string

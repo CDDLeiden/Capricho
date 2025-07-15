@@ -498,6 +498,7 @@ def main(args: argparse.Namespace) -> None:
         target_ids=args.target_ids,
         assay_ids=args.assay_ids,
         document_ids=args.document_ids,
+        chirality=args.chirality,
         calculate_pchembl=args.calculate_pchembl,
         output_path=output_path,
         confidence_scores=args.confidence_scores,

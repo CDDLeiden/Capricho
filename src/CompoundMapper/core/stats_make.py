@@ -206,7 +206,7 @@ def process_repeat_mols(
     final_cols.pop(final_cols.index("repeat_mapping"))  # remove repeat_mapping from final_cols
     df = (
         df[final_cols]
-        .rename(columns={"standard_smiles": "original_smiles"})
+        .rename(columns={"standard_smiles": "processed_smiles"})
         .reset_index(drop=True)
         .drop_duplicates()
     )
