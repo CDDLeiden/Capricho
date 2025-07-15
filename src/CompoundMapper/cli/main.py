@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
+
 from chembl_downloader import latest
 
 from .. import __version__
@@ -477,11 +479,11 @@ def main(args: argparse.Namespace) -> None:
         output_path.mkdir()
     if output_path.suffix == "":
         output_path = output_path.with_suffix(".csv")
-    assert output_path.suffix.split(".")[1] in [
-        "csv",
-        "tsv",
-        "parquet",
-    ], "Output file must be a .csv, .tsv, or a .parquet file."
+
+    assert np.intersect1d([".csv", ".tsv", ".parquet"], output_path.suffixes).shape[0] > 0, (
+        "Output file must have a valid suffix: .csv, .tsv, or .parquet. "
+        f"Provided suffix: {output_path.suffixes}"
+    )
 
     if args.chirality and not args.drop_unassigned_chiral:
         logger.warning(
@@ -528,7 +530,7 @@ def main(args: argparse.Namespace) -> None:
 
     # Save the recipe
     if not args.skip_recipe:
-        output_name = output_path.stem
+        output_name = output_path.stem.split(".")[0]  # to avoid issues with double suffixes
         recipe_path = output_path.parent / f"{output_name}_recipe.json"
 
         configs = vars(args)

@@ -248,11 +248,15 @@ def get_standardize_and_clean_workflow(
         "standard_smiles.str.contains('^\.+$', regex=True)"
     ).copy()
     if output_path is not None:
-        save_dataframe(removed_subset, output_path.with_stem(f"{output_path.stem}_removed_subset"))
+        suffixes = "".join(output_path.suffixes)
+        new_name = output_path.stem.split(".")[0] + "_removed_subset" + suffixes
+        save_dataframe(removed_subset, output_path.with_name(new_name))
     df = df.drop(index=removed_subset.index)
 
     if save_not_aggregated and output_path is not None:
-        save_dataframe(df, output_path.with_stem(f"{output_path.stem}_not_aggregated"))
+        suffixes = "".join(output_path.suffixes)
+        new_name = output_path.stem.split(".")[0] + "_not_aggregated" + suffixes
+        save_dataframe(removed_subset, output_path.with_name(new_name))
     return df
 
 
