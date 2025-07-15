@@ -259,7 +259,7 @@ def get_standardize_and_clean_workflow(
     if save_not_aggregated and output_path is not None:
         suffixes = "".join(output_path.suffixes)
         new_name = output_path.stem.split(".")[0] + "_not_aggregated" + suffixes
-        save_dataframe(removed_subset, output_path.with_name(new_name))
+        save_dataframe(df, output_path.with_name(new_name))
     return df
 
 
