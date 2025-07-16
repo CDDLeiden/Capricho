@@ -375,33 +375,57 @@ def aggregate_data(
     cols = ["connectivity", *final_data.columns.difference(["connectivity"] + xtra_cols).tolist(), *xtra_cols]
     final_data = final_data[cols]
 
-    duplicated = final_data.duplicated(subset=["target_chembl_id", "connectivity"])
-    if duplicated.any():
+    if aggregate_mutants:
+        col_subset_dupli_warning = ["connectivity", "target_chembl_id", *extra_id_cols]
+    else:
+        col_subset_dupli_warning = ["connectivity", "mutation", "target_chembl_id", *extra_id_cols]
+
+    _limit = 15  # limit in the string length for the warning/info logging
+    logging_subset = [
+        *col_subset_dupli_warning,
+        "molecule_chembl_id",
+        "assay_chembl_id",
+        "pchembl_value_mean",
+    ]
+
+    # Based on the ID columns, we shouldn't have any duplicates. This warning is a safeguard
+    duplics_for_warning = final_data.duplicated(subset=col_subset_dupli_warning)
+    if duplics_for_warning.any():
         dupli_subset = (
-            final_data[duplicated]
-            .loc[
-                :,
-                [
-                    "connectivity",
-                    "molecule_chembl_id",
-                    "assay_chembl_id",
-                    "target_chembl_id",
-                    "pchembl_value_mean",
-                ],
-            ]
+            final_data[duplics_for_warning]
+            .loc[:, logging_subset]
             .sort_values(
                 by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
                 ascending=[True, True, False],
             )
         )
-        _limit = 15  # limit in the string length for the warning
         truncated_df = dupli_subset.applymap(
             lambda x: str(x)[:_limit] + "..." if len(str(x)) > _limit else str(x)
         ).head(10)
         logger.warning(
-            "There two or more compounds with the same connectivity and target_chembl_id. "
-            "Your aggregation criteria was likely strict, so it's expected. Please look into "
-            "the following entries prior to modeling:\n"
+            f"There two or more compounds matching the ID columns {col_subset_dupli_warning} "
+            "This is not intentional, please further inspect the collected dataset. Here's a sample "
+            "of the repeated entries:\n"
+            f"{truncated_df.to_string(index=False)}"
+        )
+
+    # Additional safeguard to ensure proper handling of the output by the user prior to modeling
+    target_cpd_col_subset = ["target_chembl_id", "connectivity"]
+    duplics_for_info = final_data.duplicated(subset=target_cpd_col_subset)
+    if duplics_for_info.any():
+        dupli_subset = (
+            final_data[duplics_for_info]
+            .loc[:, logging_subset]
+            .sort_values(by=target_cpd_col_subset + ["pchembl_value_mean"], ascending=[True, True, False])
+        )
+        truncated_df = dupli_subset.applymap(
+            lambda x: str(x)[:_limit] + "..." if len(str(x)) > _limit else str(x)
+        ).head(10)
+        logger.info(
+            "There are two or more repeated compound-target readouts (based on `connectivity` & `target_chembl_id`) "
+            "without considering other ID columns. This is a result of your aggregation criteria. Make "
+            "sure to differ these data points in your modeling pipeline by including information of your other id_columns, "
+            "or resolve these compound-target repeats prior to modeling. Here's a sample of the repeated entries:\n"
             f"{truncated_df.to_string(index=False)}"
         )
 
