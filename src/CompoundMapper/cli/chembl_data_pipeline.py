@@ -35,6 +35,71 @@ from ..core.stereo import find_undefined_stereocenters
 from ..logger import logger
 
 
+def _warn_info_post_aggregation_repeats(
+    df: pd.DataFrame,
+    extra_id_cols: list[str],
+    aggregate_mutants: bool = False,
+    _limit: int = 15,  # limit in the string length for the warning/info logging
+):
+    def _truncate_dataframe(df: pd.DataFrame, limit: int) -> pd.DataFrame:
+        """Truncate DataFrame values to a specified length."""
+        if pd.__version__ > "2.1.0":  # applymap got deprecated in 2.1.0
+            return df.map(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
+        else:
+            return df.applymap(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
+
+    if aggregate_mutants:
+        col_subset_dupli_warning = ["connectivity", "target_chembl_id", *extra_id_cols]
+    else:
+        col_subset_dupli_warning = ["connectivity", "mutation", "target_chembl_id", *extra_id_cols]
+
+    logging_subset = [  # subset of columns to be displayed on the warning/info logging
+        *col_subset_dupli_warning,
+        "molecule_chembl_id",
+        "assay_chembl_id",
+        "pchembl_value_mean",
+    ]
+
+    # Based on the ID columns, we shouldn't have any duplicates. This warning is a safeguard
+    duplics_for_warning = df.duplicated(subset=col_subset_dupli_warning)
+    if duplics_for_warning.any():
+        dupli_subset = (
+            df[duplics_for_warning]
+            .loc[:, logging_subset]
+            .sort_values(
+                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
+                ascending=[True, True, False],
+            )
+        )
+        truncated_df = _truncate_dataframe(dupli_subset, _limit)
+        logger.warning(
+            f"There two or more compounds matching the ID columns {col_subset_dupli_warning} "
+            "This is not intentional, please further inspect the collected dataset. Here's a sample "
+            "of the repeated entries:\n"
+            f"{truncated_df.to_string(index=False)}"
+        )
+
+    # Additional safeguard to ensure proper handling of the output by the user prior to modeling
+    target_cpd_col_subset = ["target_chembl_id", "connectivity"]
+    duplics_for_info = df.duplicated(subset=target_cpd_col_subset)
+    if duplics_for_info.any():
+        dupli_subset = (
+            df[duplics_for_info]
+            .loc[:, logging_subset]
+            .sort_values(by=target_cpd_col_subset + ["pchembl_value_mean"], ascending=[True, True, False])
+        )
+        truncated_df = _truncate_dataframe(dupli_subset, _limit)
+        logger.info(
+            "There are two or more repeated compound-target readouts (based on `connectivity` & `target_chembl_id`) "
+            "without considering other ID columns. This is a result of your aggregation criteria. Make "
+            "sure to differ these data points in your modeling pipeline by including information of your other id_columns, "
+            "or resolve these compound-target repeats prior to modeling. Here's a sample of the repeated entries:\n"
+            f"{truncated_df.to_string(index=False)}"
+        )
+
+    return
+
+
 def get_standardize_and_clean_workflow(
     molecule_ids: list[str],
     target_ids: list[str],
@@ -375,59 +440,118 @@ def aggregate_data(
     cols = ["connectivity", *final_data.columns.difference(["connectivity"] + xtra_cols).tolist(), *xtra_cols]
     final_data = final_data[cols]
 
-    if aggregate_mutants:
-        col_subset_dupli_warning = ["connectivity", "target_chembl_id", *extra_id_cols]
-    else:
-        col_subset_dupli_warning = ["connectivity", "mutation", "target_chembl_id", *extra_id_cols]
+    _warn_info_post_aggregation_repeats(
+        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
+    )
 
-    _limit = 15  # limit in the string length for the warning/info logging
-    logging_subset = [
-        *col_subset_dupli_warning,
-        "molecule_chembl_id",
-        "assay_chembl_id",
-        "pchembl_value_mean",
+    if output_path is not None:
+        save_dataframe(final_data, output_path)
+
+    return final_data
+
+
+def re_aggregate_data(
+    df: pd.DataFrame,
+    chirality: bool,
+    extra_id_cols: list[str] = [],
+    extra_multival_cols: list[str] = [],
+    aggregate_mutants: bool = False,
+    output_path: Optional[Union[str, Path]] = None,
+    compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
+) -> pd.DataFrame:
+    """Re-aggregate the data obtained from the `aggregate_data` method after dataset
+    explosion. Useful for exploring the effect of different `extra_id_cols` and other
+    parameters.
+
+    Args:
+        df: dataframe output from `aggregate_data`
+        chirality: toggle chiral-sensitive fingerprints for identifying same molecules
+        extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
+            `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
+            if the compound is the same and the assay is the same.
+        extra_multival_cols: list of extra columns that you'd like to keep as aggregated
+            values in the final dataframe. Caveat: these columns will be displayes as (str)
+            separated by `|` (pipe) in the final dataframe. Defaults to [].
+        aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
+            regardless of the mutation flag in ChEMBL. Defaults to False.
+        output_path: path to save the aggregated data
+        compound_equality: How to identify same compounds in the dataset. If "mixed_fp",
+            uses mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
+            uses the first part of the InChI key (connectivity) to identify same compounds.
+            Defaults to "connectivity".
+
+    Returns:
+        pd.DataFrame: the re-aggregated data
+    """
+    if "processed_smiles" in df.columns:
+        df = df.rename(columns={"processed_smiles": "standard_smiles"})
+    if compound_equality == "connectivity" and "connectivity" not in df.columns:
+        raise ValueError("Input DataFrame must contain a 'connectivity' column.")
+    if "standard_smiles" not in df.columns:
+        raise ValueError("Input DataFrame must contain a 'standard_smiles' column.")
+    if "smiles" not in df.columns:
+        raise ValueError(
+            "This method expects the output from CompoundMapper's CLI, which includes a 'smiles' column."
+        )
+
+    if compound_equality == "mixed_fp":
+        fps = calculate_mixed_FPs(
+            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+        )
+        id_array = pd.Series(fps, index=df.index)
+    elif compound_equality == "connectivity":
+        id_array = df["connectivity"]
+    repeats_idxs = repeated_indices_from_array_series(id_array)
+
+    include_metadata = [
+        "doc_type",
+        "doi",
+        "journal",
+        "year",
+        "chembl_release",
+        *extra_multival_cols,
+        DATA_DROPPING_COMMENT,
+        DATA_PROCESSING_COMMENT,
     ]
 
-    # Based on the ID columns, we shouldn't have any duplicates. This warning is a safeguard
-    duplics_for_warning = final_data.duplicated(subset=col_subset_dupli_warning)
-    if duplics_for_warning.any():
-        dupli_subset = (
-            final_data[duplics_for_warning]
-            .loc[:, logging_subset]
-            .sort_values(
-                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
-                ascending=[True, True, False],
+    for col in include_metadata:  # make sure columns exist
+        if col not in df.columns:
+            raise ValueError(
+                f"Column '{col}' is required in the DataFrame but is missing. "
+                "Please ensure that the DataFrame contains all necessary columns."
             )
-        )
-        truncated_df = dupli_subset.applymap(
-            lambda x: str(x)[:_limit] + "..." if len(str(x)) > _limit else str(x)
-        ).head(10)
-        logger.warning(
-            f"There two or more compounds matching the ID columns {col_subset_dupli_warning} "
-            "This is not intentional, please further inspect the collected dataset. Here's a sample "
-            "of the repeated entries:\n"
-            f"{truncated_df.to_string(index=False)}"
-        )
 
-    # Additional safeguard to ensure proper handling of the output by the user prior to modeling
-    target_cpd_col_subset = ["target_chembl_id", "connectivity"]
-    duplics_for_info = final_data.duplicated(subset=target_cpd_col_subset)
-    if duplics_for_info.any():
-        dupli_subset = (
-            final_data[duplics_for_info]
-            .loc[:, logging_subset]
-            .sort_values(by=target_cpd_col_subset + ["pchembl_value_mean"], ascending=[True, True, False])
-        )
-        truncated_df = dupli_subset.applymap(
-            lambda x: str(x)[:_limit] + "..." if len(str(x)) > _limit else str(x)
-        ).head(10)
-        logger.info(
-            "There are two or more repeated compound-target readouts (based on `connectivity` & `target_chembl_id`) "
-            "without considering other ID columns. This is a result of your aggregation criteria. Make "
-            "sure to differ these data points in your modeling pipeline by including information of your other id_columns, "
-            "or resolve these compound-target repeats prior to modeling. Here's a sample of the repeated entries:\n"
-            f"{truncated_df.to_string(index=False)}"
-        )
+    final_data = process_repeat_mols(  # recalculate the stats given new conditions
+        df,
+        repeats_idxs,
+        solve_strat="keep",
+        extra_id_cols=extra_id_cols,
+        chirality=chirality,
+        extra_multival_cols=include_metadata,
+        aggregate_mutants=aggregate_mutants,
+    )
+    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+
+    # Reorder columns as in the original aggregate_data function
+    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
+    for col in xtra_cols:
+        if col not in final_data.columns:
+            raise ValueError(
+                f"Column '{col}' is required in the DataFrame but is missing. "
+                "Please ensure that the DataFrame contains all necessary columns."
+            )
+
+    cols = (
+        ["connectivity"]
+        + [col for col in final_data.columns if col not in ["connectivity"] + xtra_cols]
+        + xtra_cols
+    )
+    final_data = final_data[cols]
+
+    _warn_info_post_aggregation_repeats(
+        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
+    )
 
     if output_path is not None:
         save_dataframe(final_data, output_path)
