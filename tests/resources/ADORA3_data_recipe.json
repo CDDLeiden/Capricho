@@ -1,11 +1,12 @@
 {
-  "command": "getchembl --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --curate-annotation-errors --chembl-release 31 --chembl-version 35 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
-  "molecule_ids": null,
+  "command": "getchembl get --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --curate-annotation-errors --chembl-release 31 --chembl-version 35 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
+  "CompoundMapper version": "0.1.dev208+ge931c1c.d20250717",
+  "molecule_ids": [],
   "target_ids": [
     "CHEMBL256"
   ],
-  "assay_ids": null,
-  "document_ids": null,
+  "assay_ids": [],
+  "document_ids": [],
   "calculate_pchembl": true,
   "output_path": "ADORA3_data.csv",
   "confidence_scores": [
@@ -31,7 +32,6 @@
     "B",
     "F"
   ],
-  "log_level": "info",
   "chembl_release": 31,
   "metadata_columns": [],
   "id_columns": [],
@@ -46,6 +46,5 @@
   "max_assay_match": false,
   "min_assay_overlap": 0,
   "strict_mutant_removal": true,
-  "compound_equality": "connectivity",
-  "CompoundMapper version": "0.1.dev201+g2d25579.d20250715"
+  "compound_equality": "connectivity"
 }

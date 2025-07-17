@@ -30,6 +30,7 @@ dependencies = [
   "tqdm",
   "joblib",
   "rdkit >= 2022.09.1",
+  "typer",
   ]
 
 [project.optional-dependencies]
@@ -41,7 +42,7 @@ repository = "https://github.com/David-Araripe/CompoundMapper"
 # documentation = "https://readthedocs.org" TODO
 
 [project.scripts]
-getchembl = "CompoundMapper.cli.main:main_exe"
+getchembl = "CompoundMapper.cli.main:app"
 
 [tool.setuptools_scm]
 write_to = "src/CompoundMapper/_version.py"

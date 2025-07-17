@@ -101,10 +101,10 @@ def _warn_info_post_aggregation_repeats(
 
 
 def get_standardize_and_clean_workflow(
-    molecule_ids: list[str],
-    target_ids: list[str],
-    assay_ids: list[str],
-    document_ids: list[str],
+    molecule_ids: Optional[list[str]] = None,
+    target_ids: Optional[list[str]] = None,
+    assay_ids: Optional[list[str]] = None,
+    document_ids: Optional[list[str]] = None,
     chirality: bool = True,
     calculate_pchembl: bool = False,
     output_path: Optional[Union[str, Path]] = None,
@@ -182,12 +182,13 @@ def get_standardize_and_clean_workflow(
         biotypes = bioactivity_type
 
     full_df = get_bioactivities_workflow(
-        molecule_chembl_ids=molecule_ids,
-        target_chembl_ids=target_ids,
-        assay_chembl_ids=assay_ids,
-        document_chembl_ids=document_ids,
+        molecule_chembl_ids=molecule_ids or None,
+        target_chembl_ids=target_ids or None,
+        assay_chembl_ids=assay_ids or None,
+        document_chembl_ids=document_ids or None,
         confidence_scores=confidence_scores,
         assay_types=assay_types,
+        # Don't pass `standard_type|standard_relation` here -> We need N(tested compounds) in each assay
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
