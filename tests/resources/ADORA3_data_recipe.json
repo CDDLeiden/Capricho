@@ -47,5 +47,5 @@
   "min_assay_overlap": 0,
   "strict_mutant_removal": true,
   "compound_equality": "connectivity",
-  "CompoundMapper version": "0.1.dev172+gb503afd"
+  "CompoundMapper version": "0.1.dev201+g2d25579.d20250715"
 }
