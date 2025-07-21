@@ -3,17 +3,19 @@ requires = ["setuptools>=64", "setuptools_scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "compound-mapper"
+name = "capricho"
 dynamic = ["version"]
-description = "A collection of functionalities for mapping compounds into different IDs and retrieving data"
+description = "Transparent, flexible and reproducible ChEMBL data curation, aggregation and analysis."
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.7"
 license = { file = "LICENSE" }
-keywords = ["TODO"]
+keywords = ["ChEMBL", "drug discovery", "machine learning", "chemoinformatics", "computational chemistry"]
 authors = [{ name = "David Araripe", email = "david.araripe17@gmail.com" }]
 maintainers = [{ name = "David Araripe", email = "david.araripe17@gmail.com" }]
 classifiers = [
   # "TODO",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Chemistry",
   "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
 ]
@@ -37,18 +39,18 @@ dependencies = [
 dev = ["ruff", "isort", "black"]
 
 [project.urls]
-homepage = "https://github.com/David-Araripe/CompoundMapper"
-repository = "https://github.com/David-Araripe/CompoundMapper"
+homepage = "https://github.com/David-Araripe/Capricho"
+repository = "https://github.com/David-Araripe/Capricho"
 # documentation = "https://readthedocs.org" TODO
 
 [project.scripts]
-getchembl = "CompoundMapper.cli.main:app"
+capricho = "Capricho.cli.main:app"
 
 [tool.setuptools_scm]
-write_to = "src/CompoundMapper/_version.py"
+write_to = "src/Capricho/_version.py"
 
 [tool.setuptools.dynamic]
-version = {attr = "CompoundMapper.__version__"}
+version = {attr = "Capricho.__version__"}
 
 [tool.ruff]
 line-length = 110

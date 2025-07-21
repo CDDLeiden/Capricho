@@ -1,12 +1,25 @@
-# CompoundMapper
+<div align="center">
+  <img src="logo.svg" alt="" width=240>
+  <p><strong>The ChEMBL data curator that flags issues instead of silently dropping them.</strong></p>
+  
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-black?style=flat-square)](https://github.com/psf/black)
+[![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat-square&labelColor=ef8336)](https://pycqa.github.io/isort/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-purple?style=flat-square)](https://opensource.org/licenses/MIT)
 
-A Python Package for efficiently curating bioactivity data from the ChEMBL database.
+</div>
 
-Simplify fetching, standardizing, and aggregating bioactivity data, outputting a machine learning-ready dataset for drug discovery that can be shared, reproduced, and updated at any ChEMBL release.
+CAPRICHO (**C**hEMBL **A**ggregation **P**ackage with **R**obust **I**nspection and **C**uration **H**andling **O**ptions) is a Python package that streamlines fetching, curating, and aggregating ChEMBL data into a machine learning-ready format for drug discovery in a flexible and reproducible manner. Instead of making opiniated decisions on the source data, CAPRICHO curates it based on several quality control filters that can be chosen by the user. Its guiding principle is to never silently drop data. Entries that don't meet the criteria are marked, allowing the user to analyze how each curation step affects the comparability of assay readouts for the same compound.
+
+## Goals
+
+The development of CAPRICHO is guided by two core principles:
+- **Transparency Above All**: Data curation should never be a black box. Removed data points should be saved to be scrutinized by the user and the original data should be always preserved to ensure data integrity.
+- **Flexibility by Design**: Every modeling project is unique. The tool must support flexible data collection and aggregation, allowing the incorporation of any ChEMBL metadata column to be incorporated into same-compound bioactivity values.
 
 ## Features:
 
-- Flexible data retrieval by molecule IDs, target IDs, assay IDs, or document IDs
+- Data retrieval by any ChEMBL identifier (molecule IDs, target IDs, assay IDs, or document IDs)
 - Automated pChEMBL (pXC50) value calculation for bioactivities if not provided through ChEMBL
 - Customizable filtering options (see below):
     - Confidence score filtering

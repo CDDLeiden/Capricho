@@ -1,8 +1,6 @@
 """Module containing the command line interface to get data from ChEMBL"""
 
-import argparse
 import json
-import sys
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional
@@ -65,9 +63,10 @@ STORE_TRUE_ARGS = [
     "strict_mutant_removal",
 ]
 
+
 app = typer.Typer(
-    name="CompoundMapper",
-    help="A command-line interface to filter, download, and process data from ChEMBL.",
+    name="CAPRICHO",
+    help="A ChEMBL data curator that flags questionable entries instead of silently dropping them.",
     no_args_is_help=True,
     rich_markup_mode="markdown",
     context_settings={"help_option_names": ["--help", "-h"], "max_content_width": 88},
@@ -566,9 +565,9 @@ def get_data(
             elif isinstance(v, int):
                 if DEFAULTS[k] != v:
                     command_vals.append(f"--{save_k} {v}")
-        command = "getchembl get " + " ".join(command_vals)
+        command = "capricho get " + " ".join(command_vals)
         configs = {k: configs[k] for k in DEFAULTS if k in configs}
-        configs = {"command": command, "CompoundMapper version": __version__, **configs}
+        configs = {"command": command, "capricho version": __version__, **configs}
 
         with open(recipe_path, "w") as f:
             json.dump(configs, f, indent=2)

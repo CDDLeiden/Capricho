@@ -1,6 +1,6 @@
 {
-  "command": "getchembl get --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --curate-annotation-errors --chembl-release 31 --chembl-version 35 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
-  "CompoundMapper version": "0.1.dev208+ge931c1c.d20250717",
+  "command": "capricho get --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --curate-annotation-errors --chembl-release 31 --chembl-version 35 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
+  "capricho version": "0.1.dev181+g00f669e.d20250721",
   "molecule_ids": [],
   "target_ids": [
     "CHEMBL256"
