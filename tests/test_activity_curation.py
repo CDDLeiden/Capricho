@@ -6,7 +6,7 @@ from loguru import logger as loguru_logger
 
 from CompoundMapper.chembl.processing import curate_activity_pairs
 
-N_CPDS = 19  # number of compounds in the test data
+N_CPDS = 22  # number of compounds in the test data
 
 
 class TestActivityCuration(unittest.TestCase):
@@ -33,6 +33,9 @@ class TestActivityCuration(unittest.TestCase):
                 "CHEMBL9",
                 "CHEMBL9",
                 "CHEMBL9",
+                "CHEMBL10",
+                "CHEMBL10",
+                "CHEMBL10",
             ],
             "canonical_smiles": [
                 "CC=O",  # CHEMBL1
@@ -54,6 +57,9 @@ class TestActivityCuration(unittest.TestCase):
                 "O=C(C)Oc1ccccc1C(=O)O",  # CHEMBL9
                 "O=C(C)Oc1ccccc1C(=O)O",  # CHEMBL9
                 "O=C(C)Oc1ccccc1C(=O)O",  # CHEMBL9
+                "COc1cc2ccc(cc2cc1)[C@H](C)C(=O)O",  # CHEMBL10
+                "COc1cc2ccc(cc2cc1)[C@H](C)C(=O)O",  # CHEMBL10
+                "COc1cc2ccc(cc2cc1)[C@H](C)C(=O)O",  # CHEMBL10
             ],
             "activity_id": list(range(1, N_CPDS + 1)),
             "assay_chembl_id": [
@@ -76,6 +82,9 @@ class TestActivityCuration(unittest.TestCase):
                 "ASSAY17",  # CHEMBL9
                 "ASSAY18",  # CHEMBL9
                 "ASSAY19",  # CHEMBL9
+                "ASSAY20",  # CHEMBL10
+                "ASSAY21",  # CHEMBL10
+                "ASSAY22",  # CHEMBL10
             ],
             "assay_description": [
                 "Assay Desc 1",  # CHEMBL1
@@ -97,6 +106,9 @@ class TestActivityCuration(unittest.TestCase):
                 "Assay Desc 17",  # CHEMBL9
                 "Assay Desc 18",  # CHEMBL9
                 "Assay Desc 19",  # CHEMBL9
+                "Assay Desc 20",  # CHEMBL10
+                "Assay Desc 21",  # CHEMBL10
+                "Assay Desc 22",  # CHEMBL10
             ],
             "assay_type": ["B"] * N_CPDS,  # doesn't matter here, aggregate both types
             "pchembl_value": [
@@ -122,6 +134,11 @@ class TestActivityCuration(unittest.TestCase):
                 # CHEMBL 9 illustrates a possible rare case where you'd have a review ASSAY16 that repeats the
                 # same measurement of 7.0, but annotates it wrongly as 10.0. Later, the same measurement is
                 # again wrongly reported as 10.0. I don't know if this is a realy case, but I tried to cover it.
+                4.0,  # CHEMBL10
+                10.0,  # CHEMBL10 - diff 6.0 -> remove
+                10.0,  # CHEMBL10 - diff 6.0 -> remove
+                # CHEMBL 10 is similar to the case of CHEMBL9, but here we have a unit annotation error of 6.0
+                # instead of the previous 3.0. This is a rare case, but it *can* happen.
             ],
             "standard_flag": [1] * N_CPDS,
             "standard_relation": ["="] * N_CPDS,
@@ -145,6 +162,9 @@ class TestActivityCuration(unittest.TestCase):
                 "IC50",
                 "IC50",
                 "IC50",
+                "AC50",
+                "AC50",
+                "AC50",
             ],
             "standard_units": ["nM"] * N_CPDS,
             "target_chembl_id": [
@@ -167,6 +187,9 @@ class TestActivityCuration(unittest.TestCase):
                 "TARGET9",  # CHEMBL9
                 "TARGET9",  # CHEMBL9
                 "TARGET9",  # CHEMBL9
+                "TARGET10",  # CHEMBL10
+                "TARGET10",  # CHEMBL10
+                "TARGET10",  # CHEMBL10
             ],
             "target_organism": [
                 "Human",
@@ -188,6 +211,9 @@ class TestActivityCuration(unittest.TestCase):
                 "Elf",
                 "Elf",
                 "Elf",
+                "Orc",
+                "Orc",
+                "Orc",
             ],
             "assay_cell_type": [
                 "Cell Type A",
@@ -209,6 +235,9 @@ class TestActivityCuration(unittest.TestCase):
                 "Cell Type H",
                 "Cell Type H",
                 "Cell Type H",
+                "Cell Type Z",
+                "Cell Type Z",
+                "Cell Type Z",
             ],
             "assay_organism": [
                 "Human",
@@ -230,8 +259,11 @@ class TestActivityCuration(unittest.TestCase):
                 "Elf",
                 "Elf",
                 "Elf",
+                "Orc",
+                "Orc",
+                "Orc",
             ],
-            "confidence_score": [9, 9, 8, 8, 9, 9, 7, 9, 9, 9, 8, 8, 9, 9, 9, 9, 9, 9, 9],
+            "confidence_score": [9, 9, 8, 8, 9, 9, 7, 9, 9, 9, 8, 8, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9],
             "document_chembl_id": [
                 "DOC1",
                 "DOC2",
@@ -252,6 +284,9 @@ class TestActivityCuration(unittest.TestCase):
                 "DOC17",
                 "DOC18",
                 "DOC19",
+                "DOC20",
+                "DOC21",
+                "DOC22",
             ],
             "standard_smiles": [
                 "CC=O",
@@ -273,6 +308,9 @@ class TestActivityCuration(unittest.TestCase):
                 "O=C(C)Oc1ccccc1C(=O)O",  # CHEMBL9
                 "O=C(C)Oc1ccccc1C(=O)O",  # CHEMBL9
                 "O=C(C)Oc1ccccc1C(=O)O",  # CHEMBL9
+                "COc1cc2ccc(cc2cc1)[C@H](C)C(=O)O",  # CHEMBL10
+                "COc1cc2ccc(cc2cc1)[C@H](C)C(=O)O",  # CHEMBL10
+                "COc1cc2ccc(cc2cc1)[C@H](C)C(=O)O",  # CHEMBL10
             ],
             "mutation": ["WT"] * N_CPDS,
         }
@@ -288,6 +326,7 @@ class TestActivityCuration(unittest.TestCase):
         # CHEMBL7 (idx 10, 11) kept
         # CHEMBL8 (idx 12, 14) removed, (idx 13) kept
         # CHEMBL9 (idx 15, 16, 17, ) removed, (idx 18) kept
+        # CHEMBL10 (idx 19, 20, 21) removed -> annotation error of 6.0
         expected_indices_to_keep = [2, 3, 6, 9, 10, 11, 13, 18]
         expected_df_curated = df_initial.loc[expected_indices_to_keep].reset_index(drop=True)
 
@@ -296,19 +335,23 @@ class TestActivityCuration(unittest.TestCase):
 
         processed_df = curate_activity_pairs(df_initial.copy())
 
+        # Here we drop the flagged rows just for testing purpose (compare to expected_df_curated)
+        dropped_df = processed_df[processed_df["data_dropping_comment"].replace({"": None}).isna()].drop(
+            columns=["data_dropping_comment"]
+        )
+
         log_output = captured_logs.getvalue()
         loguru_logger.remove(sink_id)
 
         print("\nCaptured Log Output:\n", log_output)
 
         self.assertIn(
-            "Activity Curation: Removing 11 measurements. potential unit annotation error "
-            "- pChEMBL values differ by 3.0 for same molecule",
+            "Activity Curation: Flagging 14 measurements due to unit annotation error",
             log_output,
         )
 
         pd.testing.assert_frame_equal(
-            processed_df.reset_index(drop=True),
+            dropped_df.reset_index(drop=True),
             expected_df_curated.reset_index(drop=True),
             check_dtype=False,  # Allow different int types (e.g. int32 vs int64)
             check_like=True,  # Ignore column order as long as labels match

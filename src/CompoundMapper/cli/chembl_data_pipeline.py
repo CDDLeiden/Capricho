@@ -6,8 +6,8 @@ import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
 
 from ..chembl.data_flag_functions import (
-    flag_duplication,
     flag_insufficient_assay_overlap,
+    flag_inter_document_duplication,
     flag_max_assay_size,
     flag_min_assay_size,
     flag_missing_canonical_smiles,
@@ -28,27 +28,92 @@ from ..core.default_fields import (
     TARGET_ID,
 )
 from ..core.fp_utils import calculate_mixed_FPs
+from ..core.pandas_helper import save_dataframe
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
 from ..core.stereo import find_undefined_stereocenters
 from ..logger import logger
 
 
+def _warn_info_post_aggregation_repeats(
+    df: pd.DataFrame,
+    extra_id_cols: list[str],
+    aggregate_mutants: bool = False,
+    _limit: int = 15,  # limit in the string length for the warning/info logging
+):
+    def _truncate_dataframe(df: pd.DataFrame, limit: int) -> pd.DataFrame:
+        """Truncate DataFrame values to a specified length."""
+        if pd.__version__ > "2.1.0":  # applymap got deprecated in 2.1.0
+            return df.map(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
+        else:
+            return df.applymap(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
+
+    if aggregate_mutants:
+        col_subset_dupli_warning = ["connectivity", "target_chembl_id", *extra_id_cols]
+    else:
+        col_subset_dupli_warning = ["connectivity", "mutation", "target_chembl_id", *extra_id_cols]
+
+    logging_subset = [  # subset of columns to be displayed on the warning/info logging
+        *col_subset_dupli_warning,
+        "molecule_chembl_id",
+        "assay_chembl_id",
+        "pchembl_value_mean",
+    ]
+
+    # Based on the ID columns, we shouldn't have any duplicates. This warning is a safeguard
+    duplics_for_warning = df.duplicated(subset=col_subset_dupli_warning)
+    if duplics_for_warning.any():
+        dupli_subset = (
+            df[duplics_for_warning]
+            .loc[:, logging_subset]
+            .sort_values(
+                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
+                ascending=[True, True, False],
+            )
+        )
+        truncated_df = _truncate_dataframe(dupli_subset, _limit)
+        logger.warning(
+            f"There two or more compounds matching the ID columns {col_subset_dupli_warning} "
+            "This is not intentional, please further inspect the collected dataset. Here's a sample "
+            "of the repeated entries:\n"
+            f"{truncated_df.to_string(index=False)}"
+        )
+
+    # Additional safeguard to ensure proper handling of the output by the user prior to modeling
+    target_cpd_col_subset = ["target_chembl_id", "connectivity"]
+    duplics_for_info = df.duplicated(subset=target_cpd_col_subset)
+    if duplics_for_info.any():
+        dupli_subset = (
+            df[duplics_for_info]
+            .loc[:, logging_subset]
+            .sort_values(by=target_cpd_col_subset + ["pchembl_value_mean"], ascending=[True, True, False])
+        )
+        truncated_df = _truncate_dataframe(dupli_subset, _limit)
+        logger.info(
+            "There are two or more repeated compound-target readouts (based on `connectivity` & `target_chembl_id`) "
+            "without considering other ID columns. This is a result of your aggregation criteria. Make "
+            "sure to differ these data points in your modeling pipeline by including information of your other id_columns, "
+            "or resolve these compound-target repeats prior to modeling. Here's a sample of the repeated entries:\n"
+            f"{truncated_df.to_string(index=False)}"
+        )
+
+    return
+
+
 def get_standardize_and_clean_workflow(
-    molecule_ids: list[str],
-    target_ids: list[str],
-    assay_ids: list[str],
-    document_ids: list[str],
-    calculate_pchembl: bool,
-    output_path: Optional[Union[str, Path]],
-    confidence_scores: list[str],
-    bioactivity_type: list[str],
-    standard_relation: list[str],  # TODO: later support data with  >, <, >=, <=...
-    assay_types: list[str],
-    chembl_release: Optional[int],
+    molecule_ids: Optional[list[str]] = None,
+    target_ids: Optional[list[str]] = None,
+    assay_ids: Optional[list[str]] = None,
+    document_ids: Optional[list[str]] = None,
+    chirality: bool = True,
+    calculate_pchembl: bool = False,
+    output_path: Optional[Union[str, Path]] = None,
+    confidence_scores: list[str] = [7, 8, 9],
+    bioactivity_type: list[str] = ["IC50", "EC50", "AC50", "Ki", "Kd"],
+    standard_relation: list[str] = ["="],  # TODO: later support data with  >, <, >=, <=...
+    assay_types: list[str] = ["B", "F"],
+    chembl_release: Optional[int] = None,
     save_not_aggregated: bool = True,
-    save_dropped: bool = False,
-    save_duplicated: bool = False,
     drop_unassigned_chiral: bool = False,
     version: Optional[Union[int, str]] = None,
     backend: Literal["downloader", "webresource"] = "downloader",
@@ -58,7 +123,6 @@ def get_standardize_and_clean_workflow(
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
     strict_mutant_removal: bool = False,
-    keep_flagged_data: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -72,6 +136,8 @@ def get_standardize_and_clean_workflow(
         document_ids: list of ChEMBL document IDs to filter data from
         calculate_pchembl: whether to calculate pchembl values when not found for assay
             results reported in nanomolar/micromolar units
+        chirality: setting this to False will remove stereochemistry information from the
+            SMILES on top of the standardization. Defaults to True.
         output_path: path to save the resulting csv file
         confidence_scores: list of confidence scores (assay-related) to filter data from
         bioactivity_type: list of bioactivity types (assay-related) to filter data from
@@ -79,8 +145,6 @@ def get_standardize_and_clean_workflow(
             Defaults to "=".
         chembl_release: latest ChEMBL release to retrieve data from
         save_not_aggregated: whether to save the resulting data to the csv (output_path) before
-        save_dropped: whether to save a separate dataframe containing rows that were flagged for dropping.
-        save_duplicated: whether to save the duplicated data (if any) to a separate csv file
         drop_unassigned_chiral: whether to drop data points with undefined stereocenters. Defaults to False.
         version: `backend=="downloader"` only! version of the ChEMBL database to be downloaded by
             chembl_downloader. If left as None, the latest version will be downloaded. Defaults to None.
@@ -97,9 +161,6 @@ def get_standardize_and_clean_workflow(
                 for their activities to be considered. Defaults to None (no filtering).
             strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
                 description will be flagged for removal. Defaults to False.
-        keep_flagged_data: If True, data points flagged for dropping (due to various quality
-            checks) will be retained in the main DataFrame. The `data_dropping_comment` column
-            will still be populated. A warning will be logged. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -121,17 +182,17 @@ def get_standardize_and_clean_workflow(
         biotypes = bioactivity_type
 
     full_df = get_bioactivities_workflow(
-        molecule_chembl_ids=molecule_ids,
-        target_chembl_ids=target_ids,
-        assay_chembl_ids=assay_ids,
-        document_chembl_ids=document_ids,
+        molecule_chembl_ids=molecule_ids or None,
+        target_chembl_ids=target_ids or None,
+        assay_chembl_ids=assay_ids or None,
+        document_chembl_ids=document_ids or None,
         confidence_scores=confidence_scores,
         assay_types=assay_types,
+        # Don't pass `standard_type|standard_relation` here -> We need N(tested compounds) in each assay
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
         chembl_release=chembl_release,
-        save_dropped=save_dropped,
         version=version,
         backend=backend,
     )
@@ -177,7 +238,7 @@ def get_standardize_and_clean_workflow(
         logger.info(f"Dropping rows with missing canonical smiles:\n{_info}")
         full_df = full_df.drop(index=_info.index).reset_index(drop=True)
 
-    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
+    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False, isomeric=chirality)
     df = (
         full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string
@@ -198,8 +259,8 @@ def get_standardize_and_clean_workflow(
     # make sure we don't have Nan, can result from merging pChEMBL-lacking calculated values
     df[DATA_PROCESSING_COMMENT] = df[DATA_PROCESSING_COMMENT].fillna("")
 
-    # Raise error if df is empty after critical processing steps AND we are not saving dropped rows
-    if not save_dropped and df.empty:
+    # Raise error if df is empty after critical processing steps
+    if df.empty:
         func_params = signature(get_standardize_and_clean_workflow).parameters
         local_vars = locals()
         # Filter out df from params to avoid large object in error message
@@ -240,55 +301,31 @@ def get_standardize_and_clean_workflow(
             )
             return pd.DataFrame()
 
-    # Documents - since much of ChEMBL is take from medchem literature, if there are two
-    # assays from the same document that have the same readout and are measured against
-    # the same target, we can be pretty sure tha they are *not* equivalent;
-    df_size = df.shape[0]
-    col_subset = [  # Drop different assays that have the same exact pchembl value - probably duplicate
-        "molecule_chembl_id",
-        "standard_smiles",
-        "canonical_smiles",
-        "pchembl_value",
-        "standard_relation",
-        "target_chembl_id",
-        "target_organism",
-    ]
-    # Handle duplicated data
-    duplicated = df.duplicated(subset=col_subset, keep=False)
-    df = flag_duplication(df, dupli_id_subset=col_subset)
-    if duplicated.any():
-        df.drop_duplicates(subset=col_subset, keep="first", inplace=True)
-        if save_duplicated and output_path is not None:
-            df[duplicated].to_csv(output_path.with_stem(f"{output_path.stem}_duplicated"), index=False)
-        if df_size != df.shape[0]:
-            logger.info(f"Dropped {df_size - df.shape[0]} duplicates.")
+    # for the duplication we try to find the same molecule identifiers (molID, SMILES) and
+    # activity outcomes (targetID, organismID, standard_value, standard_relation), but reported
+    # in different ChEMBL documents (different papers) so we can keep same-readouts reported
+    # by two assays performed in the same paper !
+    df = flag_inter_document_duplication(df)
 
-    if save_dropped and output_path is not None:
-        df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
-            "~data_dropping_comment.isna()"
-        ).to_csv(output_path.with_stem(f"{output_path.stem}_removed"), index=False)
-
-    if keep_flagged_data:
-        logger.warning(
-            "Retaining flagged data points in the main dataset. "
-            "This dataset includes entries that would normally be dropped due to quality flags "
-            "and is generally not recommended. The 'data_dropping_comment' column indicates the reasons."
-        )
-        missing_smiles_patt = r"Missing (standard )SMILES|Missing SMILES|Mixture in SMILES"
-        df = (  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
-            df.query("~data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)")
-            .query("~pchembl_value.isna()")
-            .query("~standard_smiles.str.contains('^\.+$', regex=True)")
-        )
-
-    else:
-        df = df.assign(data_dropping_comment=lambda x: x.data_dropping_comment.replace("", None)).query(
-            "data_dropping_comment.isna()"
-        )
+    # This part needs to be removed prior to data aggregation. Here, we have either
+    # inorganic compounds (SMILES removed from the salt removal step), mixtures (SMILES with "."), or
+    # compounds with missing pchembl values, which are needed for the statistics
+    missing_smiles_patt = r"Missing Standard SMILES|Missing SMILES|Mixture in SMILES"
+    removed_subset = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
+        "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True) | "
+        "pchembl_value.isna() | "
+        r"standard_smiles.str.contains('^\.+$', regex=True)"
+    ).copy()
+    if output_path is not None:
+        suffixes = "".join(output_path.suffixes)
+        new_name = output_path.stem.split(".")[0] + "_removed_subset" + suffixes
+        save_dataframe(removed_subset, output_path.with_name(new_name))
+    df = df.drop(index=removed_subset.index)
 
     if save_not_aggregated and output_path is not None:
-        df.to_csv(output_path.with_stem(f"{output_path.stem}_not_aggregated"), index=False)
-
+        suffixes = "".join(output_path.suffixes)
+        new_name = output_path.stem.split(".")[0] + "_not_aggregated" + suffixes
+        save_dataframe(df, output_path.with_name(new_name))
     return df
 
 
@@ -333,7 +370,7 @@ def aggregate_data(
     Returns:
         pd.DataFrame: the aggregated data
     """
-    current_extra_id_cols = list(extra_id_cols)  # Make a mutable copy
+    current_extra_id_cols = list(extra_id_cols)  # mutable copy
 
     if max_assay_match:
         logger.info(
@@ -352,7 +389,7 @@ def aggregate_data(
 
         current_extra_id_cols.extend(fields_to_add)
         current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
-        logger.info(f"Effective ID columns for aggregation: {current_extra_id_cols}")
+        logger.info(f"ID columns for aggregation: {current_extra_id_cols}")
 
     connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
 
@@ -399,41 +436,125 @@ def aggregate_data(
     # `process_repeat_mols`, so it doesn't work. Would be nice to fix this in the future
     final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
-    # reorder the columns so that connectivity comes first
-    cols = ["connectivity"] + final_data.columns.difference(["connectivity"]).tolist()
+    # reorder the columns so that connectivity comes first and processing & droppiong comes last
+    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
+    cols = ["connectivity", *final_data.columns.difference(["connectivity"] + xtra_cols).tolist(), *xtra_cols]
     final_data = final_data[cols]
 
-    duplicated = final_data.duplicated(subset=["target_chembl_id", "connectivity"])
-    if duplicated.any():
-        dupli_subset = (
-            final_data[duplicated]
-            .loc[
-                :,
-                [
-                    "connectivity",
-                    "molecule_chembl_id",
-                    "assay_chembl_id",
-                    "target_chembl_id",
-                    "pchembl_value_mean",
-                ],
-            ]
-            .sort_values(
-                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
-                ascending=[True, True, False],
-            )
-        )
-        _limit = 15  # limit in the string length for the warning
-        truncated_df = dupli_subset.applymap(
-            lambda x: str(x)[:_limit] + "..." if len(str(x)) > _limit else str(x)
-        ).head(10)
-        logger.warning(
-            "There two or more compounds with the same connectivity and target_chembl_id. "
-            "Your aggregation criteria was likely strict, so it's expected. Please look into "
-            "the following entries prior to modeling:\n"
-            f"{truncated_df.to_string(index=False)}"
-        )
+    _warn_info_post_aggregation_repeats(
+        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
+    )
 
     if output_path is not None:
-        final_data.to_csv(output_path, index=False)
+        save_dataframe(final_data, output_path)
+
+    return final_data
+
+
+def re_aggregate_data(
+    df: pd.DataFrame,
+    chirality: bool,
+    extra_id_cols: list[str] = [],
+    extra_multival_cols: list[str] = [],
+    aggregate_mutants: bool = False,
+    output_path: Optional[Union[str, Path]] = None,
+    compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
+) -> pd.DataFrame:
+    """Re-aggregate the data obtained from the `aggregate_data` method after dataset
+    explosion. Useful for exploring the effect of different `extra_id_cols` and other
+    parameters.
+
+    Args:
+        df: dataframe output from `aggregate_data`
+        chirality: toggle chiral-sensitive fingerprints for identifying same molecules
+        extra_id_cols: additional columns to use as identifiers for the aggregation. Passing
+            `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
+            if the compound is the same and the assay is the same.
+        extra_multival_cols: list of extra columns that you'd like to keep as aggregated
+            values in the final dataframe. Caveat: these columns will be displayes as (str)
+            separated by `|` (pipe) in the final dataframe. Defaults to [].
+        aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
+            regardless of the mutation flag in ChEMBL. Defaults to False.
+        output_path: path to save the aggregated data
+        compound_equality: How to identify same compounds in the dataset. If "mixed_fp",
+            uses mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
+            uses the first part of the InChI key (connectivity) to identify same compounds.
+            Defaults to "connectivity".
+
+    Returns:
+        pd.DataFrame: the re-aggregated data
+    """
+    if "processed_smiles" in df.columns:
+        df = df.rename(columns={"processed_smiles": "standard_smiles"})
+    if compound_equality == "connectivity" and "connectivity" not in df.columns:
+        raise ValueError("Input DataFrame must contain a 'connectivity' column.")
+    if "standard_smiles" not in df.columns:
+        raise ValueError("Input DataFrame must contain a 'standard_smiles' column.")
+    if "smiles" not in df.columns:
+        raise ValueError(
+            "This method expects the output from CompoundMapper's CLI, which includes a 'smiles' column."
+        )
+
+    if compound_equality == "mixed_fp":
+        fps = calculate_mixed_FPs(
+            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+        )
+        id_array = pd.Series(fps, index=df.index)
+    elif compound_equality == "connectivity":
+        id_array = df["connectivity"]
+    repeats_idxs = repeated_indices_from_array_series(id_array)
+
+    include_metadata = [
+        "doc_type",
+        "doi",
+        "journal",
+        "year",
+        "chembl_release",
+        *extra_multival_cols,
+        DATA_DROPPING_COMMENT,
+        DATA_PROCESSING_COMMENT,
+    ]
+
+    for col in include_metadata:  # make sure columns exist
+        if col not in df.columns:
+            raise ValueError(
+                f"Column '{col}' is required in the DataFrame but is missing. "
+                "Please ensure that the DataFrame contains all necessary columns."
+            )
+
+    final_data = process_repeat_mols(  # recalculate the stats given new conditions
+        df,
+        repeats_idxs,
+        solve_strat="keep",
+        extra_id_cols=extra_id_cols,
+        chirality=chirality,
+        extra_multival_cols=include_metadata,
+        aggregate_mutants=aggregate_mutants,
+    )
+    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+
+    # Reorder columns as in the original aggregate_data function
+    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
+    for col in xtra_cols:
+        if col not in final_data.columns:
+            raise ValueError(
+                f"Column '{col}' is required in the DataFrame but is missing. "
+                "Please ensure that the DataFrame contains all necessary columns."
+            )
+
+    cols = (
+        ["connectivity"]
+        + [col for col in final_data.columns if col not in ["connectivity"] + xtra_cols]
+        + xtra_cols
+    )
+    final_data = final_data[cols]
+
+    _warn_info_post_aggregation_repeats(
+        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
+    )
+
+    if output_path is not None:
+        save_dataframe(final_data, output_path)
 
     return final_data

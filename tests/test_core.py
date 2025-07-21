@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from CompoundMapper.core import pandas_helper, smiles_utils, stats_make
+from CompoundMapper.core.pandas_helper import conflicting_duplicates
 
 
 class TestPandasHelper(unittest.TestCase):
@@ -15,7 +16,7 @@ class TestPandasHelper(unittest.TestCase):
 
     def test_aggr_val_series(self):
         series = pd.Series([1, 2.5, 3, 4.7])
-        self.assertEqual(pandas_helper.aggr_val_series(series), "1.00;2.50;3.00;4.70")
+        self.assertEqual(pandas_helper.aggr_val_series(series), "1.00|2.50|3.00|4.70")
 
     def test_get_mad(self):
         values = [1, 2, 3, 4, 5]
@@ -26,12 +27,12 @@ class TestPandasHelper(unittest.TestCase):
         df = pd.DataFrame({"A": [1, 1, 2, 2], "B": [1, 2, 3, 4]})
         grouped = df.groupby("A")
         result = pandas_helper.apply_func_grpd(grouped, pandas_helper.aggr_val_series, ["A"], "B")
-        expected = pd.DataFrame({"A": [1, 2], "B": ["1;2", "3;4"]})
+        expected = pd.DataFrame({"A": [1, 2], "B": ["1|2", "3|4"]})
         pd.testing.assert_frame_equal(result, expected)
 
     def test_assign_stats(self):
-        df = pd.DataFrame({"value": ["1;2;3", "4;5;6"]})
-        result = pandas_helper.assign_stats(df, sep=";", value_col="value")
+        df = pd.DataFrame({"value": ["1|2|3", "4|5|6"]})
+        result = pandas_helper.assign_stats(df, sep="|", value_col="value")
         self.assertIn("value_mean", result.columns)
         self.assertIn("value_std", result.columns)
         self.assertIn("value_median", result.columns)
@@ -46,6 +47,53 @@ class TestPandasHelper(unittest.TestCase):
         self.assertAlmostEquals(result["value_std"].iloc[1], 0.816497, 6)
         self.assertEqual(result["value_median"].iloc[1], 5.0)
         self.assertEqual(result["value_counts"].iloc[1], 3)
+
+    def test_conflicting_duplicates(self):
+        data = {
+            "A": [
+                1,
+                1,
+                1,
+                2,
+                2,
+            ],
+            "B": [
+                "x",
+                "x",
+                "x",
+                "y",
+                "y",
+            ],
+            "C": [
+                "p",
+                "p",
+                "p",
+                "q",
+                "q",
+            ],
+            "D": [
+                10,  # Same A, B, C (e.g. mol identifiers) but different D (document)
+                10,  # Same as above
+                20,  # Same as above
+                30,  # Same everything -> reported in same document; shouldn't drop
+                30,  # Same as above
+            ],
+            "year": [
+                2020,
+                2020,
+                2021,
+                2021,
+                2021,
+            ],
+        }
+        df = pd.DataFrame(data).sort_values(by="year")
+        mask = conflicting_duplicates(df, key_subset=["A", "B", "C"], diff_subset=["D"])
+        expected_flags = [True, True, True, False, False]
+        true_idxs = np.where(mask)[0]
+        assert np.array_equal(
+            true_idxs, np.array([0, 1, 2])
+        ), "Expected indices with conflicting duplicates do not match."
+        pd.testing.assert_series_equal(mask, pd.Series(expected_flags, index=df.index))
 
 
 class TestSmilesUtils(unittest.TestCase):

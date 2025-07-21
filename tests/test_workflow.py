@@ -1,13 +1,5 @@
-"""Module to test the workflow functions within /cli. To reproduce the same data found in test/resources, run:
-
-getchembl --target-ids CHEMBL256 \
-    --output-path ADORA3_data.csv \
-    --bioactivity-type Ki \
-    --chirality \
-    --log-level debug \
-    --chembl-release 28 \
-    --chembl-version 35 \
-    --chembl-backend downloader
+"""Module to test the workflow functions within /cli. To reproduce the same data in the
+`resources/` directory, check the check `ADORA3_data_recipe.json`.
 """
 
 import tempfile

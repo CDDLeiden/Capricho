@@ -1,11 +1,12 @@
 {
-  "command": "getchembl --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --curate-annotation-errors --chembl-release 31 --chembl-version 35 --save-dropped --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal --keep-flagged-data",
-  "molecule_ids": null,
+  "command": "getchembl get --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --curate-annotation-errors --chembl-release 31 --chembl-version 35 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
+  "CompoundMapper version": "0.1.dev208+ge931c1c.d20250717",
+  "molecule_ids": [],
   "target_ids": [
     "CHEMBL256"
   ],
-  "assay_ids": null,
-  "document_ids": null,
+  "assay_ids": [],
+  "document_ids": [],
   "calculate_pchembl": true,
   "output_path": "ADORA3_data.csv",
   "confidence_scores": [
@@ -31,26 +32,19 @@
     "B",
     "F"
   ],
-  "log_level": "info",
   "chembl_release": 31,
-  "metadata_columns": [
-    "data_dropping_comment",
-    "data_processing_comment"
-  ],
+  "metadata_columns": [],
   "id_columns": [],
   "skip_not_aggregated": false,
   "aggregate_mutants": false,
   "skip_recipe": false,
   "chembl_backend": "downloader",
-  "chembl_version": null,
-  "save_dropped": true,
+  "chembl_version": "35",
   "require_doc_date": true,
   "max_assay_size": 100,
   "min_assay_size": 20,
   "max_assay_match": false,
   "min_assay_overlap": 0,
   "strict_mutant_removal": true,
-  "keep_flagged_data": true,
-  "compound_equality": "connectivity",
-  "CompoundMapper version": "0.1.dev172+gb503afd.d20250623"
+  "compound_equality": "connectivity"
 }

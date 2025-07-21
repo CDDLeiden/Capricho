@@ -1,6 +1,7 @@
 """Module containing helper functions for manipulating pandas DataFrames"""
 
 import functools
+from pathlib import Path
 from typing import Literal, Optional, Union
 
 import numpy as np
@@ -9,6 +10,73 @@ from scipy.stats import gmean, gstd, median_abs_deviation
 
 from ..logger import logger
 from .default_fields import DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT
+
+
+def save_dataframe(
+    df: pd.DataFrame,
+    path: Union[Path, str],
+    compression: Optional[str] = "infer",
+) -> None:
+    """Saves a DataFrame to a file with optional compression.
+
+    This function determines the file format from the file extension and uses
+    the appropriate pandas function to save the DataFrame.
+
+    Args:
+        df: The DataFrame to be saved.
+        path: The file path where the DataFrame will be saved. The file
+              extension determines the format (.csv, .tsv, .parquet).
+        compression: The compression format to use. For CSV/TSV, the default
+            is 'infer', which deduces the compression from the file extension
+            (e.g., '.gz', '.zip'). For Parquet, if 'infer' is passed, it
+            defaults to 'snappy'. Use None for no compression.
+    """
+    if isinstance(path, str):
+        path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    file_suffix = path.suffix
+
+    if ".csv" in path.name or ".tsv" in path.name:
+        sep = "\t" if ".tsv" in path.name else ","
+        # For CSV and TSV, pandas can infer compression from the extension. [3, 4]
+        df.to_csv(path, sep=sep, index=False, compression=compression)
+    elif ".parquet" in path.name:
+        if compression == "infer":
+            if path.suffix.endswith(".gz"):
+                compression_to_use = "gzip"
+            else:
+                compression_to_use = "snappy"
+                path = path.with_suffix(".snappy.parquet")
+        else:
+            compression_to_use = compression
+        df.to_parquet(path, index=False, compression=compression_to_use)
+    else:
+        raise ValueError(
+            f"Unsupported file format: '{file_suffix}'. Supported formats are "
+            "'.csv', '.tsv', and '.parquet'."
+        )
+
+
+def conflicting_duplicates(df, key_subset, diff_subset: Optional[list[str]] = None) -> pd.Series:
+    """Return a boolean Series like `df.duplicated(...)`, where True marks rows
+    that have the same values in `key_subset` but different values in `diff_subset`.
+    If diff_subset is None, it behaves like `df.duplicated(subset=key_subset, keep=False)`.
+
+    Args:
+        df: pd.DataFrame to check for duplicates
+        key_subset: list of columns to check for duplication
+        diff_subset: list of columns that must be different within groups of duplicates.
+
+    Returns:
+        pd.Series: Boolean Series indicating rows with conflicting duplicates
+    """
+    if diff_subset is None:
+        return df.duplicated(subset=key_subset, keep=False)
+    nunique_diff = df.groupby(key_subset)[diff_subset].nunique(dropna=False)
+    conflicting_keys = nunique_diff[(nunique_diff > 1).any(axis=1)].index
+    mask = df.set_index(key_subset).index.isin(conflicting_keys)
+    return pd.Series(mask, index=df.index)
 
 
 def pchembl_to_molar(pchembl_value: float, unit: str = "nM") -> float:
@@ -35,7 +103,7 @@ def pchembl_to_molar(pchembl_value: float, unit: str = "nM") -> float:
 
 def format_value(x) -> str:
     """Helper function to format a value to a string with 4 decimal places. This function
-    is used to store the original pChEMBL values as strings separated by ";".
+    is used to store the original pChEMBL values as strings separated by "|".
 
     Args:
         x: Value to be formatted
@@ -53,9 +121,9 @@ def format_value(x) -> str:
         return x
 
 
-def aggr_val_series(series: pd.Series) -> str:
-    """ "Aggregate a pandas Series into a string with values separated by a semicolon."""
-    return ";".join([format_value(x) for x in series])
+def aggr_val_series(series: pd.Series, sep: str = "|") -> str:
+    """Aggregate a pd.Series into a string with values separated by a string (default: pipe)."""
+    return sep.join([format_value(x) for x in series])
 
 
 def get_mad(values) -> Union[float, np.float64]:
@@ -120,13 +188,13 @@ def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataF
     return pd.concat(results, ignore_index=False, axis=1).reset_index()
 
 
-def assign_stats(df: pd.DataFrame, sep=";", value_col="pchembl_value", use_geometric=False) -> pd.DataFrame:
+def assign_stats(df: pd.DataFrame, sep="|", value_col="pchembl_value", use_geometric=False) -> pd.DataFrame:
     """Assign statistics to a DataFrame based on a column with multiple values separated by
-    a particular separator, e.g. ';'.
+    a particular separator, e.g. `|` (pipe).
 
     Args:
         df: pd.DataFrame to be processed.
-        sep: string separating the values. Defaults to ';'.
+        sep: string separating the values. Defaults to `|` (pipe).
         value_col: column containing the values to be processed. Defaults to "pchembl_value".
         use_geometric: if True, treats values as -log[unit] and converts them into the original
             scale to calculate the statistics. If False, transformation doesn't take place.
@@ -174,13 +242,13 @@ def find_dict_in_dataframe(df):
 def add_comment(
     df: pd.DataFrame,
     comment: str,
-    criteria_func: Optional[callable] = None,  # Made Optional, default to None
-    target_column: Optional[str] = None,  # Made Optional, default to None
+    criteria_func: Optional[callable] = None,
+    target_column: Optional[str] = None,
     comment_type: Literal["p", "d"] = "d",
 ) -> pd.DataFrame:
     """Marks rows in a DataFrame based on a given criteria or the entire DataFrame, adding a comment to:
-        - 'data_dropping_comment' if comment_type == 'd' (drop)
-        - 'data_processing_comment' if comment_type == 'p' (process).
+        - `data_dropping_comment` if comment_type == `d` (drop)
+        - `data_processing_comment` if comment_type == `p` (process).
 
     Args:
         df (pd.DataFrame): The input DataFrame.
@@ -208,7 +276,8 @@ def add_comment(
         df[column_name] = ""
 
     # Preventively fill NaN values in the comment column to avoid "nan" string concatenation
-    df[column_name] = df[column_name].fillna("")
+    null_mask = df[column_name].isna()
+    df.loc[null_mask, column_name] = ""
 
     if target_column is not None:
         if target_column not in df.columns:
