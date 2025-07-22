@@ -34,13 +34,19 @@ from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_s
 from ..core.stereo import find_undefined_stereocenters
 from ..logger import logger
 
+# when aggregated, some `activity_id` values will be strings and sorting won't work properly
+AGGREGATE_SAVE_SORTED_BY = ["target_chembl_id", "assay_chembl_id"]
+# after the workflow, `activity_id` is an integer, so we can sort by it to ensure consistent
+# ordering on the aggregated datapoints -> assay1|assay2|...|assayN,activity_id1|...|activity_idN
+WORKFLOW_SAVE_SORTED_BY = [*AGGREGATE_SAVE_SORTED_BY, "activity_id"]
+
 
 def _warn_info_post_aggregation_repeats(
     df: pd.DataFrame,
     extra_id_cols: list[str],
     aggregate_mutants: bool = False,
     _limit: int = 15,  # limit in the string length for the warning/info logging
-):
+) -> None:
     def _truncate_dataframe(df: pd.DataFrame, limit: int) -> pd.DataFrame:
         """Truncate DataFrame values to a specified length."""
         if pd.__version__ > "2.1.0":  # applymap got deprecated in 2.1.0
@@ -76,7 +82,7 @@ def _warn_info_post_aggregation_repeats(
             f"There two or more compounds matching the ID columns {col_subset_dupli_warning} "
             "This is not intentional, please further inspect the collected dataset. Here's a sample "
             "of the repeated entries:\n"
-            f"{truncated_df.to_string(index=False)}"
+            f"{truncated_df.head(10).to_string(index=False)}"
         )
 
     # Additional safeguard to ensure proper handling of the output by the user prior to modeling
@@ -94,7 +100,7 @@ def _warn_info_post_aggregation_repeats(
             "without considering other ID columns. This is a result of your aggregation criteria. Make "
             "sure to differ these data points in your modeling pipeline by including information of your other id_columns, "
             "or resolve these compound-target repeats prior to modeling. Here's a sample of the repeated entries:\n"
-            f"{truncated_df.to_string(index=False)}"
+            f"{truncated_df.head(10).to_string(index=False)}"
         )
 
     return
@@ -305,16 +311,17 @@ def get_standardize_and_clean_workflow(
     # activity outcomes (targetID, organismID, standard_value, standard_relation), but reported
     # in different ChEMBL documents (different papers) so we can keep same-readouts reported
     # by two assays performed in the same paper !
-    df = flag_inter_document_duplication(df)
+    df = flag_inter_document_duplication(df).sort_values(WORKFLOW_SAVE_SORTED_BY).reset_index(drop=True)
 
     # This part needs to be removed prior to data aggregation. Here, we have either
     # inorganic compounds (SMILES removed from the salt removal step), mixtures (SMILES with "."), or
     # compounds with missing pchembl values, which are needed for the statistics
     missing_smiles_patt = r"Missing Standard SMILES|Missing SMILES|Mixture in SMILES"
+    only_salt_entry_patt = r"^\.+$"  # if only salts are present, SMILES will be just "."
     removed_subset = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
         "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True) | "
         "pchembl_value.isna() | "
-        r"standard_smiles.str.contains('^\.+$', regex=True)"
+        r"standard_smiles.str.contains(@only_salt_entry_patt, regex=True)"
     ).copy()
     if output_path is not None:
         suffixes = "".join(output_path.suffixes)
@@ -439,7 +446,7 @@ def aggregate_data(
     # reorder the columns so that connectivity comes first and processing & droppiong comes last
     xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
     cols = ["connectivity", *final_data.columns.difference(["connectivity"] + xtra_cols).tolist(), *xtra_cols]
-    final_data = final_data[cols]
+    final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
 
     _warn_info_post_aggregation_repeats(
         final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
@@ -548,7 +555,7 @@ def re_aggregate_data(
         + [col for col in final_data.columns if col not in ["connectivity"] + xtra_cols]
         + xtra_cols
     )
-    final_data = final_data[cols]
+    final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
 
     _warn_info_post_aggregation_repeats(
         final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
