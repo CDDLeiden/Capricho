@@ -8,7 +8,7 @@ import pandas as pd
 
 from ..core.pandas_helper import add_comment
 from ..logger import logger
-from .api.downloader import get_full_activity_data_sql
+from .api.downloader import get_assay_size_sql, get_full_activity_data_sql
 from .api.webresource import get_full_activity_data
 from .data_flag_functions import (
     flag_calculated_pchembl,
@@ -120,6 +120,7 @@ def curate_activity_pairs(
     Returns:
         pd.DataFrame: The curated DataFrame.
     """
+    df = df.copy()
     if not {mol_id_col, assay_id_col, activity_value_col}.issubset(df.columns):
         logger.warning(
             "Skipping activity pair curation: Required columns "
@@ -355,6 +356,12 @@ def get_bioactivities_workflow(
             prefix=prefix,
             version=version,
         )
+        assay_sizes = get_assay_size_sql(
+            assay_chembl_ids=bioactivities_df.assay_chembl_id.unique().tolist(),
+            prefix=prefix,
+            version=version,
+        )
+        bioactivities_df = bioactivities_df.merge(assay_sizes, on="assay_chembl_id")
     elif backend == "webresource":
         bioactivities_df = get_full_activity_data(
             molecule_chembl_ids=molecule_chembl_ids,

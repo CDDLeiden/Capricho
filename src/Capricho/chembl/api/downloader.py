@@ -599,9 +599,6 @@ def get_full_activity_data_sql(
     ]
     all_fields = base_fields + (additional_fields if additional_fields else [])
 
-    # Add the assay_size field, using COALESCE to ensure 0 for assays with no matching count
-    all_fields.append("COALESCE(assay_molecule_counts.num_distinct_molecules, 0) AS assay_size")
-
     from_join_clauses_main = [
         "molecule_dictionary md",
         "JOIN compound_structures cs ON md.molregno = cs.molregno",
@@ -611,60 +608,6 @@ def get_full_activity_data_sql(
         "LEFT JOIN variant_sequences vs ON a.variant_id = vs.variant_id",
         "JOIN target_dictionary td ON a.tid = td.tid",
     ]
-
-    # --- Subquery for Assay Size Calculation (assay_molecule_counts) ---
-    subquery_from_parts_count = [
-        "activities act_count",
-        "JOIN assays a_count ON act_count.assay_id = a_count.assay_id",
-        "JOIN target_dictionary td_count ON a_count.tid = td_count.tid",
-    ]
-
-    # Mirror relevant main query filters for assay size calculation
-    subquery_where_parts_count = []
-    if standard_relation:
-        relation_placeholders_count = ", ".join([f"'{rel}'" for rel in standard_relation])
-        subquery_where_parts_count.append(f"act_count.standard_relation IN ({relation_placeholders_count})")
-
-    if standard_type:
-        type_placeholders_count = ", ".join([f"'{stype}'" for stype in standard_type])
-        subquery_where_parts_count.append(f"act_count.standard_type IN ({type_placeholders_count})")
-
-    if confidence_scores:
-        confidence_placeholders_count = ", ".join([f"{score}" for score in confidence_scores])
-        subquery_where_parts_count.append(f"a_count.confidence_score IN ({confidence_placeholders_count})")
-
-    if assay_types:
-        atype_placeholders_count = ", ".join([f"'{atype}'" for atype in assay_types])
-        subquery_where_parts_count.append(f"a_count.assay_type IN ({atype_placeholders_count})")
-
-    if chembl_release:
-        subquery_from_parts_count.append("JOIN docs d_count ON act_count.doc_id = d_count.doc_id")
-        subquery_where_parts_count.append(
-            f"(d_count.chembl_release_id IS NULL OR d_count.chembl_release_id <= {chembl_release})"
-        )
-
-    subquery_from_clause_count_str = "\n                ".join(subquery_from_parts_count)
-    subquery_where_clause_count_str = " AND\n                ".join(subquery_where_parts_count)
-
-    assay_size_subquery_str = dedent(
-        f"""\
-        (
-            SELECT
-                act_count.assay_id,
-                COUNT(DISTINCT act_count.molregno) as num_distinct_molecules
-            FROM
-                {subquery_from_clause_count_str}
-            WHERE
-                {subquery_where_clause_count_str}
-            GROUP BY
-                act_count.assay_id
-        ) assay_molecule_counts"""
-    )
-
-    # LEFT JOIN the subquery to the main query
-    from_join_clauses_main.append(
-        f"LEFT JOIN {assay_size_subquery_str} ON a.assay_id = assay_molecule_counts.assay_id"
-    )
 
     fields_clause_str = ",\n            ".join(all_fields)
     from_join_clause_main_str = "\n        ".join(from_join_clauses_main)
@@ -692,3 +635,47 @@ def get_full_activity_data_sql(
         version=downloader_configs["version"],
         prefix=downloader_configs["prefix"],
     ).assign(mutation=lambda x: x["mutation"].fillna("WT"))
+
+
+def get_assay_size_sql(
+    assay_chembl_ids: Union[list, str],
+    prefix: Optional[Sequence[str]] = None,
+    version: Optional[Union[int, str]] = None,
+) -> pd.DataFrame:
+    """Get the number of distinct molecules for a list of ChEMBL assay IDs.
+
+    Args:
+        assay_chembl_ids: list of ChEMBL assay IDs to fetch data for.
+        prefix: Optional prefix for an alternative data directory.
+        version: ChEMBL database to be downloaded and used by ChEMBL downloader.
+
+    Returns:
+        pd.DataFrame: a DataFrame with assay_chembl_id and assay_size.
+    """
+    downloader_configs = check_and_download_chembl_db(prefix=prefix, version=version)
+    ids = [assay_chembl_ids] if isinstance(assay_chembl_ids, str) else assay_chembl_ids
+    placeholders = ", ".join([f"'{id}'" for id in ids])
+    where_clause = f"a.chembl_id IN ({placeholders})"
+
+    query_str = dedent(
+        f"""\
+        SELECT
+            a.chembl_id AS assay_chembl_id,
+            COUNT(DISTINCT act.molregno) as assay_size
+        FROM
+            assays a
+        JOIN activities act ON a.assay_id = act.assay_id
+        WHERE
+            {where_clause}
+        GROUP BY
+            a.chembl_id
+        """
+    )
+
+    logger.debug(f"Generated SQL query for assay size:\n{query_str}")
+
+    return query(
+        query_str,
+        version=downloader_configs["version"],
+        prefix=downloader_configs["prefix"],
+    )
