@@ -304,6 +304,7 @@ def flag_inter_document_duplication(
         "pchembl_value",
         "standard_relation",
         "target_chembl_id",
+        "mutation",
         "target_organism",
     ],
     diff_subset: Optional[list[str]] = ["document_chembl_id"],
