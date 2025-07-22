@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from CompoundMapper.core import pandas_helper, smiles_utils, stats_make
-from CompoundMapper.core.pandas_helper import conflicting_duplicates
+from Capricho.core import pandas_helper, smiles_utils, stats_make
+from Capricho.core.pandas_helper import conflicting_duplicates
 
 
 class TestPandasHelper(unittest.TestCase):

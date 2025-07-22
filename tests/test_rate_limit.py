@@ -4,8 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import redirect_stderr
 from io import StringIO
 
-from CompoundMapper.core.rate_limit import rate_limit
-from CompoundMapper.logger import setup_logger
+from Capricho.core.rate_limit import rate_limit
+from Capricho.logger import setup_logger
 
 
 class TestRateLimitDecorator(unittest.TestCase):

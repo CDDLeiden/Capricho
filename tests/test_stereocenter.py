@@ -5,7 +5,7 @@ from typing import Union
 
 from rdkit import Chem
 
-from CompoundMapper.core.stereo import find_undefined_stereocenters
+from Capricho.core.stereo import find_undefined_stereocenters
 
 
 def has_undefined_stereocenter(input: Union[Chem.Mol, str]) -> bool:
