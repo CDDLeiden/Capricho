@@ -29,7 +29,7 @@ DEFAULTS = {
     "bioactivity_type": ["Potency", "Kd", "Ki", "IC50", "AC50", "EC50"],
     "chirality": False,
     "drop_unassigned_chiral": False,
-    "curate_annotation_errors": False,
+    "curate_annotation_errors": True,
     "standard_relation": ["="],
     "assay_types": ["B", "F"],
     "log_level": "info",
@@ -50,17 +50,20 @@ DEFAULTS = {
     "compound_equality": "connectivity",
 }
 
-STORE_TRUE_ARGS = [
+DEFAULT_FALSE_ARGS = [
     "calculate_pchembl",
     "chirality",
     "drop_unassigned_chiral",
-    "curate_annotation_errors",
     "skip_not_aggregated",
     "aggregate_mutants",
     "skip_recipe",
     "require_doc_date",
     "max_assay_match",
     "strict_mutant_removal",
+]
+
+DEFAULT_TRUE_ARGS = [
+    "curate_annotation_errors",
 ]
 
 
@@ -321,7 +324,7 @@ def get_data(
     ] = DEFAULTS["compound_equality"],
     # --- Metadata & Aggregation ---
     metadata_columns: Annotated[
-        List[str],
+        str,
         typer.Option(
             "-mcols",
             "--metadata-columns",
@@ -332,7 +335,7 @@ def get_data(
         ),
     ] = DEFAULTS["metadata_columns"],
     id_columns: Annotated[
-        List[str],
+        str,
         typer.Option(
             "-idcols",
             "--id-columns",
@@ -465,7 +468,7 @@ def get_data(
         bool,
         typer.Option(
             "-smr/-no-smr",
-            "--strict-mutant-removal/--dont-strict-mutant-removal",
+            "--strict-mutant-removal/--no-strict-mutant-removal",
             help="Flag assays with mutant-related keywords in assay_description for removal.",
             is_flag=True,
             metavar="bool",
@@ -483,6 +486,9 @@ def get_data(
         output_path.mkdir()
     if output_path.suffix == "":
         output_path = output_path.with_suffix(".csv")
+
+    configs = {k: v for k, v in ctx.params.items() if v is not None}
+    logger.debug(f"Command line arguments:\n{configs}")
 
     valid_suffixes = [".csv", ".tsv", ".parquet"]
     if not np.intersect1d(valid_suffixes, output_path.suffixes).shape[0] > 0:
@@ -554,8 +560,10 @@ def get_data(
                 if DEFAULTS[k] is not v:
                     command_vals.append(f"--{save_k} {str(v)}")
             elif isinstance(v, bool):
-                if DEFAULTS[k] is not v:
-                    command_vals.append((f"--{save_k}" if k in STORE_TRUE_ARGS else f"--{k} {v}"))
+                if k in DEFAULT_FALSE_ARGS and v is not False:
+                    command_vals.append((f"--{save_k}"))
+                elif k in DEFAULT_TRUE_ARGS and v is not True:
+                    command_vals.append(f"--dont-{save_k}")
             elif isinstance(v, list):
                 if DEFAULTS[k] != v:
                     command_vals.append(f"--{save_k} {','.join([str(i) for i in v])}")
