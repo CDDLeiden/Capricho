@@ -1,7 +1,7 @@
 <div align="center">
   <img src="logo.svg" alt="" width=240>
   <p><strong>The ChEMBL data curator that flags issues instead of silently dropping them.</strong></p>
-  
+
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-black?style=flat-square)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat-square&labelColor=ef8336)](https://pycqa.github.io/isort/)
@@ -9,105 +9,190 @@
 
 </div>
 
+> Inspired in the Portuguese word "*capricho*" [🔊](https://ipa-reader.com/?text=ka%CB%88p%C9%BEi.%CA%83u&voice=Ricardo). Doing someting *with capricho* means doing it *meticulously*, *with care* and *attention to detail*.
+
 CAPRICHO (**C**hEMBL **A**ggregation **P**ackage with **R**obust **I**nspection and **C**uration **H**andling **O**ptions) is a Python package that streamlines fetching, curating, and aggregating ChEMBL data into a machine learning-ready format for drug discovery in a flexible and reproducible manner. Instead of making opiniated decisions on the source data, CAPRICHO curates it based on several quality control filters that can be chosen by the user. Its guiding principle is to never silently drop data. Entries that don't meet the criteria are marked, allowing the user to analyze how each curation step affects the comparability of assay readouts for the same compound.
 
-## Goals
+## 🎯 Goals
 
 The development of CAPRICHO is guided by two core principles:
 - **Transparency Above All**: Data curation should never be a black box. Removed data points should be saved to be scrutinized by the user and the original data should be always preserved to ensure data integrity.
 - **Flexibility by Design**: Every modeling project is unique. The tool must support flexible data collection and aggregation, allowing the incorporation of any ChEMBL metadata column to be incorporated into same-compound bioactivity values.
 
-## Features:
+## ✨ Features:
 
 - Data retrieval by any ChEMBL identifier (molecule IDs, target IDs, assay IDs, or document IDs)
 - Automated pChEMBL (pXC50) value calculation for bioactivities if not provided through ChEMBL
-- Customizable filtering options (see below):
-    - Confidence score filtering
-    - Bioactivity type selection (e.g.: Potency, Kd, Ki, IC50, AC50, EC50)
-    - Assay type filtering (Functional, Binding, ADME, Toxicity, Physicochemical)
-    - Standard relation filtering
-- Configurable data aggregation options (see below)
+- Customizable filtering options
+- Configurable data aggregation options
 - Save a fetching and processing recipe for reproducibility
+- Command-line interface for easy use
 
-Further, the package also methods for:
-- Multithreaded compound structure curation through pubchempy
-- Multithreaded compound ChEMBL similarity search
+## ⚙️ Installation
 
-## ⚙️ Configuration Options
+The most recent release can be installed from PyPI with uv:
+```shell
+uv pip install chembl_downloader
+```
 
-Retrieving data from ChEMBL is supported by any of the starting points:
-- `molecule_ids`
-- `target_ids`
-- `assay_ids`
-- `document_ids`
+or with pip:
+```shell
+python -m pip install chembl_downloader
+```
 
-### 🔍 Filtering Options
+Alternatively, install directly from the GitHub repository with uv using the command:
+```shell
+uv pip install git+https://github.com/David-Araripe/Capricho.git
+```
+or with pip
+```shell
+python -m pip install git+https://github.com/David-Araripe/Capricho.git
+```
 
-Once you have the starting point, additional parameters can be passed to filter the data:
+## 🚀  Getting started
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `confidence_scores` | Confidence scores for filtering bioactivities | [`7`, `8`, `9`] |
-| `bioactivity_type` | Types of bioactivity to include | [`Potency`, `Kd`, `Ki`, `IC50`, `AC50`, `EC50`] |
-| `assay_types` | Types of assays to include | [`B`, `F`] |
-| `chembl_release` | Get only activities up to a certain release. `None` gets up to the latest reported activities. | `None` |
-| `standard_relation` | ChEMBL standard relations to use | [`=`] |
+CAPRICHO provides a command-line interface with three main commands:
+- [download](#download)
+- [explore](#explore)
+- [get](#get)
 
-### 🔨 Processing Options
+### Download
 
-Once the data is retrieved, CompoundMapper executes the following processing steps:
-- Merge all the retrieved data into a single DataFrame
-- Standardize the SMILES strings using the [ChEMBL_Structure_Pipeline](https://github.com/chembl/ChEMBL_Structure_Pipeline) package
-- Drop entries with missing SMILES strings
-- Remove salts and solvent molecules from the SMILES strings using a regex pattern defined in `CompoundMapper.core.smiles_utils.MIXTURE_REGEX`
-- Drop any remaining mixtures (e.g., multiple compounds in a single SMILES string separated by a dot)
+This command downloads the ChEMBL SQL database using `chembl_downloader`.
 
-The other operations performed to aggregate the fetched dataset and produce the ML-ready dataset are configurable based on the following options:
+```bash
+capricho download [OPTIONS]
+```
+
+**Options:**
 
 | Option | Description | Default |
-|--------|-------------|---------|
-| `id_columns` | Additional columns to use as identifiers during aggregation. For example, using `assay_chembl_id` will **only** aggregate readouts if the assay reporting them is the same | `[]` |
-| `chirality` | Consider whether molecules have the same stereochemistry when aggregating repeated bioactivity measurements | `False` |
-| `aggregate_mutants` | Aggregate data on targets regardless of their variant sequence, treating mutants as the same target. Mutation data is still stored under `mutation` in ChEMBL | `False` |
-| `skip_not_aggregated` | Skip saving the raw data before any aggregation of repeated molecules is applied. Not-aggregated data is saved with the `_not_aggregated.csv` suffix | `False` |
-| `calculate_pchembl` | Calculate pChEMBL (pXC50) values for bioactivities reported in nM, µM or uM when not available | `False` |
-| `no_document_info` | Skip retrieving ChEMBL document info to reduce API calls. Passing this has the drawback that information such as `year` and `chembl_release` will be missing  | `False` |
-| `drop_unassigned_chiral` | Drop ChEMBL compounds with one or more undefined stereocenters. Advised when passing the `-chiral` flag | `False` |
+|---|---|---|
+| `--version`, `-v` | ChEMBL version to download. | latest |
+| `--prefix`, `-p` | Custom pystow storage path. | `~/.data/chembl/` |
 
-### Quality filters
+### explore
 
-Several quality filters have been previously mentioned in the literature and are supported in CompoundMapper, granting the user full control over the aggregated datsets' quality. We attribute the filters to the scientific papers that have used them:
+Explore the downloaded ChEMBL SQL database.
 
-- Quality filters from [Landrum & Riniker, 2024](https://pubs.acs.org/doi/10.1021/acs.jcim.4c00049).
+```bash
+capricho explore [OPTIONS]
+```
 
-| Filter Name | Explanation | Applying in CompoundMapper |
-|-------------|-------------|---------|
-| `activity_curation` | Remove pairs of measurements where pchembl values in two assays were either exactly the same or differed by 3.0 | Applied by default upon data curation |
-| `duplicate_papers` | Remove measurements where both assays were published in the same document. Usually only occurs when there is a difference between the two assays | Passing parameters to the `--id_columns` parameter should prevent such undesired aggregation from taking place |
-| `remove_mutants` | Remove any assays that have any of the keywords "mutant", "mutation", or "variant" keywords in the assay description. | In recent ChEMBL releases, such information is stored under the `variant_sequence` field, saved to the metadata. The conservative keyword search is also available using the `--conservative_remove_mutants` argument |
-| `assay_metadata`| Remove pairs of assays with not-matching assay metadata such as *assay_type*, *assay_organism*, *assay_category*, *assay_tax_id*, *assay_strain*, *assay_tissue*, *assay_cell_type*, *assay_subcellular_fraction*, and *bao_format* | Aggregate only data points from matching assays by simply passing such values to the `--id_columns` argument |
-| `sources_other_than_documents`| Remove data points that does not have an associated document date. E.g.: screening data sets or other contributed data sets. | Pass the argument `--assay_documents_only` |
-| `assay_size`| remove assays that have `N > value` reported compounds. Used in the paper to focus on primary literature, avoiding review articles | Available through the argument `--assay_max_size` |
-| `curation_confidence`| only query assays that have a certain confidence score (used only assays with confidence 9 in the paper) | available through the `--confidence_scores` argument |
+**Options:**
 
-<!-- Curation methods from https://pubs.acs.org/doi/10.1021/acs.jcim.4c00049:
+| Option | Description |
+|---|---|
+| `--version`, `-v` | ChEMBL version to use. Defaults to the latest. |
+| `--list-tables`, `-list` | List all tables within the SQL database and exit. |
+| `--table`, `-t` | Explore a specific table. |
+| `--search-column`, `-search` | Search for tables containing a column name pattern. |
+| `--query`, `-q` | Run a custom SQL query. |
 
-Activity curation: Pairs of measurements where the pchembl values in the two assays were either exactly the same or differed by 3.0 were removed. Given the very low probability of two separate experiments producing exactly the same results, the exact matches are most likely cases where values from a previous paper are copied into a new one; this was discussed in the earlier work by Kramer et al. (10) and spot-checked with a number of assay pairs here.
-Duplicate papers: ✅
-Remove mutants: ✅
-Assay type: This curation step removes pairs of assays with different assay types. ✅
-Assay metadata: ❌❌❌ (TODO): this curation step removes pairs of assays where any of the following assay metadata fields do not match: assay_type, assay_organism, assay_category, assay_tax_id, assay_strain, assay_tissue, assay_cell_type, assay_subcellular_fraction, and bao_format.
-Sources other than documents: ❌❌❌ (TODO) this curation step removes any assay that is from a source that does not have an associated document date. 
-Assay size ❌❌❌ (TODO): by default, any assays that include >100 compounds are removed.
-Curation confidence: ✅
- -->
 
-- Curation filters from [Tetko et al. 2024](https://doi.org/10.1186/s13321-024-00934-w).
+## capricho get
 
-| Filter Name | Explanation | Applying in CompoundMapper |
-|-------------|-------------|---------|
-| `remove_unassigned_chiral` | Authors found duplicated data points within a dataset due to compounds being present with defined and undefined stereoceters. | When modeling datasets with stereochemistry, avoid this problem by passing the `--drop_unassigned_chiral` argument |
+Filter, download, and process bioactivity data from ChEMBL. This is the main command of the package.
 
+```bash
+capricho get [OPTIONS]
+```
+
+A comprehensive list of options is provided below.
+
+## Quickstart Examples
+
+**1. Basic Target Query**
+
+Get all bioactivity data for a specific target (e.g., EGFR) and save it to `egfr_data.csv`.
+
+```bash
+capricho get --target-ids CHEMBL203 --output-path egfr_data.csv
+```
+
+**2. Advanced Filtering**
+
+Get data for a list of targets, but only with high confidence scores, and aggregate mutants.
+
+```bash
+capricho get --target-ids CHEMBL203,CHEMBL204 --confidence-scores 8,9 --aggregate-mutants --output-path advanced_query.csv
+```
+
+**3. Download a specific ChEMBL version**
+
+Download ChEMBL version 33.
+
+```bash
+capricho download --version 33
+```
+
+## ⚙️ `get` Command Configuration Options
+
+### Input IDs
+
+| Option | Description | Default |
+|---|---|---|
+| `-mids`, `--molecule-ids` | ChEMBL molecule IDs, comma-separated. | `[]` |
+| `-tids`, `--target-ids` | ChEMBL target IDs, comma-separated. | `[]` |
+| `-asids`, `--assay-ids` | ChEMBL assay IDs, comma-separated. | `[]` |
+| `-dids`, `--document-ids` | ChEMBL document IDs, comma-separated. | `[]` |
+
+### Filtering Options
+
+| Option | Description | Default |
+|---|---|---|
+| `-c`, `--confidence-scores` | Confidence scores to filter, comma-separated. | `[7, 8, 9]` |
+| `-biotype`, `--bioactivity-type` | Bioactivity types to filter, comma-separated. | `['Potency', 'Kd', 'Ki', 'IC50', 'AC50', 'EC50']` |
+| `-rel`, `--standard-relation` | Filter by standard relation, comma-separated. | `['=']` |
+| `-at`, `--assay-types` | Assay types (B, F, A, T, P), comma-separated. | `['B', 'F']` |
+| `-cr`, `--chembl-release` | Only fetch data reported **up to** a certain ChEMBL release. | `None` |
+| `-reqdoc`, `--require-doc-date` | Filter out bioactivities without a document date. | `False` |
+| `-maxas`, `--max-assay-size` | Max number of compounds in an assay. | `None` |
+| `-minas`, `--min-assay-size` | Min number of compounds in an assay. | `None` |
+| `-maso`, `--min-assay-overlap` | Min overlapping compounds between assays. | `0` |
+
+### Processing & Aggregation Options
+
+| Option | Description | Default |
+|---|---|---|
+| `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported. | `False` |
+| `-chiral`, `--chirality` | Consider chirality during fingerprint calculation. | `False` |
+| `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers. | `False` |
+| `-cure`, `--curate-annotation-errors` | Apply curation for pChEMBL annotation errors. | `False` |
+| `-mutagg`, `--aggregate-mutants` | Aggregate data on targets regardless of mutation. | `False` |
+| `-maxm`, `--max-assay-match` | Perform strict assay metadata matching. | `False` |
+| `-smr`, `--strict-mutant-removal` | Flag assays with mutant-related keywords for removal. | `False` |
+| `-cpd-eq`, `--compound-equality` | Method for compound equality determination. | `connectivity` |
+| `-mcols`, `--metadata-columns` | Extra metadata columns to keep, comma-separated. | `[]` |
+| `-idcols`, `--id-columns` | Extra ID columns for aggregation, comma-separated. | `[]` |
+
+### Output & Backend Options
+
+| Option | Description | Default |
+|---|---|---|
+| `-o`, `--output-path` | Path to save the output files. | `chembl_data.csv` |
+| `-skip-agg`, `--skip-not-aggregated` | Skip saving pre-aggregation data. | `False` |
+| `-rec`, `--skip-recipe` | Skip saving the JSON recipe file. | `False` |
+| `-back`, `--chembl-backend` | Backend to use for ChEMBL interaction. | `downloader` |
+| `-v`, `--chembl-version` | ChEMBL version used by `chembl_downloader`. | `None` |
+
+## Key Concepts
+
+### Compound Equality
+
+The `--compound-equality` option determines how CAPRICHO decides if two compound entries are the same.
+- `connectivity`: (Default) Compounds are considered the same if they have the same chemical connectivity (i.e., ignoring stereochemistry).
+- `mixed_fp`: A more stringent method using a combination of ECFP4 and RDKit fingerprints to determine similarity.
+
+### ChEMBL Backends
+
+The `--chembl-backend` option lets you choose how to fetch data:
+- `downloader`: (Default) Uses a local SQL database downloaded via `chembl_downloader`. This is faster for large or repeated queries.
+- `webresource`: Queries the live ChEMBL web API. This is useful for smaller, one-off queries without needing to download the entire database.
+
+### Reproducibility with `recipe.json`
+
+By default, CAPRICHO saves a `_recipe.json` file alongside your output data. This file contains the exact command and all the parameters you used to generate the data, ensuring your workflow is fully reproducible.
 
 ## Output Format
 
@@ -118,12 +203,6 @@ The fetcher returns a pandas DataFrame with the following key columns:
 - `standard_units`: Units of measurement
 - `pchembl_value`: Calculated or reported pChEMBL value
 - Additional metadata columns as specified
-
-## Installation:
-Clone the repo and then you can install it in your envionment by:
-```bash
-python -m pip install -e .
-```
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
