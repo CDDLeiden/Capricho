@@ -7,7 +7,7 @@
         fill: #131313;
       }
 
-      @media (prefers-color-scheme: dark) {
+      @media (prefers-color-scheme: light) {
         .logo-fill {
           fill: #F9F7F7;
         }
