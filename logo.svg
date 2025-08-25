@@ -4,12 +4,12 @@
 <defs>
     <style>
       .logo-fill {
-        fill: #131313;
+        fill: #F9F7F7;
       }
 
       @media (prefers-color-scheme: light) {
         .logo-fill {
-          fill: #F9F7F7;
+          fill: #131313;
         }
       }
     </style>
