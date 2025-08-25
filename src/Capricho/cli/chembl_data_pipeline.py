@@ -443,9 +443,12 @@ def aggregate_data(
     # `process_repeat_mols`, so it doesn't work. Would be nice to fix this in the future
     final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
-    # reorder the columns so that connectivity comes first and processing & droppiong comes last
+    # reorder the columns so that connectivity comes first and processing & dropping comes last
     xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
-    cols = ["connectivity", *final_data.columns.difference(["connectivity"] + xtra_cols).tolist(), *xtra_cols]
+    first_columns = ["connectivity", *current_extra_id_cols, "smiles"]
+    last_columns = final_data.columns.difference(first_columns + xtra_cols).tolist() + xtra_cols
+    cols = ["connectivity", *current_extra_id_cols, "smiles", *last_columns]
+
     final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
 
     _warn_info_post_aggregation_repeats(
@@ -550,11 +553,11 @@ def re_aggregate_data(
                 "Please ensure that the DataFrame contains all necessary columns."
             )
 
-    cols = (
-        ["connectivity"]
-        + [col for col in final_data.columns if col not in ["connectivity"] + xtra_cols]
-        + xtra_cols
-    )
+    # reorder the columns so that connectivity comes first and processing & dropping comes last
+    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
+    first_columns = ["connectivity", *extra_id_cols, "smiles"]
+    last_columns = final_data.columns.difference(first_columns + xtra_cols).tolist() + xtra_cols
+    cols = ["connectivity", *extra_id_cols, "smiles", *last_columns]
     final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
 
     _warn_info_post_aggregation_repeats(
