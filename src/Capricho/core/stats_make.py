@@ -186,12 +186,18 @@ def process_repeat_mols(
     )
     if solve_strat == "drop":
         updated_df = updated_df.drop(index=todrop_processed)
+
+    # Convert multival_cols (except pchembl_value) to strings for non-aggregated rows
+    non_aggregated_df = df.drop(index=repeat_subset.index).assign(
+        might_rancemic=lambda x: [False] * len(x),
+    )
+    for col in multival_cols:
+        if col in non_aggregated_df.columns and col != "pchembl_value":
+            non_aggregated_df[col] = non_aggregated_df[col].apply(format_value)
+
     df = pd.concat(
         [
-            df.drop(index=repeat_subset.index).assign(
-                might_rancemic=lambda x: [False] * len(x),
-                pchembl_value=lambda x: x["pchembl_value"].apply(format_value),
-            ),
+            non_aggregated_df,
             updated_df.assign(might_rancemic=lambda x: [True if not chirality else False] * len(x)),
         ],
         ignore_index=True,
@@ -214,4 +220,5 @@ def process_repeat_mols(
     # Also add the single-read points to the mean / median values
     df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"])
     df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"])
+    df["pchembl_value"] = df["pchembl_value"].apply(format_value) # convert to str for consistency
     return df

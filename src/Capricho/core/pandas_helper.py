@@ -47,7 +47,7 @@ def save_dataframe(
                 compression_to_use = "gzip"
             else:
                 compression_to_use = "snappy"
-                path = path.with_suffix(".snappy.parquet")
+                path = path.with_suffix(".parquet")
         else:
             compression_to_use = compression
         df.to_parquet(path, index=False, compression=compression_to_use)
