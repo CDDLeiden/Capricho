@@ -9,7 +9,6 @@ from ..core.fp_utils import calculate_mixed_FPs
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import repeated_indices_from_array_series
 from ..logger import logger
-from .api.webresource import get_similarity_compound_table
 
 
 def get_and_curate_chembl_compounds(
@@ -41,6 +40,7 @@ def get_and_curate_chembl_compounds(
     Returns:
         pd.DataFrame: a DataFrame with the processed similar molecules.
     """
+    from .api.webresource import get_similarity_compound_table
 
     if not isinstance(smiles, list):
         raise TypeError("The 'smiles' argument must be a list of SMILES.")

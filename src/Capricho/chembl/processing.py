@@ -9,7 +9,6 @@ import pandas as pd
 from ..core.pandas_helper import add_comment
 from ..logger import logger
 from .api.downloader import get_assay_size_sql, get_full_activity_data_sql
-from .api.webresource import get_full_activity_data
 from .data_flag_functions import (
     flag_calculated_pchembl,
     flag_potential_duplicate,
@@ -237,9 +236,11 @@ def process_bioactivities(
     Returns:
         pd.DataFrame: the processed bioactivities DataFrame.
     """
+    bioactivities_df = bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
+    with pd.option_context("future.no_silent_downcasting", True):
+        bioactivities_df = bioactivities_df.replace({None: np.nan}).infer_objects(copy=False)
     bioactivities_df = (
-        bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
-        .replace({None: np.nan})
+        bioactivities_df
         .pipe(flag_with_data_validity_comment)
         # .query("data_validity_comment.isna()")
         .pipe(flag_potential_duplicate)
@@ -363,6 +364,8 @@ def get_bioactivities_workflow(
         )
         bioactivities_df = bioactivities_df.merge(assay_sizes, on="assay_chembl_id")
     elif backend == "webresource":
+        from .api.webresource import get_full_activity_data
+
         bioactivities_df = get_full_activity_data(
             molecule_chembl_ids=molecule_chembl_ids,
             target_chembl_ids=target_chembl_ids,

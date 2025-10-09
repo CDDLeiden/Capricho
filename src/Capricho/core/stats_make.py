@@ -218,7 +218,8 @@ def process_repeat_mols(
     )
     logger.info(f"Final number of points: {len(df)}")
     # Also add the single-read points to the mean / median values
-    df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"])
-    df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"])
+    with pd.option_context("future.no_silent_downcasting", True):
+        df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"]).infer_objects(copy=False)
+        df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"]).infer_objects(copy=False)
     df["pchembl_value"] = df["pchembl_value"].apply(format_value) # convert to str for consistency
     return df
