@@ -15,7 +15,6 @@ multiple_value_cols = (
     "assay_tissue",
     "assay_cell_type",
     "relationship_type",
-    "indication_class",
     "max_phase",
     "oral",
     "prodrug",

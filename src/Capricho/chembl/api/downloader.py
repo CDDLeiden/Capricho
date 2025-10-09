@@ -185,7 +185,6 @@ def get_compound_table_sql(
             md.max_phase,
             md.therapeutic_flag,
             md.withdrawn_flag,
-            md.indication_class
         FROM
             molecule_dictionary md
         JOIN compound_structures cs ON md.molregno = cs.molregno
@@ -573,7 +572,6 @@ def get_full_activity_data_sql(
         "md.max_phase",
         "md.therapeutic_flag",
         "md.withdrawn_flag",
-        "md.indication_class",
         "act.standard_flag",
         "act.standard_relation",
         "act.standard_type",
