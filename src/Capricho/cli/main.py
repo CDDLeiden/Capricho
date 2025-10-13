@@ -3,20 +3,21 @@
 import json
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import TYPE_CHECKING, List, Optional
 
-import numpy as np
 import typer
 from typing_extensions import Annotated
 
-from chembl_downloader import latest
-
 from .. import __version__
-from ..chembl.api.downloader import check_and_download_chembl_db
-from ..chembl.api.sql_explorer import explorer_main
 from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
 from ..logger import logger, setup_logger
-from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
+
+if TYPE_CHECKING:
+    import numpy as np
+    from chembl_downloader import latest
+    from ..chembl.api.downloader import check_and_download_chembl_db
+    from ..chembl.api.sql_explorer import explorer_main
+    from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
 DEFAULTS = {
     "molecule_ids": [],
@@ -151,6 +152,8 @@ def download(
     ] = None,
 ):
     """Download ChEMBL SQL database using chembl_downloader."""
+    from ..chembl.api.downloader import check_and_download_chembl_db
+
     logger.info(f"Starting ChEMBL download command for version: {version or 'latest'}")
     check_and_download_chembl_db(prefix=str(prefix) if prefix else None, version=version)
     raise typer.Exit()
@@ -179,6 +182,8 @@ def explore(
 
     For a visual inspection of the latest ChEMBL schema, see: https://www.ebi.ac.uk/chembl/db_schema
     """
+    from ..chembl.api.sql_explorer import explorer_main
+
     logger.info("Starting ChEMBL explore command.")
     explorer_main(
         version=version,
@@ -478,6 +483,10 @@ def get_data(
     """
     Filter, download, and process bioactivity data from ChEMBL.
     """
+    import numpy as np
+    from chembl_downloader import latest
+    from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
+
     if standard_relation != ["="]:
         logger.error("Fetching data using different relation types isn't implemented yet.")
         raise typer.Exit(code=1)

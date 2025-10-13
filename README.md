@@ -51,11 +51,6 @@ python -m pip install git+https://github.com/David-Araripe/Capricho.git
 
 ## 🚀 Quick Start
 
-### Installation
-```bash
-pip install capricho
-```
-
 ### Basic Usage
 ```bash
 # Download ChEMBL database
@@ -66,6 +61,14 @@ capricho get --target-ids CHEMBL203 --output-path egfr_data.csv
 
 # Get high-confidence data for multiple targets
 capricho get --target-ids CHEMBL203,CHEMBL204 --confidence-scores 8,9 --output-path results.csv
+```
+
+### Tab Completion
+
+Our CLI supports tab completion for commands and options. To enable it, run the following command in your terminal:
+
+```bash
+capricho --install-completion
 ```
 
 ### Key Features
