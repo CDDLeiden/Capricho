@@ -6,6 +6,7 @@ import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
 
 from ..chembl.data_flag_functions import (
+    flag_censored_activity_comment,
     flag_insufficient_assay_overlap,
     flag_inter_document_duplication,
     flag_max_assay_size,
@@ -203,6 +204,30 @@ def get_standardize_and_clean_workflow(
         version=version,
         backend=backend,
     )
+
+    # Correct censored activity comments (inactive/inconclusive) with incorrect standard_relation='='
+    full_df = flag_censored_activity_comment(full_df)
+
+    # Filter out activities with standard_relation not in the user-selected values
+    # This is important because flag_censored_activity_comment may change '=' to '<'
+    if "standard_relation" in full_df.columns and standard_relation is not None:
+        excluded_relations = ~full_df["standard_relation"].isin(standard_relation)
+        num_excluded = excluded_relations.sum()
+        if num_excluded > 0:
+            logger.info(
+                f"Filtering out {num_excluded} activities with standard_relation not in {standard_relation}. "
+                "These activities will be flagged for removal and saved to the _removed_subset file."
+            )
+            # Flag these activities for removal
+            full_df.loc[excluded_relations, DATA_DROPPING_COMMENT] = full_df.loc[
+                excluded_relations, DATA_DROPPING_COMMENT
+            ].fillna("") + (
+                full_df.loc[excluded_relations, DATA_DROPPING_COMMENT]
+                .apply(lambda x: "; " if x and str(x).strip() else "")
+                .fillna("")
+                + f"Standard relation not in selected values {standard_relation}"
+            )
+
     # Filter assays by size
     if min_assay_size is not None or max_assay_size is not None:
         logger.info(

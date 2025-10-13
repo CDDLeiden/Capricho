@@ -274,6 +274,75 @@ def flag_insufficient_assay_overlap(
     return df
 
 
+def flag_censored_activity_comment(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark activities with activity_comment indicating censored/inactive data but standard_relation='='.
+
+    ChEMBL contains many activities where the activity_comment field indicates the compound
+    was inactive, inconclusive, or not tested, but the standard_relation is incorrectly set to '='.
+
+    The standard_value represents a concentration (e.g., IC50 in nM), and pChEMBL = -log10(standard_value_in_M).
+    When a compound is marked as "inactive" at a given concentration, it means:
+    - The true IC50 (standard_value) is GREATER THAN the tested concentration
+    - The true pChEMBL value is LESS THAN the reported pChEMBL
+
+    Therefore, the standard_relation should be '<' for pChEMBL values (or '>' for standard_value).
+    This function corrects the relation to '<' since we work with pChEMBL values.
+    """
+    if "activity_comment" not in df.columns:
+        logger.debug("Column 'activity_comment' not found. Skipping censored activity comment correction.")
+        return df
+
+    if "standard_relation" not in df.columns:
+        logger.warning("Column 'standard_relation' not found. Cannot correct censored activity comments.")
+        return df
+
+    # Keywords indicating censored/inactive data (case-insensitive)
+    censored_keywords = [
+        "not active",
+        "inactive",
+        "inconclusive",
+        "not tested",
+        "not determined",
+        "nd",
+        "below threshold",
+        "below detection",
+        "no activity",
+    ]
+
+    # Build pattern for case-insensitive matching
+    pattern = "|".join([f"(?i){keyword}" for keyword in censored_keywords])
+
+    mask = (  # Find rows with problematic activity_comment and standard_relation='='
+        df["activity_comment"].notna()
+        & df["activity_comment"].astype(str).str.contains(pattern, regex=True, na=False)
+        & (df["standard_relation"] == "=")
+    )
+
+    num_to_correct = mask.sum()
+
+    if num_to_correct > 0:
+        logger.info(
+            f"Correcting {num_to_correct} activities with censored activity_comment "
+            f"but standard_relation='=' (changing to '<' for log-transformed pChEMBL values)"
+        )
+
+        # Correct standard_relation to "<";
+        # inactive means actual activity is lower than reported standard_value
+        df.loc[mask, "standard_relation"] = "<"
+
+        df = add_comment(
+            df,
+            comment="Corrected standard_relation from '=' to '<' (censored activity_comment)",
+            criteria_func=lambda x, idxs=df[mask].index: x.index.isin(idxs),
+            target_column="activity_comment",
+            comment_type="p",
+        )
+    else:
+        logger.debug("No activities with censored activity_comment and standard_relation='=' found.")
+
+    return df
+
+
 ### Marking readouts that were PROCESSED by CompoundMapper ###
 def flag_calculated_pchembl(df: pd.DataFrame) -> pd.DataFrame:
     """Marks rows where 'calculated_pchembl' is True."""
