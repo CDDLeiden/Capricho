@@ -194,7 +194,8 @@ def get_standardize_and_clean_workflow(
         document_chembl_ids=document_ids or None,
         confidence_scores=confidence_scores,
         assay_types=assay_types,
-        # Don't pass `standard_type|standard_relation` here -> We need N(tested compounds) in each assay
+        standard_relation=standard_relation,
+        standard_types=biotypes,
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
