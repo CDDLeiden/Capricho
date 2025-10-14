@@ -196,7 +196,7 @@ def get_standardize_and_clean_workflow(
         confidence_scores=confidence_scores,
         assay_types=assay_types,
         standard_relation=standard_relation,
-        standard_types=biotypes,
+        standard_type=biotypes,
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
