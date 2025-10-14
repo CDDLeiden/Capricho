@@ -487,10 +487,6 @@ def get_data(
     from chembl_downloader import latest
     from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
-    if standard_relation != ["="]:
-        logger.error("Fetching data using different relation types isn't implemented yet.")
-        raise typer.Exit(code=1)
-
     if not output_path.parent.exists():
         output_path.mkdir()
     if output_path.suffix == "":

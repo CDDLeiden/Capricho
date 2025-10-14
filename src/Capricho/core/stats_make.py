@@ -154,6 +154,11 @@ def process_repeat_mols(
         logger.info(f"{points_dropped} points will be removed from the dataset")
 
     id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
+
+    # Add standard_relation to ID columns to prevent mixing different relation types
+    if "standard_relation" in df.columns:
+        id_cols.append("standard_relation")
+
     multiple_value_cols = [col for col in multiple_value_cols if col not in id_cols]
     multival_cols = [*multiple_value_cols, *extra_multival_cols]
 
