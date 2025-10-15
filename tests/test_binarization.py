@@ -46,12 +46,10 @@ class TestCheckMeasurementAgreement(unittest.TestCase):
         # Censored "<" (active) at pchembl 5.0
         # Discrete "=" at pchembl 6.0 (more active than censored)
         # Should agree: discrete >= censored
-        threshold = 6.0
         result = _check_measurement_agreement(
             discrete_value=6.0,
             censored_value=5.0,
             censored_relation="<",
-            threshold=threshold,
         )
         self.assertTrue(result)
 
@@ -59,12 +57,10 @@ class TestCheckMeasurementAgreement(unittest.TestCase):
         # Censored "<" (active) at pchembl 7.0
         # Discrete "=" at pchembl 5.0 (less active than censored)
         # Should disagree: discrete < censored
-        threshold = 6.0
         result = _check_measurement_agreement(
             discrete_value=5.0,
             censored_value=7.0,
             censored_relation="<",
-            threshold=threshold,
         )
         self.assertFalse(result)
 
@@ -72,12 +68,10 @@ class TestCheckMeasurementAgreement(unittest.TestCase):
         # Censored ">" (inactive) at pchembl 7.0
         # Discrete "=" at pchembl 5.0 (less active than censored)
         # Should agree: discrete <= censored
-        threshold = 6.0
         result = _check_measurement_agreement(
             discrete_value=5.0,
             censored_value=7.0,
             censored_relation=">",
-            threshold=threshold,
         )
         self.assertTrue(result)
 
@@ -85,12 +79,10 @@ class TestCheckMeasurementAgreement(unittest.TestCase):
         # Censored ">" (inactive) at pchembl 5.0
         # Discrete "=" at pchembl 7.0 (more active than censored)
         # Should disagree: discrete > censored
-        threshold = 6.0
         result = _check_measurement_agreement(
             discrete_value=7.0,
             censored_value=5.0,
             censored_relation=">",
-            threshold=threshold,
         )
         self.assertFalse(result)
 
