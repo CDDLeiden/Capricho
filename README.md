@@ -72,11 +72,12 @@ capricho --install-completion
 ```
 
 ### Key Features
-- **Three main commands**: `download`, `explore`, `get`
+- **Four main commands**: `download`, `explore`, `get`, `binarize`
 - **Flexible filtering**: By confidence, assay type, bioactivity type
 - **Transparent processing**: All filtering steps are logged and flagged
 - **Reproducible workflows**: Automatic recipe generation
 - **Multiple backends**: Local SQL or web API
+- **Binary classification support**: Convert continuous activity values to binary labels
 
 ## 📖 Documentation
 
