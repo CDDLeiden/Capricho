@@ -398,6 +398,75 @@ class TestBinarizeAggregatedData(unittest.TestCase):
         self.assertEqual(result.loc[0, "activity_binary"], 1)  # ~ at 6.8: lower bound 6.3
         self.assertEqual(result.loc[1, "activity_binary"], 1)  # = at 7.0
 
+    def test_different_mutants_not_flagged_when_compare_across_mutants_false(self):
+        """Test that different mutants are NOT considered as disagreements when compare_across_mutants=False"""
+        df = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN1"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
+                "mutation": ["Wild-type", "V600E"],
+                "pchembl_value_mean": [7.0, 5.0],
+                "standard_relation": ["=", "="],
+            }
+        )
+
+        result = binarize_aggregated_data(df, threshold=self.threshold, compare_across_mutants=False)
+
+        # Both should be binarized
+        self.assertEqual(result.loc[0, "activity_binary"], 1)  # Active on wild-type
+        self.assertEqual(result.loc[1, "activity_binary"], 0)  # Inactive on mutant
+
+        # Should NOT have conflict flag because they are different mutants
+        if DATA_DROPPING_COMMENT in result.columns:
+            self.assertTrue(
+                result[DATA_DROPPING_COMMENT].isna().all()
+                or not result[DATA_DROPPING_COMMENT].str.contains("Non-agreeing", na=False).any()
+            )
+
+    def test_different_mutants_flagged_when_compare_across_mutants_true(self):
+        """Test that different mutants ARE considered as disagreements when compare_across_mutants=True"""
+        df = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN1"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
+                "mutation": ["Wild-type", "V600E"],
+                "pchembl_value_mean": [7.0, 5.0],
+                "standard_relation": ["=", "="],
+            }
+        )
+
+        result = binarize_aggregated_data(df, threshold=self.threshold, compare_across_mutants=True)
+
+        # Both should be binarized
+        self.assertEqual(result.loc[0, "activity_binary"], 1)  # Active on wild-type
+        self.assertEqual(result.loc[1, "activity_binary"], 0)  # Inactive on mutant
+
+        # SHOULD have conflict flag because we're aggregating across mutants
+        self.assertIn(DATA_DROPPING_COMMENT, result.columns)
+        self.assertTrue(result[DATA_DROPPING_COMMENT].str.contains("Non-agreeing", na=False).all())
+
+    def test_same_mutant_with_disagreement_always_flagged(self):
+        """Test that disagreements on the same mutant are always flagged regardless of compare_across_mutants"""
+        df = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN1"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
+                "mutation": ["Wild-type", "Wild-type"],
+                "pchembl_value_mean": [7.0, 5.0],
+                "standard_relation": ["<", "="],  # Censored says active, discrete says inactive
+            }
+        )
+
+        # Test with compare_across_mutants=False
+        result_false = binarize_aggregated_data(df, threshold=self.threshold, compare_across_mutants=False)
+        self.assertIn(DATA_DROPPING_COMMENT, result_false.columns)
+        self.assertTrue(result_false[DATA_DROPPING_COMMENT].str.contains("Non-agreeing", na=False).all())
+
+        # Test with compare_across_mutants=True (should have same result)
+        result_true = binarize_aggregated_data(df, threshold=self.threshold, compare_across_mutants=True)
+        self.assertIn(DATA_DROPPING_COMMENT, result_true.columns)
+        self.assertTrue(result_true[DATA_DROPPING_COMMENT].str.contains("Non-agreeing", na=False).all())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -674,6 +674,16 @@ def binarize_data(
             metavar="str",
         ),
     ] = "activity_binary",
+    compare_across_mutants: Annotated[
+        bool,
+        typer.Option(
+            "-cmp-mut/-dont-cmp-mut",
+            "--compare-across-mutants/--dont-compare-across-mutants",
+            help="If True, measurements on different mutants are compared for conflicts. Default: False (different mutants are separate compound-target pairs).",
+            is_flag=True,
+            metavar="bool",
+        ),
+    ] = False,
 ):
     """
     Binarize aggregated bioactivity data based on activity threshold.
@@ -713,6 +723,7 @@ def binarize_data(
         target_id_col=target_id_col,
         relation_col=relation_col,
         output_binary_col=output_binary_col,
+        compare_across_mutants=compare_across_mutants,
     )
 
     # Ensure out/dir exists, add proper suffix for saving and Save the binarized data.

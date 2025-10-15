@@ -92,6 +92,7 @@ def binarize_aggregated_data(
     target_id_col: str = "target_chembl_id",
     relation_col: str = "standard_relation",
     output_binary_col: str = "activity_binary",
+    compare_across_mutants: bool = False,
 ) -> pd.DataFrame:
     """Binarize aggregated bioactivity data based on activity threshold and standard_relation.
 
@@ -114,6 +115,9 @@ def binarize_aggregated_data(
         target_id_col: Column identifying targets (default: "target_chembl_id")
         relation_col: Column with standard_relation values (default: "standard_relation")
         output_binary_col: Name for output binary column (default: "activity_binary")
+        compare_across_mutants: If False (default), different mutations are treated as separate
+            compound-target pairs for conflict detection. If True, measurements on different
+            mutants are compared and flagged if they disagree.
 
     Returns:
         DataFrame with binary activity labels and conflict flags
@@ -134,16 +138,57 @@ def binarize_aggregated_data(
     # Create mapping for same compound-target pairs (ignoring standard_relation)
     groupby_cols = [compound_id_col, target_id_col]
 
+    # If compare_across_mutants is False and mutation column exists, include it in grouping
+    # This means different mutants won't be compared for conflicts
+    if not compare_across_mutants and "mutation" in df.columns:
+        groupby_cols.append("mutation")
+
     # Initialize output columns
     df[output_binary_col] = np.nan
     conflict_indices = []
 
-    # Process each compound-target group
+    # First pass: apply binarization logic to all rows
+    for idx, row in df.iterrows():
+        value = row[value_column]
+        relation = row[relation_col]
+
+        if pd.isna(value):
+            df.loc[idx, output_binary_col] = np.nan
+            continue
+
+        # Apply binarization based on relation type
+        if relation == "=":
+            # Discrete measurement: compare directly
+            df.loc[idx, output_binary_col] = 1 if value >= threshold else 0
+
+        elif relation == "~":
+            # Approximate measurement (±0.5 log units uncertainty)
+            # Use the lower bound for conservative classification
+            lower_bound = value - 0.5
+            df.loc[idx, output_binary_col] = 1 if lower_bound >= threshold else 0
+
+        elif relation in ["<", "<=", "<<"]:
+            # Censored active: compound is MORE active than reported value
+            # Since pchembl is -log, higher value = more active
+            # If reported pchembl >= threshold, definitely active
+            df.loc[idx, output_binary_col] = 1 if value >= threshold else 0
+
+        elif relation in [">", ">=", ">>"]:
+            # Censored inactive: compound is LESS active than reported value
+            # Since pchembl is -log, lower value = less active
+            # If reported pchembl <= threshold, definitely inactive
+            df.loc[idx, output_binary_col] = 0 if value <= threshold else 1
+
+        else:
+            logger.warning(f"Unknown relation '{relation}' at index {idx}. Skipping binarization.")
+            df.loc[idx, output_binary_col] = np.nan
+
+    # Second pass: check for conflicts within each group
     for group_key, group_df in df.groupby(groupby_cols):
         group_indices = group_df.index.tolist()
         relations_in_group = group_df[relation_col].unique()
 
-        # Check for mixed relations
+        # Check for mixed relations (discrete vs censored)
         has_discrete = "=" in relations_in_group or "~" in relations_in_group
         has_censored = any(rel in ["<", ">", "<=", ">=", ">>", "<<"] for rel in relations_in_group)
 
@@ -176,41 +221,17 @@ def binarize_aggregated_data(
                     f"{target_id_col}={group_key[1]}: discrete and censored measurements disagree"
                 )
 
-        # Apply binarization logic to each row in the group
-        for idx, row in group_df.iterrows():
-            value = row[value_column]
-            relation = row[relation_col]
-
-            if pd.isna(value):
-                df.loc[idx, output_binary_col] = np.nan
-                continue
-
-            # Apply binarization based on relation type
-            if relation == "=":
-                # Discrete measurement: compare directly
-                df.loc[idx, output_binary_col] = 1 if value >= threshold else 0
-
-            elif relation == "~":
-                # Approximate measurement (±0.5 log units uncertainty)
-                # Use the lower bound for conservative classification
-                lower_bound = value - 0.5
-                df.loc[idx, output_binary_col] = 1 if lower_bound >= threshold else 0
-
-            elif relation in ["<", "<=", "<<"]:
-                # Censored active: compound is MORE active than reported value
-                # Since pchembl is -log, higher value = more active
-                # If reported pchembl >= threshold, definitely active
-                df.loc[idx, output_binary_col] = 1 if value >= threshold else 0
-
-            elif relation in [">", ">=", ">>"]:
-                # Censored inactive: compound is LESS active than reported value
-                # Since pchembl is -log, lower value = less active
-                # If reported pchembl <= threshold, definitely inactive
-                df.loc[idx, output_binary_col] = 0 if value <= threshold else 1
-
-            else:
-                logger.warning(f"Unknown relation '{relation}' at index {idx}. Skipping binarization.")
-                df.loc[idx, output_binary_col] = np.nan
+        # Also check for disagreements in binary labels (different activity classifications)
+        binary_labels = group_df[output_binary_col].dropna()
+        if len(binary_labels) > 1 and len(binary_labels.unique()) > 1:
+            # Multiple measurements with different binary labels - potential conflict
+            # Only flag if not already flagged by discrete-censored check
+            if not any(idx in conflict_indices for idx in group_indices):
+                conflict_indices.extend(group_indices)
+                logger.debug(
+                    f"Conflict detected for {compound_id_col}={group_key[0]}, "
+                    f"{target_id_col}={group_key[1]}: measurements result in different activity labels"
+                )
 
     # Flag rows with conflicts and provide detailed logging
     if conflict_indices:
@@ -224,7 +245,7 @@ def binarize_aggregated_data(
         conflict_subset = df.loc[conflict_indices].copy()
 
         # Select relevant columns for logging
-        logging_cols = [compound_id_col, target_id_col, relation_col, value_column]
+        logging_cols = [compound_id_col, target_id_col, relation_col, value_column, "mutation"]
         # Add optional columns if they exist
         optional_cols = ["molecule_chembl_id", "assay_chembl_id", output_binary_col]
         for col in optional_cols:
