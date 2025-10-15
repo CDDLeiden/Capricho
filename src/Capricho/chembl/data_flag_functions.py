@@ -380,6 +380,10 @@ def flag_inter_document_duplication(
 ) -> pd.DataFrame:
     """Marks rows with a potential duplication after SMILES standardization & salt removal.
 
+    This function only flags duplicates for discrete measurements (standard_relation='=').
+    Censored measurements (e.g., '<', '>') are not flagged as duplicates since the same
+    bound can be independently reached in different studies without indicating true duplication.
+
     Args:
         df: DataFrame to be processed.
         key_subset: metadata columns used for identifying duplicates. Defaults to a
@@ -393,21 +397,53 @@ def flag_inter_document_duplication(
         pd.DataFrame: DataFrame with duplicates marked in `data_processing_comment`
                       (or `data_dropping_comment` if comment_type='d' was used).
     """
-    dupli_mask = conflicting_duplicates(df, key_subset=key_subset, diff_subset=diff_subset)
-    n_duplicates = dupli_mask.sum()
-    dupli_idxs = np.compress(dupli_mask.values, dupli_mask.index)
+    # Only check for duplicates in discrete measurements (standard_relation='=')
+    if "standard_relation" not in df.columns:
+        logger.warning(
+            "Column 'standard_relation' not found in DataFrame. Skipping inter-document duplication flagging."
+        )
+        return df
+
+    discrete_mask = df["standard_relation"] == "="
+    num_discrete = discrete_mask.sum()
+    num_censored = (~discrete_mask).sum()
+
+    if num_discrete == 0:
+        logger.info(
+            f"No discrete measurements (standard_relation='=') found. "
+            f"All {num_censored} measurements are censored. Skipping inter-document duplication flagging."
+        )
+        return df
+
+    logger.debug(
+        f"Checking for inter-document duplicates among {num_discrete} discrete measurements. "
+        f"Ignoring {num_censored} censored measurements."
+    )
+
+    # Only check duplicates among discrete measurements
+    df_discrete = df[discrete_mask]
+    dupli_mask_discrete = conflicting_duplicates(df_discrete, key_subset=key_subset, diff_subset=diff_subset)
+    n_duplicates = dupli_mask_discrete.sum()
+
     if n_duplicates > 0:
         logger.info(
-            f"Flagged {n_duplicates} duplicates with same Mol identifiers accross different Documents."
+            f"Flagged {n_duplicates} duplicates with same Mol identifiers across different Documents "
+            f"(only among discrete measurements with standard_relation='=')."
         )
-    return (
-        df.assign(temp_dupli_flag=dupli_mask)
-        .pipe(
-            add_comment,
-            comment="pChEMBL Duplication Across Documents",
-            criteria_func=lambda x, idxs=dupli_idxs: x.index.isin(idxs),
-            target_column="temp_dupli_flag",
-            comment_type="p",
+        # Map the duplicate indices back to the original dataframe
+        dupli_idxs = df_discrete[dupli_mask_discrete].index
+        return (
+            df.assign(temp_dupli_flag=False)
+            .pipe(lambda x: x.assign(temp_dupli_flag=x.index.isin(dupli_idxs)))
+            .pipe(
+                add_comment,
+                comment="pChEMBL Duplication Across Documents",
+                criteria_func=lambda x, idxs=dupli_idxs: x.index.isin(idxs),
+                target_column="temp_dupli_flag",
+                comment_type="p",
+            )
+            .drop(columns=["temp_dupli_flag"])
         )
-        .drop(columns=["temp_dupli_flag"])
-    )
+    else:
+        logger.debug("No inter-document duplicates found among discrete measurements.")
+        return df

@@ -1,12 +1,13 @@
-"""ABOUTME: Tests for data_flag_functions module.
-ABOUTME: Validates that censored activity comments are correctly identified and standard_relation is changed.
-"""
+"""Tests for data_flag_functions module."""
 
 import unittest
 
 import pandas as pd
 
-from Capricho.chembl.data_flag_functions import flag_censored_activity_comment
+from Capricho.chembl.data_flag_functions import (
+    flag_censored_activity_comment,
+    flag_inter_document_duplication,
+)
 
 
 class TestFlagCensoredActivityComment(unittest.TestCase):
@@ -202,6 +203,93 @@ class TestFlagCensoredActivityComment(unittest.TestCase):
 
         # Should return DataFrame unchanged
         self.assertEqual(len(result), 1)
+
+
+class TestFlagInterDocumentDuplication(unittest.TestCase):
+    """Validates censored activity comment handling and inter-document duplication detection for discrete measurements."""
+
+    def test_only_flags_discrete_measurements(self):
+        """Test that only discrete measurements (standard_relation='=') are flagged as duplicates."""
+        test_data = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1"] * 6,
+                "standard_smiles": ["CCO"] * 6,
+                "canonical_smiles": ["CCO"] * 6,
+                "pchembl_value": [6.0, 6.0, 6.0, 6.0, 5.0, 5.0],
+                "standard_relation": ["=", "=", "<", "<", "=", "="],
+                "target_chembl_id": ["TARGET1"] * 6,
+                "mutation": ["WT"] * 6,
+                "target_organism": ["Homo sapiens"] * 6,
+                "document_chembl_id": ["DOC1", "DOC2", "DOC3", "DOC4", "DOC5", "DOC6"],
+                "data_processing_comment": [""] * 6,
+            }
+        )
+
+        result = flag_inter_document_duplication(test_data)
+
+        # Only rows 0 and 1 (discrete measurements with pchembl=6.0, relation='=') should be flagged
+        # Rows 2 and 3 (censored measurements with pchembl=6.0, relation='<') should NOT be flagged
+        # Rows 4 and 5 (discrete measurements with pchembl=5.0, relation='=') should be flagged
+        flagged_mask = result["data_processing_comment"].str.contains(
+            "pChEMBL Duplication Across Documents", na=False
+        )
+
+        # Check that rows 0, 1, 4, 5 are flagged (discrete measurements)
+        self.assertTrue(flagged_mask.iloc[0], "Row 0 should be flagged (discrete, pchembl=6.0)")
+        self.assertTrue(flagged_mask.iloc[1], "Row 1 should be flagged (discrete, pchembl=6.0)")
+        self.assertTrue(flagged_mask.iloc[4], "Row 4 should be flagged (discrete, pchembl=5.0)")
+        self.assertTrue(flagged_mask.iloc[5], "Row 5 should be flagged (discrete, pchembl=5.0)")
+
+        # Check that rows 2 and 3 are NOT flagged (censored measurements)
+        self.assertFalse(flagged_mask.iloc[2], "Row 2 should NOT be flagged (censored, relation='<')")
+        self.assertFalse(flagged_mask.iloc[3], "Row 3 should NOT be flagged (censored, relation='<')")
+
+    def test_no_discrete_measurements(self):
+        """Test that when all measurements are censored, nothing is flagged."""
+        test_data = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1"] * 4,
+                "standard_smiles": ["CCO"] * 4,
+                "canonical_smiles": ["CCO"] * 4,
+                "pchembl_value": [6.0, 6.0, 5.0, 5.0],
+                "standard_relation": ["<", "<", ">", ">"],
+                "target_chembl_id": ["TARGET1"] * 4,
+                "mutation": ["WT"] * 4,
+                "target_organism": ["Homo sapiens"] * 4,
+                "document_chembl_id": ["DOC1", "DOC2", "DOC3", "DOC4"],
+                "data_processing_comment": [""] * 4,
+            }
+        )
+
+        result = flag_inter_document_duplication(test_data)
+
+        # No rows should be flagged since all are censored
+        flagged_mask = result["data_processing_comment"].str.contains(
+            "pChEMBL Duplication Across Documents", na=False
+        )
+        self.assertFalse(flagged_mask.any(), "No censored measurements should be flagged")
+
+    def test_missing_standard_relation_column(self):
+        """Test that function handles missing standard_relation column gracefully."""
+        test_data = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1"] * 2,
+                "standard_smiles": ["CCO"] * 2,
+                "canonical_smiles": ["CCO"] * 2,
+                "pchembl_value": [6.0, 6.0],
+                "target_chembl_id": ["TARGET1"] * 2,
+                "mutation": ["WT"] * 2,
+                "target_organism": ["Homo sapiens"] * 2,
+                "document_chembl_id": ["DOC1", "DOC2"],
+                "data_processing_comment": [""] * 2,
+            }
+        )
+
+        result = flag_inter_document_duplication(test_data)
+
+        # Function should return dataframe unchanged
+        self.assertEqual(len(result), 2)
+        self.assertTrue(result["data_processing_comment"].str.strip().eq("").all())
 
 
 if __name__ == "__main__":
