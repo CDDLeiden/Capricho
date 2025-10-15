@@ -7,6 +7,22 @@ from ..core.pandas_helper import add_comment
 from ..logger import logger
 
 
+def _truncate_dataframe(df: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
+    """Truncate DataFrame values to a specified length for display purposes.
+
+    Args:
+        df: DataFrame to truncate
+        limit: Maximum character length for each cell value
+
+    Returns:
+        DataFrame with truncated string values
+    """
+    if pd.__version__ > "2.1.0":  # applymap got deprecated in 2.1.0
+        return df.map(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
+    else:
+        return df.applymap(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
+
+
 def _invert_relation_for_pchembl(relation: str) -> str:
     """Inverts comparison relation for pchembl values.
 
@@ -40,7 +56,6 @@ def _check_measurement_agreement(
     discrete_value: float,
     censored_value: float,
     censored_relation: str,
-    threshold: float,
 ) -> bool:
     """Check if discrete and censored measurements agree for the same compound-target pair.
 
@@ -48,7 +63,6 @@ def _check_measurement_agreement(
         discrete_value: pchembl_value from "=" or "~" measurement
         censored_value: pchembl_value from censored measurement
         censored_relation: The censored relation ("<", ">", "<<", ">>", "<=", ">=")
-        threshold: Activity threshold for binarization
 
     Returns:
         True if measurements agree, False otherwise
@@ -122,7 +136,7 @@ def binarize_aggregated_data(
 
     # Initialize output columns
     df[output_binary_col] = np.nan
-    conflict_flags = []
+    conflict_indices = []
 
     # Process each compound-target group
     for group_key, group_df in df.groupby(groupby_cols):
@@ -151,12 +165,12 @@ def binarize_aggregated_data(
                     if pd.isna(censored_val):
                         continue
 
-                    agrees = _check_measurement_agreement(discrete_val, censored_val, censored_rel, threshold)
+                    agrees = _check_measurement_agreement(discrete_val, censored_val, censored_rel)
                     agreements.append(agrees)
 
             # Flag if any disagreements found
             if agreements and not all(agreements):
-                conflict_flags.extend(group_indices)
+                conflict_indices.extend(group_indices)
                 logger.debug(
                     f"Conflict detected for {compound_id_col}={group_key[0]}, "
                     f"{target_id_col}={group_key[1]}: discrete and censored measurements disagree"
@@ -198,16 +212,44 @@ def binarize_aggregated_data(
                 logger.warning(f"Unknown relation '{relation}' at index {idx}. Skipping binarization.")
                 df.loc[idx, output_binary_col] = np.nan
 
-    # Flag rows with conflicts
-    if conflict_flags:
-        logger.info(
-            f"Found {len(conflict_flags)} measurements with disagreements between "
-            "discrete (=) and censored (<, >) values"
+    # Flag rows with conflicts and provide detailed logging
+    if conflict_indices:
+        logger.warning(
+            f"Found {len(conflict_indices)} measurements with disagreements between "
+            "discrete (=, ~) and censored (<, >, <=, >=, <<, >>) values. "
+            "These compound-target pairs have inconsistent measurements across different relation types."
         )
+
+        # Prepare detailed logging output similar to _warn_info_post_aggregation_repeats
+        conflict_subset = df.loc[conflict_indices].copy()
+
+        # Select relevant columns for logging
+        logging_cols = [compound_id_col, target_id_col, relation_col, value_column]
+        # Add optional columns if they exist
+        optional_cols = ["molecule_chembl_id", "assay_chembl_id", output_binary_col]
+        for col in optional_cols:
+            if col in conflict_subset.columns:
+                logging_cols.append(col)
+
+        # Filter to only existing columns and sort
+        logging_cols = [col for col in logging_cols if col in conflict_subset.columns]
+        conflict_display = conflict_subset[logging_cols].sort_values(
+            by=[target_id_col, compound_id_col, value_column], ascending=[True, True, False]
+        )
+
+        # Truncate for display
+        truncated_df = _truncate_dataframe(conflict_display, limit=15)
+
+        logger.warning(
+            f"Sample of conflicting measurements (showing up to 20 rows):\n"
+            f"{truncated_df.head(20).to_string(index=False)}"
+        )
+
+        # Flag the conflicts in the dataframe
         df = add_comment(
             df=df,
             comment="Non-agreeing discrete and censored values",
-            criteria_func=lambda x: x.index.isin(conflict_flags),
+            criteria_func=lambda x: x.index.isin(conflict_indices),
             target_column=value_column,
             comment_type="d",
         )
