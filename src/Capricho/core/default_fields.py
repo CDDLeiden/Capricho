@@ -1,3 +1,5 @@
+"""Contain default field names and constants used across the CAPRICHO project."""
+
 multiple_value_cols = (
     "standard_smiles",
     "canonical_smiles",
