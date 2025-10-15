@@ -212,6 +212,7 @@ def assign_stats(df: pd.DataFrame, sep="|", value_col="pchembl_value", use_geome
 
     value_series = df[value_col].astype(str).str.split(sep).apply(lambda x: list(map(float, x)))
     new_cols = [f"{value_col}{suffix}" for suffix in ["_mean", "_std", "_median", "_counts"]]
+
     if use_geometric:
         df[new_cols[0]] = value_series.apply(gmean)
         df[new_cols[1]] = value_series.apply(gstd)
@@ -222,6 +223,22 @@ def assign_stats(df: pd.DataFrame, sep="|", value_col="pchembl_value", use_geome
         df[new_cols[1]] = value_series.apply(np.std)
         df[new_cols[2]] = value_series.apply(np.median)
         df[new_cols[3]] = value_series.apply(len)
+
+    # For censored measurements, use the first value instead of calculated statistics
+    if "standard_relation" in df.columns:
+        relation_series = df["standard_relation"].astype(str).str.split(sep)
+        # A row is censored if the first relation value is not "="
+        # standard_relation is always on the ID array so we can just check the first value
+        is_censored = relation_series.apply(lambda x: x[0] != "=")
+
+        if is_censored.any():
+            # mean = first value
+            df.loc[is_censored, new_cols[0]] = value_series[is_censored].apply(lambda x: x[0])
+            df.loc[is_censored, new_cols[1]] = np.nan  # std = NaN
+            # median = first value
+            df.loc[is_censored, new_cols[2]] = value_series[is_censored].apply(lambda x: x[0])
+            # counts stays the same, so we don't modify it
+
     return df
 
 

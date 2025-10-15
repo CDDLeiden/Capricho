@@ -447,6 +447,26 @@ def aggregate_data(
             f"Invalid compound_pairing value: {compound_equality}. " "Expected 'mixed_fp' or 'connectivity'."
         )
 
+    # For censored measurements (!=), include relation and pchembl_value in the compound identifier
+    # so they are only aggregated if they have the same value AND relation
+    has_censored = df["standard_relation"].ne("=").any()
+    if has_censored:
+        logger.info(
+            "Detected censored measurements (standard_relation != '='). "
+            "These will only be aggregated if they have identical relation AND pchembl_value."
+        )
+        # Round pchembl_value to 2 decimal places to avoid floating point precision issues
+        rounded_pchembl = df["pchembl_value"].round(2).astype(str)
+        # For censored measurements, append relation + value to the id_array
+        censored_mask = df["standard_relation"] != "="
+        df.loc[censored_mask, "id_array"] = (
+            df.loc[censored_mask, "id_array"].astype(str)
+            + "_"
+            + df.loc[censored_mask, "standard_relation"]
+            + "_"
+            + rounded_pchembl[censored_mask]
+        )
+
     # Here we have a repeat index for compounds across all fetched data. Processing which repeats
     # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
     repeats_idxs = repeated_indices_from_array_series(df["id_array"])
@@ -546,6 +566,29 @@ def re_aggregate_data(
         id_array = pd.Series(fps, index=df.index)
     elif compound_equality == "connectivity":
         id_array = df["connectivity"]
+
+    # For censored measurements (!=), include relation and pchembl_value in the compound identifier
+    # so they are only aggregated if they have the same value AND relation
+    if "standard_relation" in df.columns:
+        has_censored = df["standard_relation"].ne("=").any()
+        if has_censored:
+            logger.info(
+                "Detected censored measurements (standard_relation != '='). "
+                "These will only be aggregated if they have identical relation AND pchembl_value."
+            )
+            # Round pchembl_value to 2 decimal places to avoid floating point precision issues
+            rounded_pchembl = df["pchembl_value"].round(2).astype(str)
+            # For censored measurements, append relation + value to the id_array
+            censored_mask = df["standard_relation"] != "="
+            id_array = id_array.copy()  # Create a copy to avoid modifying the original
+            id_array.loc[censored_mask] = (
+                id_array.loc[censored_mask].astype(str)
+                + "_"
+                + df.loc[censored_mask, "standard_relation"]
+                + "_"
+                + rounded_pchembl[censored_mask]
+            )
+
     repeats_idxs = repeated_indices_from_array_series(id_array)
 
     include_metadata = [
