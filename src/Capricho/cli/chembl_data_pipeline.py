@@ -186,8 +186,16 @@ def get_standardize_and_clean_workflow(
         for act in bioactivity_type:
             biotypes.extend([f"Log {act}", f"-Log {act}", act])
     else:
+        if standard_relation != ["="]:
+            logger.error(
+                "pchembl_values are only calculated for standard_relation='='. If you want "
+                "to use censored data, please set `calculate_pchembl` to True with the flag "
+                "--calculate-pchembl."
+            )
         biotypes = bioactivity_type
 
+    # get_bioactivities_workflow -> fetch with either webresource or downloader -> (minimally) process bioactivities
+    # -> standardization is done here -> curate bioactivity errors (if curate_annotation_errors=True)
     full_df = get_bioactivities_workflow(
         molecule_chembl_ids=molecule_ids or None,
         target_chembl_ids=target_ids or None,
