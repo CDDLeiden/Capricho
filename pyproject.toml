@@ -37,7 +37,7 @@ dependencies = [
   ]
 
 [project.optional-dependencies]
-dev = ["ruff", "isort", "black"]
+dev = ["ruff", "isort", "black", "pytest"]
 
 [project.urls]
 homepage = "https://github.com/David-Araripe/Capricho"
