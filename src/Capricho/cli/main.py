@@ -119,6 +119,11 @@ class CompoundEquality(str, Enum):
     connectivity = "connectivity"
 
 
+class CompoundIdColumn(str, Enum):
+    connectivity = "connectivity"
+    smiles = "smiles"
+
+
 @app.callback()
 def main(
     ctx: typer.Context,  # noqa: F821
@@ -635,14 +640,13 @@ def binarize_data(
         ),
     ] = "pchembl_value_mean",
     compound_id_col: Annotated[
-        str,
+        CompoundIdColumn,
         typer.Option(
             "-cid",
             "--compound-id-col",
-            help="Column name for compound identifiers.",
-            metavar="str",
+            help="Column name for compound identifiers (connectivity or smiles).",
         ),
-    ] = "connectivity",
+    ] = CompoundIdColumn.connectivity,
     target_id_col: Annotated[
         str,
         typer.Option(
@@ -705,7 +709,7 @@ def binarize_data(
         df=df,
         threshold=threshold,
         value_column=value_column,
-        compound_id_col=compound_id_col,
+        compound_id_col=compound_id_col.value,
         target_id_col=target_id_col,
         relation_col=relation_col,
         output_binary_col=output_binary_col,
