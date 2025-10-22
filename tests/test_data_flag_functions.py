@@ -7,6 +7,7 @@ import pandas as pd
 from Capricho.chembl.data_flag_functions import (
     flag_censored_activity_comment,
     flag_inter_document_duplication,
+    flag_missing_document_date,
 )
 
 
@@ -290,6 +291,112 @@ class TestFlagInterDocumentDuplication(unittest.TestCase):
         # Function should return dataframe unchanged
         self.assertEqual(len(result), 2)
         self.assertTrue(result["data_processing_comment"].str.strip().eq("").all())
+
+
+class TestFlagMissingDocumentDate(unittest.TestCase):
+    """Tests for flag_missing_document_date function."""
+
+    def test_flag_missing_year(self):
+        """Test that activities with missing year are flagged in processing comment."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "year": [2020, None, 2021],
+                "pchembl_value": [6.0, 6.5, 7.0],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        result = flag_missing_document_date(df)
+
+        # Check that only row 1 (with None year) is flagged
+        self.assertFalse(
+            "Missing document date" in str(result.loc[0, "data_dropping_comment"]),
+            "Row 0 should NOT be flagged (has year)",
+        )
+        self.assertTrue(
+            "Missing document date" in str(result.loc[1, "data_dropping_comment"]),
+            "Row 1 should be flagged (missing year)",
+        )
+        self.assertFalse(
+            "Missing document date" in str(result.loc[2, "data_dropping_comment"]),
+            "Row 2 should NOT be flagged (has year)",
+        )
+
+    def test_all_have_year(self):
+        """Test that when all activities have year, nothing is flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "year": [2019, 2020, 2021],
+                "pchembl_value": [6.0, 6.5, 7.0],
+                "data_processing_comment": [None, None, None],
+            }
+        )
+
+        result = flag_missing_document_date(df)
+
+        # No rows should have "Missing document date" in processing comment
+        for idx in range(len(result)):
+            comment = result.loc[idx, "data_processing_comment"]
+            self.assertFalse(
+                comment and "Missing document date" in str(comment),
+                f"Row {idx} should NOT be flagged (has year)",
+            )
+
+    def test_all_missing_year(self):
+        """Test that when all activities lack year, all are flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "year": [None, None, None],
+                "pchembl_value": [6.0, 6.5, 7.0],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        result = flag_missing_document_date(df)
+
+        # All rows should be flagged
+        for idx in range(len(result)):
+            self.assertTrue(
+                "Missing document date" in str(result.loc[idx, "data_dropping_comment"]),
+                f"Row {idx} should be flagged (missing year)",
+            )
+
+    def test_missing_year_column(self):
+        """Test that function handles missing year column gracefully."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "pchembl_value": [6.0, 6.5],
+                "data_processing_comment": [None, None],
+            }
+        )
+
+        result = flag_missing_document_date(df)
+
+        # Should return DataFrame unchanged
+        self.assertEqual(len(result), 2)
+        self.assertTrue("year" not in result.columns)
+
+    def test_preserves_existing_comments(self):
+        """Test that existing processing comments are preserved when flagging."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "year": [None, None],
+                "pchembl_value": [6.0, 6.5],
+                "data_dropping_comment": ["Existing comment", None],
+            }
+        )
+
+        result = flag_missing_document_date(df)
+
+        # Check that existing comment is preserved and new flag is added
+        self.assertIn("Existing comment", result.loc[0, "data_dropping_comment"])
+        self.assertIn("Missing document date", result.loc[0, "data_dropping_comment"])
+        self.assertIn("Missing document date", result.loc[1, "data_dropping_comment"])
 
 
 if __name__ == "__main__":

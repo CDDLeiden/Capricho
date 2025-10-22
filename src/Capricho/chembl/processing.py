@@ -240,8 +240,7 @@ def process_bioactivities(
     with pd.option_context("future.no_silent_downcasting", True):
         bioactivities_df = bioactivities_df.replace({None: np.nan}).infer_objects(copy=False)
     bioactivities_df = (
-        bioactivities_df
-        .pipe(flag_with_data_validity_comment)
+        bioactivities_df.pipe(flag_with_data_validity_comment)
         # .query("data_validity_comment.isna()")
         .pipe(flag_potential_duplicate)
         # .query("potential_duplicate == 0")

@@ -12,6 +12,7 @@ from ..chembl.data_flag_functions import (
     flag_max_assay_size,
     flag_min_assay_size,
     flag_missing_canonical_smiles,
+    flag_missing_document_date,
     flag_missing_standard_smiles,
     flag_salt_or_solvent_removal,
     flag_strict_mutant_assays,
@@ -212,6 +213,10 @@ def get_standardize_and_clean_workflow(
         version=version,
         backend=backend,
     )
+
+    # Flag activities without document dates for transparency
+    # Note: if require_doc_date=True, these will be hard-filtered in process_bioactivities
+    full_df = flag_missing_document_date(full_df)
 
     # Correct censored activity comments (inactive/inconclusive) with incorrect standard_relation='='
     full_df = flag_censored_activity_comment(full_df)

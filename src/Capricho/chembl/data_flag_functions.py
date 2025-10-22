@@ -176,6 +176,41 @@ def flag_strict_mutant_assays(df: pd.DataFrame, strict_mutant_removal: bool = Fa
     return df
 
 
+def flag_missing_document_date(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark activities that lack a document date (year) in the processing comment.
+
+    This function always flags missing document dates for transparency, regardless of whether
+    they will be filtered out. Activities without document dates are flagged in the
+    data_processing_comment column so users can see which data points lack temporal information.
+
+    Args:
+        df: DataFrame to be processed.
+
+    Returns:
+        pd.DataFrame: DataFrame with activities lacking document dates flagged in processing comment.
+    """
+    if "year" not in df.columns:
+        logger.debug("Column 'year' not found in DataFrame. Skipping document date flagging.")
+        return df
+
+    mask = df["year"].isna()
+    num_to_flag = mask.sum()
+
+    if num_to_flag > 0:
+        logger.info(f"Flagging {num_to_flag} activities with missing document date (year) for transparency.")
+        df = add_comment(
+            df,
+            comment="Missing document date",
+            criteria_func=lambda x: x.isna(),
+            target_column="year",
+            comment_type="d",
+        )
+    else:
+        logger.debug("No activities with missing document dates found.")
+
+    return df
+
+
 def flag_insufficient_assay_overlap(
     df: pd.DataFrame,
     min_overlap: int = 0,
