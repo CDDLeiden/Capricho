@@ -83,6 +83,11 @@ capricho explore --query "SELECT assay_type, COUNT(*) as count FROM assays GROUP
 capricho explore --query "SELECT confidence_score, COUNT(*) as count FROM assays GROUP BY confidence_score ORDER BY confidence_score DESC"
 ```
 
+**Check all standard units:**
+```bash
+capricho explore --query "SELECT standard_units, COUNT(*) as count FROM activities WHERE standard_units IS NOT NULL GROUP BY standard_units ORDER BY count DESC LIMIT 30"
+```
+
 ## capricho get
 
 Filter, download, and process bioactivity data from ChEMBL. This is the main command of CAPRICHO.
