@@ -701,6 +701,12 @@ def binarize_data(
     while properly handling censored measurements (< and >) and validating agreement between
     discrete (=) and censored measurements for the same compound-target pair.
 
+    The output file also contains a new relation column with signs adjusted for -log scale.
+    E.g.: for threshold of 6.0, `IC50` with `pchembl_value` 6.0 and `pchembl_relation` >
+      - -log[IC50 concentration] > 6.0;
+      - IC50 concentration < 1 µM;
+      - active (1).
+
     Example:
         capricho binarize -i aggregated_data.csv -o binarized_data.csv -t 6.5
     """
@@ -741,7 +747,6 @@ def binarize_data(
         output_path.parent.mkdir(parents=True)
     if output_path.suffix == "":
         output_path = output_path.with_suffix(input_path.suffix)
-    logger.info(f"Saving binarized data to {output_path}")
     save_dataframe(binarized_df, output_path)
 
     # Log number of actives/inactives

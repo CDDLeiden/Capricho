@@ -193,6 +193,24 @@ When aggregating data with censored measurements, CAPRICHO only combines measure
 
 This conservative approach prevents mixing incompatible measurement types (e.g., averaging an exact value with a lower bound).
 
+### pchembl_relation: Inverted Relations for -log Scale
+
+When working with pChEMBL values ($-log_{10}(Molar)$), the direction of comparison operators is inverted compared to the original concentration values. CAPRICHO automatically creates a `pchembl_relation` column during binarization to make this relationship explicit:
+
+**Relation Inversion Logic:**
+- `standard_relation` `<` (low concentration, active) → `pchembl_relation` `>` (high pChEMBL, active)
+- `standard_relation` `>` (high concentration, inactive) → `pchembl_relation` `<` (low pChEMBL, inactive)
+- `standard_relation` `=` → `pchembl_relation` `=` (unchanged)
+- `standard_relation` `~` → `pchembl_relation` `~` (unchanged)
+
+**Example Interpretation:**
+For a measurement with `IC50` = 1 µM (pChEMBL = 6.0) and `standard_relation` = `<`:
+- Original: IC50 < 1 µM (active at concentrations below 1 µM)
+- pChEMBL: pchembl_value > 6.0 (higher pChEMBL = more active)
+- With threshold = 6.0: classified as **active (1)**
+
+This inverted relation column is automatically added when you run the `binarize` command and helps interpret how measurements relate to activity thresholds on the -log scale.
+
 ### Activity Data Analysis
 
 **For binary classification** (active/inactive), use the `binarize` command which properly handles censored measurements. Following the example above, we have:

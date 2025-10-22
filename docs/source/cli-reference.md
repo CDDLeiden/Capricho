@@ -343,11 +343,29 @@ capricho binarize \
   --compare-across-mutants
 ```
 
+### Understanding pchembl_relation
+
+The output file includes a `pchembl_relation` column that adjusts the standard_relation signs for the -log scale used in pChEMBL values. This makes it easier to interpret activity thresholds:
+
+**Example:** For threshold = 6.0 (1 µM)
+- `IC50` with `pchembl_value` = 6.0 and `pchembl_relation` = `>`
+  - -log10[IC50 concentration] > 6.0
+  - IC50 concentration < 1 µM
+  - **active (1)**
+
+The relation inversion happens because pChEMBL values are negative logarithms:
+- `standard_relation` `<` (low concentration) → `pchembl_relation` `>` (high pChEMBL, active)
+- `standard_relation` `>` (high concentration) → `pchembl_relation` `<` (low pChEMBL, inactive)
+- `standard_relation` `=` → `pchembl_relation` `=` (unchanged)
+
+This column is automatically generated during binarization and helps interpret the relationship between measurements and the activity threshold.
+
 ### Output Format
 
 The output file contains all original columns plus:
 
 - **Binary activity column** (default: `activity_binary`): 0 (inactive), 1 (active), or null (missing)
+- **pchembl_relation column**: Standard relation adjusted for -log scale (see above)
 - **Conflict flags**: Rows with disagreeing measurements are flagged in the `data_dropping_comment` column
 
 Conflicting measurements are logged with detailed information about the disagreement.
