@@ -141,7 +141,7 @@ The main data file contains these important columns:
 - `pchembl_value_mean`: Mean pChEMBL value (aggregated)
 - `pchembl_value_median`: Median pChEMBL value (aggregated)
 - `pchembl_value_std`: Standard deviation
-- `standard_relation`: Relation type (=, <, >, ~)
+- `standard_relation`: Relation type (=, <, <<, >, >>, ~)
 - `data_dropping_comment`: Flags for filtered data
 - `data_processing_comment`: Processing notes
 

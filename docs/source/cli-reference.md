@@ -26,8 +26,8 @@ capricho download
 # Download specific version
 capricho download --version 33
 
-# Use custom storage location
-capricho download --prefix /data/chembl/
+# Use custom storage location (this will install version 25 it on ~/.data/old-chembl)
+capricho download --version 25 --prefix data/old-chembl/
 ```
 
 ## capricho explore
@@ -51,7 +51,7 @@ capricho explore [OPTIONS]
 ### Examples
 
 ```bash
-# List all available tables
+# List all available tables on the relational database
 capricho explore --list-tables
 
 # Examine the activities table
@@ -59,9 +59,6 @@ capricho explore --table activities
 
 # Find tables with 'pchembl' columns
 capricho explore --search-column pchembl
-
-# Run custom query to count activities per target
-capricho explore --query "SELECT target_chembl_id, COUNT(*) FROM activities GROUP BY target_chembl_id LIMIT 10"
 
 # Check available standard_relation types in ChEMBL
 capricho explore --query "SELECT standard_relation, COUNT(*) as count FROM activities WHERE standard_relation IS NOT NULL GROUP BY standard_relation ORDER BY count DESC"
@@ -113,7 +110,7 @@ Control which bioactivity data to include:
 |---|---|---|
 | `-c`, `--confidence-scores` | Confidence scores to filter, comma-separated | `[7, 8, 9]` |
 | `-biotype`, `--bioactivity-type` | Bioactivity types to filter, comma-separated | `['Potency', 'Kd', 'Ki', 'IC50', 'AC50', 'EC50']` |
-| `-rel`, `--standard-relation` | Filter by standard relation, comma-separated | `['=']` |
+| `-rel`, `--standard-relation` | Filter by standard relation (`=`, `<`, `>`, `~`), comma-separated. **Note:** Including `<` or `>` requires `--calculate-pchembl`. See [Standard Relations](concepts.md). | `['=']` |
 | `-at`, `--assay-types` | Assay types (B, F, A, T, P), comma-separated | `['B', 'F']` |
 | `-cr`, `--chembl-release` | Only fetch data reported **up to** a certain ChEMBL release | `None` |
 | `-reqdoc`, `--require-doc-date` | Filter out bioactivities without a document date | `False` |
@@ -149,6 +146,9 @@ Common bioactivity measurements:
 - **A**: ADMET assay
 - **T**: Toxicity assay
 - **P**: Physicochemical assay
+- **U**: Unclassified
+
+Further information on assay types and confidence scores can be found in the [ChEMBL documentation](https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/chembl-data-questions).
 
 ### Processing & Aggregation Options
 
@@ -156,7 +156,7 @@ Control how data is processed and aggregated:
 
 | Option | Description | Default |
 |---|---|---|
-| `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported | `False` |
+| `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported. **Required when using censored data** (`--standard-relation` includes `<` or `>`). See [Standard Relations](concepts.md). | `False` |
 | `-chiral`, `--chirality` | Consider chirality during fingerprint calculation | `False` |
 | `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers | `False` |
 | `-cure`, `--curate-annotation-errors` | Apply curation for pChEMBL annotation errors | `False` |
@@ -169,7 +169,7 @@ Control how data is processed and aggregated:
 
 #### Compound Equality Methods
 - **connectivity**: (Default) Based on molecular connectivity, ignoring stereochemistry
-- **mixed_fp**: Uses ECFP4 and RDKit fingerprints for similarity determination
+- **mixed_fp**: Uses ECFP4 and RDKit fingerprints (each with 2048 bits) for similarity determination
 
 #### Useful Metadata Columns
 - `organism`: Source organism
@@ -274,12 +274,12 @@ The pChEMBL scale is -log10(Molar), where higher values indicate higher activity
 
 ### Handling Standard Relations
 
-The binarization process intelligently handles different measurement types:
+The binarization process handles different measurement types:
 
 - **`=`** (discrete): Direct comparison to threshold
 - **`~`** (approximate): Uses lower bound for conservative classification (±0.5 log units)
-- **`<`, `<<`** (censored active): Compound is MORE active than reported value
-- **`>`, `>>`** (censored inactive): Compound is LESS active than reported value
+- **`<`, `<<`** (censored active): Compound is _more_ active than reported value
+- **`>`, `>>`** (censored inactive): Compound is _less_ active than reported value
 
 ### Conflict Detection
 
