@@ -12,7 +12,6 @@ used to annotate processing steps that occurred during the data processing pipel
 
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from ..core.default_fields import (
@@ -209,6 +208,45 @@ def flag_missing_document_date(df: pd.DataFrame) -> pd.DataFrame:
         logger.debug("No activities with missing document dates found.")
 
     return df
+
+
+def flag_incompatible_units(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark activities with units that cannot be converted to pChEMBL in the dropping comment.
+
+    This function flags activities with standard_units that are incompatible with pChEMBL
+    calculation (i.e., not nM, µM, uM, or mM). These activities will have pchembl_value=NaN
+    and are flagged for transparency.
+
+    Args:
+        df: DataFrame to be processed.
+
+    Returns:
+        pd.DataFrame: DataFrame with incompatible units flagged in dropping comment.
+    """
+    if "standard_units" not in df.columns:
+        logger.debug("Column 'standard_units' not found in DataFrame. Skipping incompatible units flagging.")
+        return df
+
+    compatible_units = ["nM", "µM", "uM", "mM"]
+    # Flag rows where standard_units is NOT in compatible_units AND NOT null
+    mask = ~df["standard_units"].isin(compatible_units) & df["standard_units"].notna()
+    num_to_flag = mask.sum()
+
+    if num_to_flag > 0:
+        logger.info(f"Flagging {num_to_flag} activities with incompatible units for pChEMBL calculation.")
+        df = add_comment(
+            df,
+            comment="Incompatible units for pChEMBL calculation",
+            criteria_func=lambda x: ~x.isin(compatible_units) & x.notna(),
+            target_column="standard_units",
+            comment_type="d",
+        )
+    else:
+        logger.debug("No activities with incompatible units found.")
+
+    return df
+
+
 
 
 def flag_insufficient_assay_overlap(
