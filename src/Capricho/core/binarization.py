@@ -1,5 +1,9 @@
 """Contain functions for binarizing bioactivity data; handling censored data and validating agreement between discrete and censored measurements"""
 
+import json
+from pathlib import Path
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
@@ -84,6 +88,268 @@ def _check_measurement_agreement(
         return True
 
 
+def _classify_by_relation(value: float, relation: str, threshold: float) -> int:
+    """Classify a single measurement as active (1) or inactive (0) based on relation type.
+
+    Args:
+        value: pchembl_value to classify
+        relation: standard_relation ("=", "~", "<", ">", "<=", ">=", "<<", ">>")
+        threshold: Activity threshold for binarization
+
+    Returns:
+        1 for active, 0 for inactive
+    """
+    if relation == "=":
+        return 1 if value >= threshold else 0
+
+    elif relation == "~":
+        lower_bound = value - 0.5
+        return 1 if lower_bound >= threshold else 0
+
+    elif relation in ["<", "<=", "<<"]:
+        return 1 if value >= threshold else 0
+
+    elif relation in [">", ">=", ">>"]:
+        return 0 if value <= threshold else 1
+
+    else:
+        raise ValueError(f"Unknown relation: {relation}")
+
+
+def _detect_conflicts(
+    group_df: pd.DataFrame,
+    value_column: str,
+    relation_col: str,
+    output_binary_col: str,
+) -> tuple[bool, str]:
+    """Detect conflicts within a compound-target group.
+
+    Args:
+        group_df: DataFrame subset for one compound-target pair
+        value_column: Column name with pchembl values
+        relation_col: Column name with standard_relation
+        output_binary_col: Column name with binary labels
+
+    Returns:
+        Tuple of (has_conflict, conflict_type) where conflict_type is one of:
+        "discrete_censored_disagreement", "binary_label_mismatch", or ""
+    """
+    relations_in_group = group_df[relation_col].unique()
+    has_discrete = "=" in relations_in_group or "~" in relations_in_group
+    has_censored = any(rel in ["<", ">", "<=", ">=", ">>", "<<"] for rel in relations_in_group)
+
+    if has_discrete and has_censored:
+        discrete_rows = group_df[group_df[relation_col].isin(["=", "~"])]
+        censored_rows = group_df[group_df[relation_col].isin(["<", ">", "<=", ">=", ">>", "<<"])]
+
+        agreements = []
+        for _, discrete_row in discrete_rows.iterrows():
+            discrete_val = discrete_row[value_column]
+            if pd.isna(discrete_val):
+                continue
+
+            for _, censored_row in censored_rows.iterrows():
+                censored_val = censored_row[value_column]
+                censored_rel = censored_row[relation_col]
+                if pd.isna(censored_val):
+                    continue
+
+                agrees = _check_measurement_agreement(discrete_val, censored_val, censored_rel)
+                agreements.append(agrees)
+
+        if agreements and not all(agreements):
+            return True, "discrete_censored_disagreement"
+
+    binary_labels = group_df[output_binary_col].dropna()
+    if len(binary_labels) > 1 and len(binary_labels.unique()) > 1:
+        return True, "binary_label_mismatch"
+
+    return False, ""
+
+
+def _generate_conflict_details(
+    df: pd.DataFrame,
+    conflict_indices: list,
+    compound_id_col: str,
+    target_id_col: str,
+    relation_col: str,
+    value_column: str,
+    output_binary_col: str,
+    threshold: float,
+) -> list[dict]:
+    """Generate detailed conflict information for each compound-target pair.
+
+    Args:
+        df: DataFrame with binarized data
+        conflict_indices: List of row indices with conflicts
+        compound_id_col: Column name for compound IDs
+        target_id_col: Column name for target IDs
+        relation_col: Column name for relations
+        value_column: Column name for pchembl values
+        output_binary_col: Column name for binary labels
+        threshold: Binarization threshold
+
+    Returns:
+        List of conflict detail dictionaries
+    """
+    if not conflict_indices:
+        return []
+
+    conflict_subset = df.loc[conflict_indices].copy()
+    groupby_cols = [compound_id_col, target_id_col]
+    if "mutation" in conflict_subset.columns:
+        groupby_cols.append("mutation")
+
+    conflict_details = []
+    for group_key, group_df in conflict_subset.groupby(groupby_cols):
+        has_conflict, conflict_type = _detect_conflicts(group_df, value_column, relation_col, output_binary_col)
+
+        if not has_conflict:
+            continue
+
+        measurements = []
+        for _, row in group_df.iterrows():
+            measurement = {
+                "value": float(row[value_column]) if not pd.isna(row[value_column]) else None,
+                "relation": row[relation_col],
+                "binary": int(row[output_binary_col]) if not pd.isna(row[output_binary_col]) else None,
+                "threshold_distance": float(row[value_column] - threshold) if not pd.isna(row[value_column]) else None,
+            }
+
+            if "assay_chembl_id" in row:
+                measurement["assay"] = row["assay_chembl_id"]
+            if "molecule_chembl_id" in row:
+                measurement["molecule"] = row["molecule_chembl_id"]
+
+            measurements.append(measurement)
+
+        conflict_detail = {
+            "compound_id": group_key[0],
+            "target_id": group_key[1],
+            "conflict_type": conflict_type,
+            "measurements": measurements,
+            "threshold": threshold,
+        }
+
+        if len(groupby_cols) > 2:
+            conflict_detail["mutation"] = group_key[2]
+
+        discrete_values = [
+            m["value"] for m in measurements if m["relation"] in ["=", "~"] and m["value"] is not None
+        ]
+        censored_values = [
+            m["value"]
+            for m in measurements
+            if m["relation"] in ["<", ">", "<=", ">=", "<<", ">>"] and m["value"] is not None
+        ]
+
+        if discrete_values and censored_values:
+            conflict_detail["explanation"] = (
+                f"Discrete measurement(s) at {discrete_values} vs censored at {censored_values}. "
+                f"Threshold: {threshold}"
+            )
+        else:
+            binary_labels = [m["binary"] for m in measurements if m["binary"] is not None]
+            conflict_detail["explanation"] = (
+                f"Multiple measurements with different binary labels: {set(binary_labels)}"
+            )
+
+        conflict_details.append(conflict_detail)
+
+    return conflict_details
+
+
+def _log_and_flag_conflicts(
+    df: pd.DataFrame,
+    conflict_indices: list,
+    compound_id_col: str,
+    target_id_col: str,
+    relation_col: str,
+    value_column: str,
+    output_binary_col: str,
+) -> pd.DataFrame:
+    """Log conflict details and flag conflicting rows in the DataFrame.
+
+    Args:
+        df: DataFrame with binarized data
+        conflict_indices: List of row indices with conflicts
+        compound_id_col: Column name for compound IDs
+        target_id_col: Column name for target IDs
+        relation_col: Column name for relations
+        value_column: Column name for pchembl values
+        output_binary_col: Column name for binary labels
+
+    Returns:
+        DataFrame with conflicts flagged via add_comment()
+    """
+    if not conflict_indices:
+        return df
+
+    logger.warning(
+        f"Found {len(conflict_indices)} measurements with disagreements. "
+        "These compound-target pairs have inconsistent measurements across different relation types."
+    )
+
+    conflict_subset = df.loc[conflict_indices].copy()
+
+    logging_cols = [compound_id_col, target_id_col, relation_col, value_column, "mutation"]
+    optional_cols = ["molecule_chembl_id", "assay_chembl_id", output_binary_col]
+    for col in optional_cols:
+        if col in conflict_subset.columns:
+            logging_cols.append(col)
+
+    logging_cols = [col for col in logging_cols if col in conflict_subset.columns]
+    conflict_display = conflict_subset[logging_cols].sort_values(
+        by=[target_id_col, compound_id_col, value_column], ascending=[True, True, False]
+    )
+
+    truncated_df = _truncate_dataframe(conflict_display, limit=15)
+    logger.warning(f"Sample of conflicting measurements (showing up to 20 rows):\n{truncated_df.head(20).to_string(index=False)}")
+
+    df = add_comment(
+        df=df,
+        comment="Non-agreeing discrete and censored values",
+        criteria_func=lambda x: x.index.isin(conflict_indices),
+        target_column=value_column,
+        comment_type="d",
+    )
+
+    return df
+
+
+def save_conflict_report(
+    conflict_details: list[dict],
+    output_path: str | Path,
+    threshold: float,
+) -> None:
+    """Save conflict report to JSON file.
+
+    Args:
+        conflict_details: List of conflict detail dictionaries
+        output_path: Path to save the JSON file
+        threshold: Binarization threshold used
+    """
+    report = {
+        "summary": {
+            "total_conflicts": len(conflict_details),
+            "discrete_censored_disagreements": sum(
+                1 for c in conflict_details if c["conflict_type"] == "discrete_censored_disagreement"
+            ),
+            "binary_label_mismatches": sum(
+                1 for c in conflict_details if c["conflict_type"] == "binary_label_mismatch"
+            ),
+            "threshold": threshold,
+        },
+        "conflicts": conflict_details,
+    }
+
+    output_path = Path(output_path)
+    with open(output_path, "w") as f:
+        json.dump(report, f, indent=2)
+
+    logger.info(f"Conflict report saved to {output_path}")
+
+
 def binarize_aggregated_data(
     df: pd.DataFrame,
     threshold: float = 6.0,
@@ -93,6 +359,7 @@ def binarize_aggregated_data(
     relation_col: str = "standard_relation",
     output_binary_col: str = "activity_binary",
     compare_across_mutants: bool = False,
+    conflict_report_path: Optional[str | Path] = None,
 ) -> pd.DataFrame:
     """Binarize aggregated bioactivity data based on activity threshold and standard_relation.
 
@@ -118,6 +385,7 @@ def binarize_aggregated_data(
         compare_across_mutants: If False (default), different mutations are treated as separate
             compound-target pairs for conflict detection. If True, measurements on different
             mutants are compared and flagged if they disagree.
+        conflict_report_path: Optional path to save detailed conflict report as JSON
 
     Returns:
         DataFrame with binary activity labels and conflict flags
@@ -129,153 +397,49 @@ def binarize_aggregated_data(
 
     df = df.copy()
 
-    # Check if standard_relation column exists
-    has_relation_col = relation_col in df.columns
-    if not has_relation_col:
+    if relation_col not in df.columns:
         logger.warning(f"Column '{relation_col}' not found. Assuming all measurements have '=' relation.")
         df[relation_col] = "="
 
-    # Create mapping for same compound-target pairs (ignoring standard_relation)
     groupby_cols = [compound_id_col, target_id_col]
-
-    # If compare_across_mutants is False and mutation column exists, include it in grouping
-    # This means different mutants won't be compared for conflicts
     if not compare_across_mutants and "mutation" in df.columns:
         groupby_cols.append("mutation")
 
-    # Initialize output columns
     df[output_binary_col] = np.nan
     conflict_indices = []
 
-    # First pass: apply binarization logic to all rows
     for idx, row in df.iterrows():
         value = row[value_column]
         relation = row[relation_col]
 
         if pd.isna(value):
-            df.loc[idx, output_binary_col] = np.nan
             continue
 
-        # Apply binarization based on relation type
-        if relation == "=":
-            # Discrete measurement: compare directly
-            df.loc[idx, output_binary_col] = 1 if value >= threshold else 0
+        try:
+            df.loc[idx, output_binary_col] = _classify_by_relation(value, relation, threshold)
+        except ValueError as e:
+            logger.warning(f"{e} at index {idx}. Skipping binarization.")
 
-        elif relation == "~":
-            # Approximate measurement (±0.5 log units uncertainty)
-            # Use the lower bound for conservative classification
-            lower_bound = value - 0.5
-            df.loc[idx, output_binary_col] = 1 if lower_bound >= threshold else 0
-
-        elif relation in ["<", "<=", "<<"]:
-            # Censored active: compound is MORE active than reported value
-            # Since pchembl is -log, higher value = more active
-            # If reported pchembl >= threshold, definitely active
-            df.loc[idx, output_binary_col] = 1 if value >= threshold else 0
-
-        elif relation in [">", ">=", ">>"]:
-            # Censored inactive: compound is LESS active than reported value
-            # Since pchembl is -log, lower value = less active
-            # If reported pchembl <= threshold, definitely inactive
-            df.loc[idx, output_binary_col] = 0 if value <= threshold else 1
-
-        else:
-            logger.warning(f"Unknown relation '{relation}' at index {idx}. Skipping binarization.")
-            df.loc[idx, output_binary_col] = np.nan
-
-    # Second pass: check for conflicts within each group
     for group_key, group_df in df.groupby(groupby_cols):
-        group_indices = group_df.index.tolist()
-        relations_in_group = group_df[relation_col].unique()
+        has_conflict, conflict_type = _detect_conflicts(group_df, value_column, relation_col, output_binary_col)
 
-        # Check for mixed relations (discrete vs censored)
-        has_discrete = "=" in relations_in_group or "~" in relations_in_group
-        has_censored = any(rel in ["<", ">", "<=", ">=", ">>", "<<"] for rel in relations_in_group)
+        if has_conflict:
+            conflict_indices.extend(group_df.index.tolist())
+            logger.debug(
+                f"Conflict ({conflict_type}) for {compound_id_col}={group_key[0]}, "
+                f"{target_id_col}={group_key[1]}"
+            )
 
-        if has_discrete and has_censored:
-            # Need to validate agreement between discrete and censored measurements
-            discrete_rows = group_df[group_df[relation_col].isin(["=", "~"])]
-            censored_rows = group_df[group_df[relation_col].isin(["<", ">", "<=", ">=", ">>", "<<"])]
+    df = _log_and_flag_conflicts(
+        df, conflict_indices, compound_id_col, target_id_col, relation_col, value_column, output_binary_col
+    )
 
-            # Check all discrete-censored pairs for agreement
-            agreements = []
-            for _, discrete_row in discrete_rows.iterrows():
-                discrete_val = discrete_row[value_column]
-                if pd.isna(discrete_val):
-                    continue
-
-                for _, censored_row in censored_rows.iterrows():
-                    censored_val = censored_row[value_column]
-                    censored_rel = censored_row[relation_col]
-                    if pd.isna(censored_val):
-                        continue
-
-                    agrees = _check_measurement_agreement(discrete_val, censored_val, censored_rel)
-                    agreements.append(agrees)
-
-            # Flag if any disagreements found
-            if agreements and not all(agreements):
-                conflict_indices.extend(group_indices)
-                logger.debug(
-                    f"Conflict detected for {compound_id_col}={group_key[0]}, "
-                    f"{target_id_col}={group_key[1]}: discrete and censored measurements disagree"
-                )
-
-        # Also check for disagreements in binary labels (different activity classifications)
-        binary_labels = group_df[output_binary_col].dropna()
-        if len(binary_labels) > 1 and len(binary_labels.unique()) > 1:
-            # Multiple measurements with different binary labels - potential conflict
-            # Only flag if not already flagged by discrete-censored check
-            if not any(idx in conflict_indices for idx in group_indices):
-                conflict_indices.extend(group_indices)
-                logger.debug(
-                    f"Conflict detected for {compound_id_col}={group_key[0]}, "
-                    f"{target_id_col}={group_key[1]}: measurements result in different activity labels"
-                )
-
-    # Flag rows with conflicts and provide detailed logging
-    if conflict_indices:
-        logger.warning(
-            f"Found {len(conflict_indices)} measurements with disagreements between "
-            "discrete (=, ~) and censored (<, >, <=, >=, <<, >>) values. "
-            "These compound-target pairs have inconsistent measurements across different relation types."
+    if conflict_report_path and conflict_indices:
+        conflict_details = _generate_conflict_details(
+            df, conflict_indices, compound_id_col, target_id_col, relation_col, value_column, output_binary_col, threshold
         )
+        save_conflict_report(conflict_details, conflict_report_path, threshold)
 
-        # Prepare detailed logging output similar to _warn_info_post_aggregation_repeats
-        conflict_subset = df.loc[conflict_indices].copy()
-
-        # Select relevant columns for logging
-        logging_cols = [compound_id_col, target_id_col, relation_col, value_column, "mutation"]
-        # Add optional columns if they exist
-        optional_cols = ["molecule_chembl_id", "assay_chembl_id", output_binary_col]
-        for col in optional_cols:
-            if col in conflict_subset.columns:
-                logging_cols.append(col)
-
-        # Filter to only existing columns and sort
-        logging_cols = [col for col in logging_cols if col in conflict_subset.columns]
-        conflict_display = conflict_subset[logging_cols].sort_values(
-            by=[target_id_col, compound_id_col, value_column], ascending=[True, True, False]
-        )
-
-        # Truncate for display
-        truncated_df = _truncate_dataframe(conflict_display, limit=15)
-
-        logger.warning(
-            f"Sample of conflicting measurements (showing up to 20 rows):\n"
-            f"{truncated_df.head(20).to_string(index=False)}"
-        )
-
-        # Flag the conflicts in the dataframe
-        df = add_comment(
-            df=df,
-            comment="Non-agreeing discrete and censored values",
-            criteria_func=lambda x: x.index.isin(conflict_indices),
-            target_column=value_column,
-            comment_type="d",
-        )
-
-    # Convert binary column to Int64 (nullable integer)
     df[output_binary_col] = df[output_binary_col].astype("Int64")
 
     logger.info(

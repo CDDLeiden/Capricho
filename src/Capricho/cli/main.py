@@ -684,6 +684,15 @@ def binarize_data(
             metavar="bool",
         ),
     ] = False,
+    conflict_report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "-cr",
+            "--conflict-report-path",
+            help="Optional path to save detailed conflict report as JSON for interactive analysis.",
+            metavar="path",
+        ),
+    ] = None,
 ):
     """
     Binarize aggregated bioactivity data based on activity threshold.
@@ -724,6 +733,7 @@ def binarize_data(
         relation_col=relation_col,
         output_binary_col=output_binary_col,
         compare_across_mutants=compare_across_mutants,
+        conflict_report_path=conflict_report_path,
     )
 
     # Ensure out/dir exists, add proper suffix for saving and Save the binarized data.
@@ -733,6 +743,14 @@ def binarize_data(
         output_path = output_path.with_suffix(input_path.suffix)
     logger.info(f"Saving binarized data to {output_path}")
     save_dataframe(binarized_df, output_path)
+
+    # Log number of actives/inactives
+    n_actives = binarized_df[output_binary_col].sum()
+    n_inactives = len(binarized_df) - n_actives
+    logger.info(
+        f"{n_actives}/{len(binarized_df)} actives ({n_actives / len(binarized_df) * 100:.2f}%); "
+        f"{n_inactives}/{len(binarized_df)} inactives ({n_inactives / len(binarized_df) * 100:.2f}%)."
+    )
 
     logger.info(f"Binarization complete. Output saved to {output_path}")
     return binarized_df
