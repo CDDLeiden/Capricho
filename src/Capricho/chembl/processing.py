@@ -11,6 +11,7 @@ from ..logger import logger
 from .api.downloader import get_assay_size_sql, get_full_activity_data_sql
 from .data_flag_functions import (
     flag_calculated_pchembl,
+    flag_incompatible_units,
     flag_potential_duplicate,
     flag_with_data_validity_comment,
 )
@@ -21,23 +22,18 @@ def convert_to_log10(df: pd.DataFrame) -> pd.DataFrame:
     """Function to be applied to the whole DataFrame. Will convert the standard_value
     column to pchembl_value column, if the standard_units are in nM, µM or uM.
 
+    Activities with incompatible units are flagged and preserved with pchembl_value=NaN
+    for transparency.
+
     Args:
         df: a bioactivity DataFrame. e.g.: output from `get_activity_table`.
 
     Returns:
-        pd.DataFrame: the DataFrame with the pchembl_value column added. If the data didn't
-            meet the pchembl_value calculation criteria (standard_units not in nM, µM or uM) |
-            (standard_type.str.contains(log)), it can return an empty DataFrame.
+        pd.DataFrame: the DataFrame with the pchembl_value column added. Activities with
+            incompatible units are flagged and have pchembl_value=NaN.
     """
 
     def compute_log(row):
-        # Sometimes standard_type is already log transformed;
-        if re.findall("log", row["standard_type"], re.IGNORECASE):
-            if row["standard_value"] < 0:
-                return -row["standard_value"]  # log10 transformed, but not negative yet ?
-            else:
-                return row["standard_value"]
-
         unit = row["standard_units"]
         if pd.isna(unit):
             return np.nan
@@ -51,26 +47,31 @@ def convert_to_log10(df: pd.DataFrame) -> pd.DataFrame:
             value_in_M = value * 1e-6
         elif unit == "nM":
             value_in_M = value * 1e-9
+        else:
+            return np.nan  # Unit not compatible with pChEMBL calculation
 
         return -np.log10(value_in_M)
 
     desired_units = ["nM", "µM", "uM", "mM"]  # noqa: F841
-    # allow na values in case value is log transformed
-    tmp_df = (
-        df.query("standard_units.isin(@desired_units) | standard_units.isna()")
-        .copy()
-        .pipe(flag_calculated_pchembl)
-    )
-    if "pchembl_value" not in tmp_df.columns:
+    df = df.copy().pipe(flag_incompatible_units)  # flag incompatible units w/ pchembl calculation e.g.; %
+
+    # Filter to convertible units for calculation, but preserve incompatible ones after
+    convertible_mask = df["standard_units"].isin(desired_units) | df["standard_units"].isna()
+    convertible_df = df[convertible_mask].copy()
+    incompatible_df = df[~convertible_mask].copy()
+
+    if "pchembl_value" not in convertible_df.columns:
         raise ValueError("pchembl_value column not found in input DataFrame.")
-    elif (~tmp_df.pchembl_value.isna()).any():
+    elif (~convertible_df.pchembl_value.isna()).any():
         raise ValueError(
             "input DataFrame should only have pchembl_value.isna() values. If not, use "
             "chembl.processing.process_bioactivities instead."
         )
-    if tmp_df.shape[0] > 0:
-        tmp_df = tmp_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
-        pchembl_inf_or_nan = tmp_df.replace([np.inf, -np.inf], np.nan).query("pchembl_value.isna()")
+
+    if convertible_df.shape[0] > 0:  # Calculate pChEMBL for convertible units
+        convertible_df = convertible_df.pipe(flag_calculated_pchembl)
+        convertible_df = convertible_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
+        pchembl_inf_or_nan = convertible_df.replace([np.inf, -np.inf], np.nan).query("pchembl_value.isna()")
         if not pchembl_inf_or_nan.empty:
             debug_cols = [
                 "target_chembl_id",
@@ -83,14 +84,23 @@ def convert_to_log10(df: pd.DataFrame) -> pd.DataFrame:
             _info = pchembl_inf_or_nan.loc[pchembl_inf_or_nan.index[:6], debug_cols]
             comment = "Infinite or NaN pchembl_value after calculation"
             logger.info(f"Flagging {len(pchembl_inf_or_nan)} rows: {comment}:\n{_info}")
-            tmp_df = add_comment(
-                df=tmp_df,
+            convertible_df = add_comment(
+                df=convertible_df,
                 comment=comment,
                 criteria_func=lambda x: x.index.isin(pchembl_inf_or_nan.index),
                 target_column="pchembl_value",  # Dummy target, criteria_func handles selection
                 comment_type="d",
             )
-    return tmp_df
+
+    if incompatible_df.shape[0] > 0:  # Recombine convertible and incompatible dataframes
+        # Ensure incompatible_df has pchembl_value column (will be NaN)
+        if "pchembl_value" not in incompatible_df.columns:
+            incompatible_df["pchembl_value"] = np.nan
+        result_df = pd.concat([convertible_df, incompatible_df], ignore_index=True)
+    else:
+        result_df = convertible_df
+
+    return result_df
 
 
 # TODO: Consider whether we should do this across pairs identified from fingerprints or molecule IDs
@@ -246,13 +256,21 @@ def process_bioactivities(
         # .query("potential_duplicate == 0")
         .drop(columns=["data_validity_comment", "potential_duplicate"])
     )
-    with_pchembl = bioactivities_df.query("~pchembl_value.isna()")
-    if calculate_pchembl:  # if pchembl value not present, calculate it
-        without_pchembl = convert_to_log10(bioactivities_df.query("pchembl_value.isna()"))
-        if not without_pchembl.empty:
-            bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
+
+    # Separate activities with and without pChEMBL values
+    with_pchembl = bioactivities_df.query("~pchembl_value.isna()").copy()
+    without_pchembl = bioactivities_df.query("pchembl_value.isna()").copy()
+
+    if calculate_pchembl and not without_pchembl.empty:
+        # Calculate pChEMBL for activities without it (preserves incompatible units)
+        without_pchembl = convert_to_log10(without_pchembl)
+        bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
+    elif not calculate_pchembl and not without_pchembl.empty:
+        # Keep activities without pChEMBL (incompatible units already flagged)
+        bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
     else:
-        bioactivities_df = with_pchembl
+        # Either calculate_pchembl=True and no missing values, or calculate_pchembl=False and all have values
+        bioactivities_df = with_pchembl if without_pchembl.empty else bioactivities_df
 
     if curate_annotation_errors:
         bioactivities_df = curate_activity_pairs(bioactivities_df)

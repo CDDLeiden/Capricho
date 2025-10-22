@@ -6,6 +6,7 @@ import pandas as pd
 
 from Capricho.chembl.data_flag_functions import (
     flag_censored_activity_comment,
+    flag_incompatible_units,
     flag_inter_document_duplication,
     flag_missing_document_date,
 )
@@ -397,6 +398,100 @@ class TestFlagMissingDocumentDate(unittest.TestCase):
         self.assertIn("Existing comment", result.loc[0, "data_dropping_comment"])
         self.assertIn("Missing document date", result.loc[0, "data_dropping_comment"])
         self.assertIn("Missing document date", result.loc[1, "data_dropping_comment"])
+
+
+class TestFlagIncompatibleUnits(unittest.TestCase):
+    """Tests for flag_incompatible_units function."""
+
+    def test_flag_incompatible_units(self):
+        """Test that activities with non-convertible units are flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3", "CHEMBL4"],
+                "standard_units": ["nM", "%", "µM", "ug.mL-1"],
+                "standard_value": [100.0, 50.0, 10.0, 5.0],
+                "pchembl_value": [7.0, None, 8.0, None],
+                "data_dropping_comment": [None, None, None, None],
+            }
+        )
+
+        result = flag_incompatible_units(df)
+
+        # Check that rows with "%" and "ug.mL-1" are flagged, but "nM" and "µM" are not
+        self.assertFalse(
+            "Incompatible units" in str(result.loc[0, "data_dropping_comment"]),
+            "Row 0 (nM) should NOT be flagged",
+        )
+        self.assertTrue(
+            "Incompatible units" in str(result.loc[1, "data_dropping_comment"]),
+            "Row 1 (%) should be flagged",
+        )
+        self.assertFalse(
+            "Incompatible units" in str(result.loc[2, "data_dropping_comment"]),
+            "Row 2 (µM) should NOT be flagged",
+        )
+        self.assertTrue(
+            "Incompatible units" in str(result.loc[3, "data_dropping_comment"]),
+            "Row 3 (L) should be flagged",
+        )
+
+    def test_all_compatible_units(self):
+        """Test that when all units are compatible, nothing is flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "standard_units": ["nM", "uM", "mM"],
+                "standard_value": [100.0, 10.0, 1.0],
+                "pchembl_value": [7.0, 8.0, 6.0],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        result = flag_incompatible_units(df)
+
+        # No rows should be flagged
+        for idx in range(len(result)):
+            comment = result.loc[idx, "data_dropping_comment"]
+            self.assertFalse(
+                comment and "Incompatible units" in str(comment),
+                f"Row {idx} should NOT be flagged (compatible unit)",
+            )
+
+    def test_null_units_not_flagged(self):
+        """Test that null/NA units are not flagged (they're handled separately)."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "standard_units": [None, "nM"],
+                "standard_value": [7.5, 100.0],
+                "pchembl_value": [7.5, 7.0],
+                "data_dropping_comment": [None, None],
+            }
+        )
+
+        result = flag_incompatible_units(df)
+
+        # Null units should not be flagged
+        self.assertFalse(
+            result.loc[0, "data_dropping_comment"]
+            and "Incompatible units" in str(result.loc[0, "data_dropping_comment"]),
+            "Row 0 (null unit) should NOT be flagged",
+        )
+
+    def test_missing_standard_units_column(self):
+        """Test that function handles missing standard_units column gracefully."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1"],
+                "pchembl_value": [6.0],
+                "data_dropping_comment": [None],
+            }
+        )
+
+        result = flag_incompatible_units(df)
+
+        # Should return DataFrame unchanged
+        self.assertEqual(len(result), 1)
 
 
 if __name__ == "__main__":
