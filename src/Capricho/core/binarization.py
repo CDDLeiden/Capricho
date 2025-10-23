@@ -125,7 +125,7 @@ def _detect_conflicts(
     Args:
         group_df: DataFrame subset for one compound-target pair
         value_column: Column name with pchembl values
-        pchembl_relation_col: Column name with pchembl_value_relation
+        pchembl_relation_col: Column name with pchembl_relation
         output_binary_col: Column name with binary labels
 
     Returns:
@@ -182,7 +182,7 @@ def _generate_conflict_details(
         conflict_indices: List of row indices with conflicts
         compound_id_col: Column name for compound IDs
         target_id_col: Column name for target IDs
-        pchembl_relation_col: Column name for pchembl_value_relation
+        pchembl_relation_col: Column name for pchembl_relation
         value_column: Column name for pchembl values
         output_binary_col: Column name for binary labels
         threshold: Binarization threshold
@@ -200,7 +200,9 @@ def _generate_conflict_details(
 
     conflict_details = []
     for group_key, group_df in conflict_subset.groupby(groupby_cols):
-        has_conflict, conflict_type = _detect_conflicts(group_df, value_column, pchembl_relation_col, output_binary_col)
+        has_conflict, conflict_type = _detect_conflicts(
+            group_df, value_column, pchembl_relation_col, output_binary_col
+        )
 
         if not has_conflict:
             continue
@@ -211,7 +213,9 @@ def _generate_conflict_details(
                 "value": float(row[value_column]) if not pd.isna(row[value_column]) else None,
                 "pchembl_relation": row[pchembl_relation_col],
                 "binary": int(row[output_binary_col]) if not pd.isna(row[output_binary_col]) else None,
-                "threshold_distance": float(row[value_column] - threshold) if not pd.isna(row[value_column]) else None,
+                "threshold_distance": (
+                    float(row[value_column] - threshold) if not pd.isna(row[value_column]) else None
+                ),
             }
 
             if "standard_relation" in row and not pd.isna(row["standard_relation"]):
@@ -235,11 +239,11 @@ def _generate_conflict_details(
             conflict_detail["mutation"] = group_key[2]
 
         discrete_measurements = [
-            m for m in measurements
-            if m["pchembl_relation"] in ["=", "~"] and m["value"] is not None
+            m for m in measurements if m["pchembl_relation"] in ["=", "~"] and m["value"] is not None
         ]
         censored_measurements = [
-            m for m in measurements
+            m
+            for m in measurements
             if m["pchembl_relation"] in ["<", ">", "<=", ">=", "<<", ">>"] and m["value"] is not None
         ]
 
@@ -310,7 +314,9 @@ def _log_and_flag_conflicts(
     )
 
     truncated_df = _truncate_dataframe(conflict_display, limit=15)
-    logger.warning(f"Sample of conflicting measurements (showing up to 20 rows):\n{truncated_df.head(20).to_string(index=False)}")
+    logger.warning(
+        f"Sample of conflicting measurements (showing up to 20 rows):\n{truncated_df.head(20).to_string(index=False)}"
+    )
 
     df = add_comment(
         df=df,
@@ -394,7 +400,7 @@ def binarize_aggregated_data(
         conflict_report_path: Optional path to save detailed conflict report as JSON
 
     Returns:
-        DataFrame with binary activity labels, pchembl_value_relation column, and conflict flags
+        DataFrame with binary activity labels, pchembl_relation column, and conflict flags
     """
     required_cols = [compound_id_col, target_id_col, value_column]
     missing_cols = [col for col in required_cols if col not in df.columns]
@@ -407,7 +413,7 @@ def binarize_aggregated_data(
         logger.warning(f"Column '{relation_col}' not found. Assuming all measurements have '=' relation.")
         df[relation_col] = "="
 
-    pchembl_relation_col = "pchembl_value_relation"
+    pchembl_relation_col = "pchembl_relation"
     df[pchembl_relation_col] = df[relation_col].apply(invert_relation_for_pchembl)
 
     groupby_cols = [compound_id_col, target_id_col]
@@ -442,13 +448,25 @@ def binarize_aggregated_data(
             )
 
     df = _log_and_flag_conflicts(
-        df, conflict_indices, compound_id_col, target_id_col, pchembl_relation_col, value_column, output_binary_col
+        df,
+        conflict_indices,
+        compound_id_col,
+        target_id_col,
+        pchembl_relation_col,
+        value_column,
+        output_binary_col,
     )
 
     if conflict_report_path and conflict_indices:
         conflict_details = _generate_conflict_details(
-            df, conflict_indices, compound_id_col, target_id_col, pchembl_relation_col,
-            value_column, output_binary_col, threshold
+            df,
+            conflict_indices,
+            compound_id_col,
+            target_id_col,
+            pchembl_relation_col,
+            value_column,
+            output_binary_col,
+            threshold,
         )
         save_conflict_report(conflict_details, conflict_report_path, threshold)
 
