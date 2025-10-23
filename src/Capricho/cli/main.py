@@ -13,12 +13,15 @@ from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
 from ..logger import logger, setup_logger
 
 if TYPE_CHECKING:
-    import numpy as np
-    from chembl_downloader import latest
+    import numpy as np  # noqa: F401
+    from chembl_downloader import latest  # noqa: F401
 
-    from ..chembl.api.downloader import check_and_download_chembl_db
-    from ..chembl.api.sql_explorer import explorer_main
-    from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
+    from ..chembl.api.downloader import check_and_download_chembl_db  # noqa: F401
+    from ..chembl.api.sql_explorer import explorer_main  # noqa: F401
+    from .chembl_data_pipeline import (  # noqa: F401
+        aggregate_data,
+        get_standardize_and_clean_workflow,
+    )
 
 DEFAULTS = {
     "molecule_ids": [],
