@@ -290,8 +290,7 @@ def get_standardize_and_clean_workflow(
         # standardize the smiles & clean possible solvents & salts from the string
         .pipe(flag_missing_canonical_smiles)
         .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
-        .pipe(flag_missing_standard_smiles)
-        # .dropna(subset=["standard_smiles"])  # drop if no structure is found
+        .dropna(subset=["standard_smiles"])  # drop if no structure is found
         .pipe(flag_salt_or_solvent_removal)
         .assign(final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures))
         .drop(columns="standard_smiles")
