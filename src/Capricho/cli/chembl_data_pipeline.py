@@ -4,6 +4,7 @@ from typing import Literal, Optional, Union
 
 import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
+from job_tqdflex import ParallelApplier
 
 from ..chembl.data_flag_functions import (
     flag_censored_activity_comment,
@@ -323,11 +324,20 @@ def get_standardize_and_clean_workflow(
 
     # Search for undefined stereocenters within the remaining data
     if drop_unassigned_chiral:  # here we have the problem with the "." SMILES
-        df = df.assign(
-            undefined_stereocenters=lambda x: x["standard_smiles"]
-            .apply(find_undefined_stereocenters)
-            .apply(len)
-        ).pipe(flag_undefined_stereochemistry)
+        # Use parallel processing for finding undefined stereocenters
+        logger.debug(f"Finding undefined stereocenters in {len(df)} SMILES strings using parallel processing")
+        applier = ParallelApplier(
+            find_undefined_stereocenters,
+            df["standard_smiles"].tolist(),
+            n_jobs=4,  # Use 4 cores by default
+            backend="loky",
+            custom_desc="Finding undefined stereocenters",
+            logger=logger,
+        )
+        undefined_stereo_lists = applier()
+        undefined_stereo_counts = [len(x) for x in undefined_stereo_lists]
+
+        df = df.assign(undefined_stereocenters=undefined_stereo_counts).pipe(flag_undefined_stereochemistry)
         logger.trace(f'Unassigned stereocenters: {df["undefined_stereocenters"].unique().tolist()}')
         undefined_stereo_mask = df["undefined_stereocenters"] > 0
         if undefined_stereo_mask.any():

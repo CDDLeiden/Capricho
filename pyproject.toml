@@ -34,6 +34,7 @@ dependencies = [
   "rdkit >= 2022.09.1",
   "pyarrow",
   "typer",
+  "job-tqdflex",
   ]
 
 [project.optional-dependencies]
