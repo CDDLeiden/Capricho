@@ -15,6 +15,7 @@ from ..chembl.data_flag_functions import (
     flag_missing_canonical_smiles,
     flag_missing_document_date,
     flag_missing_standard_smiles,
+    flag_patent_source,
     flag_salt_or_solvent_removal,
     flag_strict_mutant_assays,
     flag_to_remove_mixture_compounds,
@@ -222,6 +223,9 @@ def get_standardize_and_clean_workflow(
     # Correct censored activity comments (inactive/inconclusive) with incorrect standard_relation='='
     full_df = flag_censored_activity_comment(full_df)
 
+    # Flag activities from patent sources for transparency
+    full_df = flag_patent_source(full_df)
+
     # Filter out activities with standard_relation not in the user-selected values
     # This is important because flag_censored_activity_comment may change '=' to '<'
     if "standard_relation" in full_df.columns and standard_relation is not None:
@@ -284,7 +288,7 @@ def get_standardize_and_clean_workflow(
         logger.info(f"Dropping rows with missing canonical smiles:\n{_info}")
         full_df = full_df.drop(index=_info.index).reset_index(drop=True)
 
-    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False, isomeric=chirality)
+    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False, isomeric=chirality, progress=True)
     df = (
         full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string
@@ -330,8 +334,9 @@ def get_standardize_and_clean_workflow(
             df["standard_smiles"].tolist(),
             n_jobs=4,  # Use 4 cores by default
             backend="loky",
-            custom_desc="Finding undefined stereocenters",
+            custom_desc="Find undefined stereocenters (in parallel, chunks of 50)",
             logger=logger,
+            chunk_size=50,
         )
         undefined_stereo_lists = applier()
         undefined_stereo_counts = [len(x) for x in undefined_stereo_lists]

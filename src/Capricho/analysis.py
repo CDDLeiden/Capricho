@@ -34,6 +34,7 @@ class DroppingComment(str, Enum):
     ASSAY_SIZE_TOO_LARGE = "Assay size >"  # Example: "Assay size > 100"
     ASSAY_SIZE_TOO_SMALL = "Assay size <"  # Example: "Assay size < 20"
     UNIT_ANNOTATION_ERROR = "Unit Annotation Error"
+    PATENT_SOURCE = "Patent source"
 
 
 def normalize_comment_pattern(comment: str) -> str:
@@ -87,6 +88,7 @@ def get_all_comments() -> list[str]:
         DroppingComment.ASSAY_SIZE_TOO_LARGE.value,
         DroppingComment.ASSAY_SIZE_TOO_SMALL.value,
         DroppingComment.UNIT_ANNOTATION_ERROR.value,
+        DroppingComment.PATENT_SOURCE.value,
         ProcessingComment.SALT_SOLVENT_REMOVED.value,
         ProcessingComment.CALCULATED_PCHEMBL.value,
         ProcessingComment.PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS.value,
@@ -156,6 +158,7 @@ def explode_assay_comparability(subset: pd.DataFrame, sep_str: str = "|") -> pd.
         "data_processing_comment",
         "data_dropping_comment",
         "standard_type",
+        "canonical_smiles",
     ]
 
     exploded_subset = subset[
@@ -339,6 +342,14 @@ def build_query_string(comment: str) -> str:
             "~dropping_comment.str.contains('Data Validity Comment Present', regex=False)"
         )
 
+    # Special handling for patent sources (exclude data validity issues)
+    if comment == DroppingComment.PATENT_SOURCE.value:
+        return (
+            "((data_dropping_comment_x.str.contains('Patent source', regex=False) | "
+            "data_dropping_comment_y.str.contains('Patent source', regex=False)) & "
+            "~dropping_comment.str.contains('Data Validity Comment Present', regex=False))"
+        )
+
     # For Data Validity Comment, allow any processing comment
     if comment == DroppingComment.DATA_VALIDITY_COMMENT.value:
         return f"dropping_comment.str.contains('{comment}', regex=False)"
@@ -370,13 +381,28 @@ def plot_multi_panel_comparability(
     Returns:
         Tuple of (figure, axes array).
     """
-    nrows = int(np.ceil(len(comments) / ncols))
+    comments_with_data = []  # only display the comments that have data
+    for comment in comments:
+        query_str = build_query_string(comment)
+        subset = exploded_subset.query(query_str)
+        if len(subset) > 0:
+            comments_with_data.append(comment)
+
+    if len(comments_with_data) == 0:  # No data to plot
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        ax.text(0.5, 0.5, "No data available for any flags", ha="center", va="center")
+        ax.axis("off")
+        return fig, np.array([ax])
+
+    nrows = int(np.ceil(len(comments_with_data) / ncols))
     colors = [tuple([*col] + [1]) for col in colormaps["tab10"].colors]
 
     fig, axs = plt.subplots(nrows, ncols, figsize=figsize)
     axs_flat = axs.flatten()
 
-    for idx, color, obs, ax in zip(range(1, len(comments) + 1), colors, comments, axs_flat):
+    for idx, color, obs, ax in zip(
+        range(1, len(comments_with_data) + 1), colors, comments_with_data, axs_flat
+    ):
         query_str = build_query_string(obs)
         subset = exploded_subset.query(query_str)
 
@@ -384,22 +410,16 @@ def plot_multi_panel_comparability(
         title_str = obs
         if obs.startswith("Assay size"):
             # Find first occurrence with actual threshold from data
-            if len(subset) > 0:
-                for col in ["data_dropping_comment_x", "data_dropping_comment_y"]:
-                    if col in subset.columns:
-                        sample_comments = subset[col].dropna()
-                        if len(sample_comments) > 0:
-                            for comment in sample_comments.iloc[0].split("|"):
-                                if normalize_comment_pattern(comment) == obs:
-                                    title_str = comment
-                                    break
-                            if title_str != obs:
+            for col in ["data_dropping_comment_x", "data_dropping_comment_y"]:
+                if col in subset.columns:
+                    sample_comments = subset[col].dropna()
+                    if len(sample_comments) > 0:
+                        for comment in sample_comments.iloc[0].split("|"):
+                            if normalize_comment_pattern(comment) == obs:
+                                title_str = comment
                                 break
-
-        if len(subset) == 0:
-            ax.text(0.5, 0.5, "No data", ha="center", va="center", transform=ax.transAxes)
-            ax.set_title(f"{idx}. {title_str}")
-            continue
+                        if title_str != obs:
+                            break
 
         subset = subset.copy()
         subset["pchembl_value_x"] = subset["pchembl_value_x"].astype(float)
@@ -451,7 +471,7 @@ def plot_multi_panel_comparability(
         if idx > (nrows - 1) * ncols:
             ax.set_xlabel("Assay 1 pChEMBL value")
 
-        if idx == len(comments):
+        if idx == len(comments_with_data):
             handles, labels = ax.get_legend_handles_labels()
             ax.legend(
                 handles[1:],
@@ -464,7 +484,7 @@ def plot_multi_panel_comparability(
             )
 
     # Hide unused subplots
-    for ax in axs_flat[len(comments) :]:
+    for ax in axs_flat[len(comments_with_data) :]:
         ax.set_visible(False)
 
     fig.tight_layout()
