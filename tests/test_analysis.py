@@ -120,6 +120,7 @@ class TestExplodeAssayComparability(unittest.TestCase):
                 "data_processing_comment": ["||", "|"],
                 "data_dropping_comment": ["||", "|"],
                 "standard_type": ["IC50|IC50|IC50", "Ki|Ki"],
+                "canonical_smiles": ["CCCC|CCCC|CCCC", "CCCO|CCCO"],
             }
         )
 
@@ -135,6 +136,8 @@ class TestExplodeAssayComparability(unittest.TestCase):
         self.assertIn("assay_chembl_id_y", result.columns)
         self.assertIn("pchembl_value_x", result.columns)
         self.assertIn("pchembl_value_y", result.columns)
+        self.assertIn("canonical_smiles_x", result.columns)
+        self.assertIn("canonical_smiles_y", result.columns)
 
     def test_explode_filters_same_assay(self):
         """Test that comparisons of same assay are filtered out."""
@@ -149,6 +152,7 @@ class TestExplodeAssayComparability(unittest.TestCase):
                 "data_processing_comment": ["|"],
                 "data_dropping_comment": ["|"],
                 "standard_type": ["IC50|IC50"],
+                "canonical_smiles": ["CCCC|CCCC"],
             }
         )
 
@@ -173,6 +177,7 @@ class TestExplodeAssayComparability(unittest.TestCase):
                 "data_processing_comment": ["Calculated pChEMBL|Salt/solvent removed"],
                 "data_dropping_comment": ["Assay size < 20|"],
                 "standard_type": ["IC50|IC50"],
+                "canonical_smiles": ["CCCC|CCCC"],
             }
         )
 
@@ -200,6 +205,7 @@ class TestExplodeAssayComparability(unittest.TestCase):
                 "data_processing_comment": [],
                 "data_dropping_comment": [],
                 "standard_type": [],
+                "canonical_smiles": [],
             }
         )
 
@@ -223,6 +229,7 @@ class TestExplodeAssayComparability(unittest.TestCase):
                 "data_processing_comment": [";"],
                 "data_dropping_comment": [";"],
                 "standard_type": ["IC50;IC50"],
+                "canonical_smiles": ["CCCC;CCCC"],
             }
         )
 

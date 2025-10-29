@@ -9,6 +9,7 @@ from Capricho.chembl.data_flag_functions import (
     flag_incompatible_units,
     flag_inter_document_duplication,
     flag_missing_document_date,
+    flag_patent_source,
 )
 
 
@@ -492,6 +493,118 @@ class TestFlagIncompatibleUnits(unittest.TestCase):
 
         # Should return DataFrame unchanged
         self.assertEqual(len(result), 1)
+
+
+class TestFlagPatentSource(unittest.TestCase):
+    """Tests for flag_patent_source function."""
+
+    def test_flag_patent_sources(self):
+        """Test that activities from patent sources are flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3", "CHEMBL4"],
+                "doc_type": ["PATENT", "PATENT", "PUBLICATION", "PUBLICATION"],
+                "pchembl_value": [6.0, 6.5, 7.0, 7.5],
+                "data_dropping_comment": [None, None, None, None],
+            }
+        )
+
+        result = flag_patent_source(df)
+
+        # Check that rows with doc_type="PATENT" are flagged
+        self.assertTrue(
+            "Patent source" in str(result.loc[0, "data_dropping_comment"]),
+            "Row 0 should be flagged (doc_type=PATENT)",
+        )
+        self.assertTrue(
+            "Patent source" in str(result.loc[1, "data_dropping_comment"]),
+            "Row 1 should be flagged (doc_type=PATENT)",
+        )
+
+        # Check that rows with doc_type="PUBLICATION" are not flagged
+        self.assertFalse(
+            result.loc[2, "data_dropping_comment"]
+            and "Patent source" in str(result.loc[2, "data_dropping_comment"]),
+            "Row 2 should NOT be flagged (doc_type=PUBLICATION)",
+        )
+        self.assertFalse(
+            result.loc[3, "data_dropping_comment"]
+            and "Patent source" in str(result.loc[3, "data_dropping_comment"]),
+            "Row 3 should NOT be flagged (doc_type=PUBLICATION)",
+        )
+
+    def test_all_from_patents(self):
+        """Test that when all activities are from patents, all are flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "doc_type": ["PATENT", "PATENT", "PATENT"],
+                "pchembl_value": [6.0, 6.5, 7.0],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        result = flag_patent_source(df)
+
+        # All rows should be flagged
+        for idx in range(len(result)):
+            self.assertTrue(
+                "Patent source" in str(result.loc[idx, "data_dropping_comment"]),
+                f"Row {idx} should be flagged (doc_type=PATENT)",
+            )
+
+    def test_no_patent_sources(self):
+        """Test that when no activities are from patents, nothing is flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "doc_type": ["PUBLICATION", "PUBLICATION", "PUBLICATION"],
+                "pchembl_value": [6.0, 6.5, 7.0],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        result = flag_patent_source(df)
+
+        # No rows should be flagged
+        for idx in range(len(result)):
+            comment = result.loc[idx, "data_dropping_comment"]
+            self.assertFalse(
+                comment and "Patent source" in str(comment),
+                f"Row {idx} should NOT be flagged (doc_type=PUBLICATION)",
+            )
+
+    def test_missing_doc_type_column(self):
+        """Test that function handles missing doc_type column gracefully."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "pchembl_value": [6.0, 6.5],
+                "data_dropping_comment": [None, None],
+            }
+        )
+
+        # Should raise KeyError when doc_type column is missing
+        with self.assertRaises(KeyError):
+            flag_patent_source(df)
+
+    def test_preserves_existing_comments(self):
+        """Test that existing dropping comments are preserved when flagging."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "doc_type": ["PATENT", "PATENT"],
+                "pchembl_value": [6.0, 6.5],
+                "data_dropping_comment": ["Existing comment", None],
+            }
+        )
+
+        result = flag_patent_source(df)
+
+        # Check that existing comment is preserved and new flag is added
+        self.assertIn("Existing comment", result.loc[0, "data_dropping_comment"])
+        self.assertIn("Patent source", result.loc[0, "data_dropping_comment"])
+        self.assertIn("Patent source", result.loc[1, "data_dropping_comment"])
 
 
 if __name__ == "__main__":
