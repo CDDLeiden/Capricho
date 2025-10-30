@@ -4,8 +4,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from CompoundMapper.core import pandas_helper, smiles_utils, stats_make
-from CompoundMapper.core.pandas_helper import conflicting_duplicates
+from Capricho.core import pandas_helper, smiles_utils, stats_make
+from Capricho.core.pandas_helper import conflicting_duplicates
 
 
 class TestPandasHelper(unittest.TestCase):
@@ -115,6 +115,65 @@ class TestStatsMake(unittest.TestCase):
         series = pd.Series([np.array([1, 2]), np.array([1, 2]), np.array([3, 4])])
         result = stats_make.repeated_indices_from_array_series(series)
         self.assertEqual(result, [[0, 1]])
+
+    def test_process_repeat_mols_with_different_standard_relations(self):
+        """Test that compounds with different standard_relation values are not aggregated together"""
+        # Create test data with same compound (fingerprint) but different standard_relations
+        test_df = pd.DataFrame({
+            'standard_smiles': ['CCO', 'CCO', 'CCO'],
+            'pchembl_value': [6.5, 7.0, 8.0],
+            'target_chembl_id': ['CHEMBL123', 'CHEMBL123', 'CHEMBL123'],
+            'mutation': ['None', 'None', 'None'],
+            'standard_relation': ['=', '<', '='],  # Different relations
+            'molecule_chembl_id': ['MOL1', 'MOL1', 'MOL1'],
+            'assay_chembl_id': ['ASSAY1', 'ASSAY2', 'ASSAY3'],
+            'assay_description': ['Test assay 1', 'Test assay 2', 'Test assay 3'],
+            'activity_id': [1, 2, 3],
+            'standard_type': ['IC50', 'IC50', 'IC50'],
+            'assay_type': ['B', 'B', 'B'],
+            'confidence_score': [9, 9, 9],
+            'target_organism': ['Homo sapiens', 'Homo sapiens', 'Homo sapiens'],
+            'assay_tissue': ['None', 'None', 'None'],
+            'assay_cell_type': ['None', 'None', 'None'],
+            'relationship_type': ['D', 'D', 'D'],
+            'max_phase': ['None', 'None', 'None'],
+            'oral': ['None', 'None', 'None'],
+            'prodrug': ['None', 'None', 'None'],
+            'withdrawn_flag': ['None', 'None', 'None'],
+            'document_chembl_id': ['DOC1', 'DOC2', 'DOC3'],
+            'canonical_smiles': ['CCO', 'CCO', 'CCO'],
+        })
+
+        # All rows have same fingerprint, should be identified as repeats
+        repeat_idxs = [[0, 1, 2]]
+
+        # Process the repeats
+        result_df = stats_make.process_repeat_mols(
+            test_df,
+            repeat_idxs,
+            solve_strat='keep',
+            extra_id_cols=[],
+            aggregate_mutants=False,
+            chirality=False
+        )
+
+        # Check that we have 2 separate rows (not 1) because standard_relation differs
+        # Rows 0 and 2 have '=' so should aggregate together
+        # Row 1 has '<' so should remain separate
+        equal_rows = result_df[result_df['standard_relation'] == '=']
+        less_than_rows = result_df[result_df['standard_relation'] == '<']
+
+        self.assertEqual(len(equal_rows), 1, "Should have 1 row with standard_relation='='")
+        self.assertEqual(len(less_than_rows), 1, "Should have 1 row with standard_relation='<'")
+
+        # The '=' row should have aggregated pchembl values from rows 0 and 2
+        equal_row = equal_rows.iloc[0]
+        self.assertEqual(equal_row['pchembl_value_counts'], 2)
+        self.assertAlmostEqual(equal_row['pchembl_value_mean'], (6.5 + 8.0) / 2)
+
+        # The '<' row should have a single pchembl value from row 1
+        less_than_row = less_than_rows.iloc[0]
+        self.assertEqual(less_than_row['pchembl_value'], '7.00')  # format_value converts to string
 
 
 if __name__ == "__main__":

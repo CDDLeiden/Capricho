@@ -3,15 +3,15 @@ from io import StringIO
 
 import pandas as pd
 
-from CompoundMapper.chembl.data_flag_functions import flag_insufficient_assay_overlap
-from CompoundMapper.core.default_fields import (
+from Capricho.chembl.data_flag_functions import flag_insufficient_assay_overlap
+from Capricho.core.default_fields import (
     ACTIVITY_ID,
     ASSAY_ID,
     DATA_DROPPING_COMMENT,
     MOLECULE_ID,
     TARGET_ID,
 )
-from CompoundMapper.logger import logger
+from Capricho.logger import logger
 
 
 class TestFlagInsufficientAssayOverlap(unittest.TestCase):

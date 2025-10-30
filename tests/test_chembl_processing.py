@@ -2,7 +2,7 @@ import unittest
 
 import pandas as pd
 
-from CompoundMapper.chembl import processing
+from Capricho.chembl import processing
 
 
 class TestChemblProcessing(unittest.TestCase):

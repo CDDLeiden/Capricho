@@ -4,8 +4,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import redirect_stderr
 from io import StringIO
 
-from CompoundMapper.core.rate_limit import rate_limit
-from CompoundMapper.logger import setup_logger
+from Capricho.core.rate_limit import rate_limit
+from Capricho.logger import setup_logger
 
 
 class TestRateLimitDecorator(unittest.TestCase):
@@ -34,7 +34,7 @@ class TestRateLimitDecorator(unittest.TestCase):
         execution_times = []
         for line in log_output.split("\n"):
             if "starting execution at" in line:
-                time_str = line.split("starting execution at")[1].split(".")[0]
+                time_str = line.split("starting execution at")[1].strip()
                 execution_times.append(float(time_str))
 
         self.assertGreaterEqual(len(execution_times), num_calls, "Not enough execution start times logged")

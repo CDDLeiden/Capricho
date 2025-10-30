@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from CompoundMapper.core import fp_utils
+from Capricho.core import fp_utils
 
 
 class TestFPUtils(unittest.TestCase):

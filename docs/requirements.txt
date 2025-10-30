@@ -1,0 +1,5 @@
+sphinx>=7.0,<8.0
+sphinx-rtd-theme>=2.0
+sphinx-click>=6.0
+myst-parser>=3.0,<4.0
+docutils>=0.18,<0.22
