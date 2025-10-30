@@ -305,13 +305,13 @@ def build_query_string(comment: str) -> str:
     Returns:
         Query string suitable for pd.DataFrame.query().
     """
-    # Special handling for document duplication (needs to be in both assays)
+    # Since this data duplication is a flagged introduced by capricho, we'll just show the
+    # data points that have x == y for this flag
     if comment == ProcessingComment.PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS.value:
         return (
             "(data_processing_comment_x.str.contains('pChEMBL Duplication Across Documents', regex=False) & "
-            "data_processing_comment_y.str.contains('pChEMBL Duplication Across Documents', regex=False)) | "
-            "(data_processing_comment_y.str.contains('pChEMBL Duplication Across Documents', regex=False) & "
-            "data_processing_comment_x.str.contains('pChEMBL Duplication Across Documents', regex=False))"
+            "data_processing_comment_y.str.contains('pChEMBL Duplication Across Documents', regex=False) & "
+            "pchembl_value_x == pchembl_value_y)"
         )
 
     # Special handling for calculated pChEMBL (uses combined processing_comment column)
