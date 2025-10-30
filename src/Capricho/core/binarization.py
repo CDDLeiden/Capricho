@@ -11,6 +11,85 @@ from ..core.pandas_helper import add_comment
 from ..logger import logger
 
 
+def _calculate_mcc(tp: int, tn: int, fp: int, fn: int) -> float:
+    """Calculate Matthews Correlation Coefficient from confusion matrix values.
+
+    MCC = (TP*TN - FP*FN) / sqrt((TP+FP)(TP+FN)(TN+FP)(TN+FN))
+
+    Args:
+        tp: True positives
+        tn: True negatives
+        fp: False positives
+        fn: False negatives
+
+    Returns:
+        MCC value between -1.0 and 1.0, or 0.0 if denominator is zero
+    """
+    numerator = (tp * tn) - (fp * fn)
+    denominator_parts = (tp + fp) * (tp + fn) * (tn + fp) * (tn + fn)
+
+    if denominator_parts == 0:
+        return 0.0
+
+    import math
+
+    denominator = math.sqrt(denominator_parts)
+
+    return numerator / denominator
+
+
+def _calculate_assay_compatibility_mcc(
+    df: pd.DataFrame,
+    compound_id_col: str,
+    target_id_col: str,
+    output_binary_col: str,
+) -> float:
+    """Calculate MCC measuring agreement between measurements for same compound-target pairs.
+
+    Uses pairwise comparisons: for each compound-target pair with multiple measurements,
+    compares all pairs of binary labels to build confusion matrix, then calculates MCC.
+
+    Args:
+        df: DataFrame with binarized data
+        compound_id_col: Column name for compound IDs
+        target_id_col: Column name for target IDs
+        output_binary_col: Column name with binary labels
+
+    Returns:
+        MCC value between -1.0 and 1.0
+    """
+    groupby_cols = [compound_id_col, target_id_col]
+    if "mutation" in df.columns:
+        groupby_cols.append("mutation")
+
+    tp = tn = fp = fn = 0
+
+    for _, group_df in df.groupby(groupby_cols):
+        binary_labels = group_df[output_binary_col].dropna().tolist()
+
+        # Skip if less than 2 measurements
+        if len(binary_labels) < 2:
+            continue
+
+        # Pairwise comparisons within this group
+        for i in range(len(binary_labels)):
+            for j in range(i + 1, len(binary_labels)):
+                label_i = binary_labels[i]
+                label_j = binary_labels[j]
+
+                # Treat label_i as "truth" and label_j as "prediction"
+                if label_i == 1 and label_j == 1:
+                    tp += 1
+                elif label_i == 0 and label_j == 0:
+                    tn += 1
+                elif label_i == 0 and label_j == 1:
+                    fp += 1
+                elif label_i == 1 and label_j == 0:
+                    fn += 1
+
+    return _calculate_mcc(tp, tn, fp, fn)
+
+
 def _truncate_dataframe(df: pd.DataFrame, limit: int = 15) -> pd.DataFrame:
     """Truncate DataFrame values to a specified length for display purposes.
 
@@ -56,36 +135,6 @@ def invert_relation_for_pchembl(relation: str) -> str:
     return inversion_map[relation]
 
 
-def _check_measurement_agreement(
-    discrete_value: float,
-    censored_value: float,
-    censored_pchembl_relation: str,
-) -> bool:
-    """Check if discrete and censored measurements agree for the same compound-target pair.
-
-    Args:
-        discrete_value: pchembl_value from "=" or "~" measurement
-        censored_value: pchembl_value from censored measurement
-        censored_pchembl_relation: The censored relation already converted to pchembl space
-            (">", "<", ">>", "<<", ">=", "<=")
-
-    Returns:
-        True if measurements agree, False otherwise
-    """
-    # Check if censored measurement is consistent with discrete measurement
-    if censored_pchembl_relation in [">", ">>"]:
-        # Censored says "pchembl > censored_value" (active)
-        # Discrete should have pchembl >= censored_value
-        return discrete_value >= censored_value
-    elif censored_pchembl_relation in ["<", "<<"]:
-        # Censored says "pchembl < censored_value" (inactive)
-        # Discrete should have pchembl <= censored_value
-        return discrete_value <= censored_value
-    else:
-        # Should not reach here for censored relations
-        return True
-
-
 def _classify_by_relation(value: float, relation: str, threshold: float) -> int:
     """Classify a single measurement as active (1) or inactive (0) based on relation type.
 
@@ -116,48 +165,20 @@ def _classify_by_relation(value: float, relation: str, threshold: float) -> int:
 
 def _detect_conflicts(
     group_df: pd.DataFrame,
-    value_column: str,
-    pchembl_relation_col: str,
     output_binary_col: str,
 ) -> tuple[bool, str]:
-    """Detect conflicts within a compound-target group.
+    """Detect conflicts within a compound-target group based on binarization outcomes.
+
+    A conflict occurs when multiple measurements for the same compound-target pair
+    result in different binary labels (active vs inactive).
 
     Args:
         group_df: DataFrame subset for one compound-target pair
-        value_column: Column name with pchembl values
-        pchembl_relation_col: Column name with pchembl_relation
         output_binary_col: Column name with binary labels
 
     Returns:
-        Tuple of (has_conflict, conflict_type) where conflict_type is one of:
-        "discrete_censored_disagreement", "binary_label_mismatch", or ""
+        Tuple of (has_conflict, conflict_type) where conflict_type is "binary_label_mismatch" or ""
     """
-    relations_in_group = group_df[pchembl_relation_col].unique()
-    has_discrete = "=" in relations_in_group or "~" in relations_in_group
-    has_censored = any(rel in ["<", ">", "<=", ">=", ">>", "<<"] for rel in relations_in_group)
-
-    if has_discrete and has_censored:
-        discrete_rows = group_df[group_df[pchembl_relation_col].isin(["=", "~"])]
-        censored_rows = group_df[group_df[pchembl_relation_col].isin(["<", ">", "<=", ">=", ">>", "<<"])]
-
-        agreements = []
-        for _, discrete_row in discrete_rows.iterrows():
-            discrete_val = discrete_row[value_column]
-            if pd.isna(discrete_val):
-                continue
-
-            for _, censored_row in censored_rows.iterrows():
-                censored_val = censored_row[value_column]
-                censored_pchembl_rel = censored_row[pchembl_relation_col]
-                if pd.isna(censored_val):
-                    continue
-
-                agrees = _check_measurement_agreement(discrete_val, censored_val, censored_pchembl_rel)
-                agreements.append(agrees)
-
-        if agreements and not all(agreements):
-            return True, "discrete_censored_disagreement"
-
     binary_labels = group_df[output_binary_col].dropna()
     if len(binary_labels) > 1 and len(binary_labels.unique()) > 1:
         return True, "binary_label_mismatch"
@@ -200,9 +221,7 @@ def _generate_conflict_details(
 
     conflict_details = []
     for group_key, group_df in conflict_subset.groupby(groupby_cols):
-        has_conflict, conflict_type = _detect_conflicts(
-            group_df, value_column, pchembl_relation_col, output_binary_col
-        )
+        has_conflict, conflict_type = _detect_conflicts(group_df, output_binary_col)
 
         if not has_conflict:
             continue
@@ -213,9 +232,6 @@ def _generate_conflict_details(
                 "value": float(row[value_column]) if not pd.isna(row[value_column]) else None,
                 "pchembl_relation": row[pchembl_relation_col],
                 "binary": int(row[output_binary_col]) if not pd.isna(row[output_binary_col]) else None,
-                "threshold_distance": (
-                    float(row[value_column] - threshold) if not pd.isna(row[value_column]) else None
-                ),
             }
 
             if "standard_relation" in row and not pd.isna(row["standard_relation"]):
@@ -238,31 +254,31 @@ def _generate_conflict_details(
         if len(groupby_cols) > 2:
             conflict_detail["mutation"] = group_key[2]
 
-        discrete_measurements = [
-            m for m in measurements if m["pchembl_relation"] in ["=", "~"] and m["value"] is not None
-        ]
-        censored_measurements = [
-            m
-            for m in measurements
-            if m["pchembl_relation"] in ["<", ">", "<=", ">=", "<<", ">>"] and m["value"] is not None
-        ]
+        # Group measurements by binary outcome
+        active_measurements = [m for m in measurements if m["binary"] == 1]
+        inactive_measurements = [m for m in measurements if m["binary"] == 0]
 
-        if discrete_measurements and censored_measurements:
-            discrete_parts = [f"{m['pchembl_relation']} {m['value']:.2f}" for m in discrete_measurements]
-            censored_parts = [f"{m['pchembl_relation']} {m['value']:.2f}" for m in censored_measurements]
+        # Create vote summary
+        vote_summary = {
+            "active_votes": len(active_measurements),
+            "inactive_votes": len(inactive_measurements),
+        }
+        conflict_detail["vote_summary"] = vote_summary
 
-            discrete_str = ", ".join(discrete_parts)
-            censored_str = ", ".join(censored_parts)
+        # Build explanation with vote counts and measurement details
+        explanation_parts = []
 
-            conflict_detail["explanation"] = (
-                f"Discrete measurement(s) ({discrete_str}) vs censored ({censored_str}). "
-                f"Threshold: {threshold}"
+        if active_measurements:
+            active_strs = [f"{m['pchembl_relation']}{m['value']:.2f}" for m in active_measurements]
+            explanation_parts.append(f"Active ({len(active_measurements)} votes): {', '.join(active_strs)}")
+
+        if inactive_measurements:
+            inactive_strs = [f"{m['pchembl_relation']}{m['value']:.2f}" for m in inactive_measurements]
+            explanation_parts.append(
+                f"Inactive ({len(inactive_measurements)} votes): {', '.join(inactive_strs)}"
             )
-        else:
-            binary_labels = [m["binary"] for m in measurements if m["binary"] is not None]
-            conflict_detail["explanation"] = (
-                f"Multiple measurements with different binary labels: {set(binary_labels)}"
-            )
+
+        conflict_detail["explanation"] = " | ".join(explanation_parts) + f" | Threshold: {threshold}"
 
         conflict_details.append(conflict_detail)
 
@@ -344,12 +360,6 @@ def save_conflict_report(
     report = {
         "summary": {
             "total_conflicts": len(conflict_details),
-            "discrete_censored_disagreements": sum(
-                1 for c in conflict_details if c["conflict_type"] == "discrete_censored_disagreement"
-            ),
-            "binary_label_mismatches": sum(
-                1 for c in conflict_details if c["conflict_type"] == "binary_label_mismatch"
-            ),
             "threshold": threshold,
         },
         "conflicts": conflict_details,
@@ -436,9 +446,7 @@ def binarize_aggregated_data(
             logger.warning(f"{e} at index {idx}. Skipping binarization.")
 
     for group_key, group_df in df.groupby(groupby_cols):
-        has_conflict, conflict_type = _detect_conflicts(
-            group_df, value_column, pchembl_relation_col, output_binary_col
-        )
+        has_conflict, conflict_type = _detect_conflicts(group_df, output_binary_col)
 
         if has_conflict:
             conflict_indices.extend(group_df.index.tolist())
@@ -472,11 +480,43 @@ def binarize_aggregated_data(
 
     df[output_binary_col] = df[output_binary_col].astype("Int64")
 
+    # Calculate summary statistics
+    n_active = (df[output_binary_col] == 1).sum()
+    n_inactive = (df[output_binary_col] == 0).sum()
+    n_missing = df[output_binary_col].isna().sum()
+    n_total = len(df)
+
+    # Calculate conflict statistics
+    n_conflicting_measurements = len(conflict_indices)
+
+    # Count unique compound-target pairs with conflicts
+    if conflict_indices:
+        conflict_subset = df.loc[conflict_indices]
+        conflict_groupby_cols = [compound_id_col, target_id_col]
+        if not compare_across_mutants and "mutation" in conflict_subset.columns:
+            conflict_groupby_cols.append("mutation")
+        n_conflicting_pairs = conflict_subset.groupby(conflict_groupby_cols).ngroups
+    else:
+        n_conflicting_pairs = 0
+
+    # Calculate MCC for assay compatibility (only for pairs with multiple measurements)
+    mcc = _calculate_assay_compatibility_mcc(df, compound_id_col, target_id_col, output_binary_col)
+
+    # Log comprehensive summary
     logger.info(
-        f"Binarization complete. Threshold: {threshold}. "
-        f"Active (1): {(df[output_binary_col] == 1).sum()}, "
-        f"Inactive (0): {(df[output_binary_col] == 0).sum()}, "
-        f"Missing: {df[output_binary_col].isna().sum()}"
+        f"BINARIZATION SUMMARY\n"
+        f"Threshold: {threshold}\n"
+        f"\nBinary labels:\n"
+        f"  Active (1):   {n_active:>6} ({n_active/n_total*100:>5.1f}%)\n"
+        f"  Inactive (0): {n_inactive:>6} ({n_inactive/n_total*100:>5.1f}%)\n"
+        f"  Missing:      {n_missing:>6} ({n_missing/n_total*100:>5.1f}%)\n"
+        f"\nConflict analysis:\n"
+        f"  Measurements with conflicts:      {n_conflicting_measurements:>6}\n"
+        f"  Compound-target pairs affected:   {n_conflicting_pairs:>6}\n"
+        f"  Datapoints lost if conflicts removed: {n_conflicting_measurements:>6} "
+        f"({n_conflicting_measurements/n_total*100:>5.1f}%)\n"
+        f"\nAssay compatibility:\n"
+        f"  MCC (agreement between measurements): {mcc:>6.3f}\n"
     )
 
     return df

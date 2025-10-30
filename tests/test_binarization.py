@@ -4,8 +4,7 @@ import numpy as np
 import pandas as pd
 
 from Capricho.core.binarization import (
-    _check_measurement_agreement,
-    _invert_relation_for_pchembl,
+    invert_relation_for_pchembl,
     binarize_aggregated_data,
 )
 from Capricho.core.default_fields import DATA_DROPPING_COMMENT
@@ -13,78 +12,32 @@ from Capricho.core.default_fields import DATA_DROPPING_COMMENT
 
 class TestInvertRelationForPchembl(unittest.TestCase):
     def test_invert_less_than(self):
-        self.assertEqual(_invert_relation_for_pchembl("<"), ">")
+        self.assertEqual(invert_relation_for_pchembl("<"), ">")
 
     def test_invert_greater_than(self):
-        self.assertEqual(_invert_relation_for_pchembl(">"), "<")
+        self.assertEqual(invert_relation_for_pchembl(">"), "<")
 
     def test_invert_equals(self):
-        self.assertEqual(_invert_relation_for_pchembl("="), "=")
+        self.assertEqual(invert_relation_for_pchembl("="), "=")
 
     def test_invert_less_than_equals(self):
-        self.assertEqual(_invert_relation_for_pchembl("<="), ">=")
+        self.assertEqual(invert_relation_for_pchembl("<="), ">=")
 
     def test_invert_greater_than_equals(self):
-        self.assertEqual(_invert_relation_for_pchembl(">="), "<=")
+        self.assertEqual(invert_relation_for_pchembl(">="), "<=")
 
     def test_invalid_relation(self):
         with self.assertRaises(ValueError):
-            _invert_relation_for_pchembl("invalid")
+            invert_relation_for_pchembl("invalid")
 
     def test_invert_approximately_equal(self):
-        self.assertEqual(_invert_relation_for_pchembl("~"), "~")
+        self.assertEqual(invert_relation_for_pchembl("~"), "~")
 
     def test_invert_much_greater_than(self):
-        self.assertEqual(_invert_relation_for_pchembl(">>"), "<<")
+        self.assertEqual(invert_relation_for_pchembl(">>"), "<<")
 
     def test_invert_much_less_than(self):
-        self.assertEqual(_invert_relation_for_pchembl("<<"), ">>")
-
-
-class TestCheckMeasurementAgreement(unittest.TestCase):
-    def test_agreement_censored_active(self):
-        # Censored "<" (active) at pchembl 5.0
-        # Discrete "=" at pchembl 6.0 (more active than censored)
-        # Should agree: discrete >= censored
-        result = _check_measurement_agreement(
-            discrete_value=6.0,
-            censored_value=5.0,
-            censored_relation="<",
-        )
-        self.assertTrue(result)
-
-    def test_disagreement_censored_active(self):
-        # Censored "<" (active) at pchembl 7.0
-        # Discrete "=" at pchembl 5.0 (less active than censored)
-        # Should disagree: discrete < censored
-        result = _check_measurement_agreement(
-            discrete_value=5.0,
-            censored_value=7.0,
-            censored_relation="<",
-        )
-        self.assertFalse(result)
-
-    def test_agreement_censored_inactive(self):
-        # Censored ">" (inactive) at pchembl 7.0
-        # Discrete "=" at pchembl 5.0 (less active than censored)
-        # Should agree: discrete <= censored
-        result = _check_measurement_agreement(
-            discrete_value=5.0,
-            censored_value=7.0,
-            censored_relation=">",
-        )
-        self.assertTrue(result)
-
-    def test_disagreement_censored_inactive(self):
-        # Censored ">" (inactive) at pchembl 5.0
-        # Discrete "=" at pchembl 7.0 (more active than censored)
-        # Should disagree: discrete > censored
-        result = _check_measurement_agreement(
-            discrete_value=7.0,
-            censored_value=5.0,
-            censored_relation=">",
-        )
-        self.assertFalse(result)
+        self.assertEqual(invert_relation_for_pchembl("<<"), ">>")
 
 
 class TestBinarizeAggregatedData(unittest.TestCase):
