@@ -187,7 +187,7 @@ def process_repeat_mols(
     updated_df = updated_df.drop(columns=todrop_cols).rename(columns=rename_cols)
     todrop_processed = updated_df["repeat_mapping"].isin(high_diff_repeats).index
     smiles_canonizer = ChemStandardizer(
-        method="canon", from_smi=True, n_jobs=4, progress=True, isomeric=chirality
+        method="canon", from_smi=True, n_jobs=8, progress=True, isomeric=chirality, chunk_size=None
     )
     if solve_strat == "drop":
         updated_df = updated_df.drop(index=todrop_processed)
@@ -224,8 +224,12 @@ def process_repeat_mols(
     logger.info(f"Final number of points: {len(df)}")
     # Also add the single-read points to the mean / median / counts values
     with pd.option_context("future.no_silent_downcasting", True):
-        df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"]).infer_objects(copy=False)
-        df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"]).infer_objects(copy=False)
+        df["pchembl_value_median"] = (
+            df["pchembl_value_median"].fillna(df["pchembl_value"]).infer_objects(copy=False)
+        )
+        df["pchembl_value_mean"] = (
+            df["pchembl_value_mean"].fillna(df["pchembl_value"]).infer_objects(copy=False)
+        )
         df["pchembl_value_counts"] = df["pchembl_value_counts"].fillna(1).infer_objects(copy=False)
-    df["pchembl_value"] = df["pchembl_value"].apply(format_value) # convert to str for consistency
+    df["pchembl_value"] = df["pchembl_value"].apply(format_value)  # convert to str for consistency
     return df

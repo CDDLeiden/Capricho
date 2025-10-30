@@ -288,7 +288,9 @@ def get_standardize_and_clean_workflow(
         logger.info(f"Dropping rows with missing canonical smiles:\n{_info}")
         full_df = full_df.drop(index=_info.index).reset_index(drop=True)
 
-    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False, isomeric=chirality, progress=True)
+    stdzer = ChemStandardizer(
+        from_smi=True, n_jobs=8, verbose=False, isomeric=chirality, progress=True, chunk_size=1000
+    )
     df = (
         full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string
@@ -332,11 +334,11 @@ def get_standardize_and_clean_workflow(
         applier = ParallelApplier(
             find_undefined_stereocenters,
             df["standard_smiles"].tolist(),
-            n_jobs=4,  # Use 4 cores by default
+            n_jobs=8,  # Use 8 cores by default
             backend="loky",
-            custom_desc="Find undefined stereocenters (in parallel, chunks of 50)",
+            custom_desc="Find undefined stereocenters",
             logger=logger,
-            chunk_size=50,
+            chunk_size=200,
         )
         undefined_stereo_lists = applier()
         undefined_stereo_counts = [len(x) for x in undefined_stereo_lists]
@@ -451,11 +453,13 @@ def aggregate_data(
         current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
         logger.info(f"ID columns for aggregation: {current_extra_id_cols}")
 
-    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+    connectivity_writer = InchiHandling(
+        convert_to="connectivity", n_jobs=4, progress=True, from_smi=True, chunk_size=None
+    )
 
     if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
-            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+            df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}, chunk_size=50
         )
         df = df.assign(id_array=fps)
     elif compound_equality == "connectivity":
@@ -580,7 +584,7 @@ def re_aggregate_data(
 
     if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(
-            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+            df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}
         )
         id_array = pd.Series(fps, index=df.index)
     elif compound_equality == "connectivity":
@@ -637,7 +641,9 @@ def re_aggregate_data(
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
     )
-    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+    connectivity_writer = InchiHandling(
+        convert_to="connectivity", n_jobs=8, progress=True, from_smi=True, chunk_size=50
+    )
     final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
     # Reorder columns as in the original aggregate_data function

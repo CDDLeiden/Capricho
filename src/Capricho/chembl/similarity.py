@@ -62,7 +62,7 @@ def get_and_curate_chembl_compounds(
         )
         return pd.DataFrame()
 
-    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False)
+    stdzer = ChemStandardizer(from_smi=True, n_jobs=1, verbose=False, isomeric=chirality, progress=True)
     df = (
         similar_compounds.assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
         .dropna(subset=["standard_smiles"])  # drop if no structure is found

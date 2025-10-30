@@ -53,8 +53,7 @@ def get_and_curate_multiple_compounds_result(
         df: DataFrame with curated results
     """
     pubchempy_results = get_multiple_compounds(cpd_list, input_type, n_jobs=n_threads)
-
-    stdzer = ChemStandardizer(from_smi=True, n_jobs=n_jobs, verbose=False)
+    stdzer = ChemStandardizer(from_smi=True, n_jobs=n_jobs, verbose=False, isomeric=chirality, progress=True)
     curated = []
 
     for inp, res in zip(cpd_list, pubchempy_results):
