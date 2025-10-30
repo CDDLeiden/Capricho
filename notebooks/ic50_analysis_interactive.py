@@ -20,6 +20,7 @@ def _():
         get_all_comments,
         plot_multi_panel_comparability,
     )
+
     return (
         AllChem,
         Chem,
@@ -52,6 +53,7 @@ def _(AllChem, Chem, mo, pd, rdMolDraw2D):
 
         svg = drawer.GetDrawingText()
         return mo.Html(svg)
+
     return (smiles_to_svg_html,)
 
 
