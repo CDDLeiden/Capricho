@@ -4,6 +4,7 @@ from typing import Literal, Optional, Union
 
 import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
+from job_tqdflex import ParallelApplier
 
 from ..chembl.data_flag_functions import (
     flag_censored_activity_comment,
@@ -12,7 +13,9 @@ from ..chembl.data_flag_functions import (
     flag_max_assay_size,
     flag_min_assay_size,
     flag_missing_canonical_smiles,
+    flag_missing_document_date,
     flag_missing_standard_smiles,
+    flag_patent_source,
     flag_salt_or_solvent_removal,
     flag_strict_mutant_assays,
     flag_to_remove_mixture_compounds,
@@ -186,8 +189,16 @@ def get_standardize_and_clean_workflow(
         for act in bioactivity_type:
             biotypes.extend([f"Log {act}", f"-Log {act}", act])
     else:
+        if standard_relation != ["="]:
+            logger.error(
+                "pchembl_values are only calculated for standard_relation='='. If you want "
+                "to use censored data, please set `calculate_pchembl` to True with the flag "
+                "--calculate-pchembl."
+            )
         biotypes = bioactivity_type
 
+    # get_bioactivities_workflow -> fetch with either webresource or downloader -> (minimally) process bioactivities
+    # -> standardization is done here -> curate bioactivity errors (if curate_annotation_errors=True)
     full_df = get_bioactivities_workflow(
         molecule_chembl_ids=molecule_ids or None,
         target_chembl_ids=target_ids or None,
@@ -196,7 +207,7 @@ def get_standardize_and_clean_workflow(
         confidence_scores=confidence_scores,
         assay_types=assay_types,
         standard_relation=standard_relation,
-        standard_types=biotypes,
+        standard_type=biotypes,
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
@@ -205,8 +216,15 @@ def get_standardize_and_clean_workflow(
         backend=backend,
     )
 
+    # Flag activities without document dates for transparency
+    # Note: if require_doc_date=True, these will be hard-filtered in process_bioactivities
+    full_df = flag_missing_document_date(full_df)
+
     # Correct censored activity comments (inactive/inconclusive) with incorrect standard_relation='='
     full_df = flag_censored_activity_comment(full_df)
+
+    # Flag activities from patent sources for transparency
+    full_df = flag_patent_source(full_df)
 
     # Filter out activities with standard_relation not in the user-selected values
     # This is important because flag_censored_activity_comment may change '=' to '<'
@@ -270,14 +288,15 @@ def get_standardize_and_clean_workflow(
         logger.info(f"Dropping rows with missing canonical smiles:\n{_info}")
         full_df = full_df.drop(index=_info.index).reset_index(drop=True)
 
-    stdzer = ChemStandardizer(from_smi=True, n_jobs=8, verbose=False, isomeric=chirality)
+    stdzer = ChemStandardizer(
+        from_smi=True, n_jobs=8, verbose=False, isomeric=chirality, progress=True, chunk_size=1000
+    )
     df = (
         full_df.query("standard_type.isin(@bioactivity_type)")
         # standardize the smiles & clean possible solvents & salts from the string
         .pipe(flag_missing_canonical_smiles)
         .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
-        .pipe(flag_missing_standard_smiles)
-        # .dropna(subset=["standard_smiles"])  # drop if no structure is found
+        .dropna(subset=["standard_smiles"])  # drop if no structure is found
         .pipe(flag_salt_or_solvent_removal)
         .assign(final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures))
         .drop(columns="standard_smiles")
@@ -310,11 +329,21 @@ def get_standardize_and_clean_workflow(
 
     # Search for undefined stereocenters within the remaining data
     if drop_unassigned_chiral:  # here we have the problem with the "." SMILES
-        df = df.assign(
-            undefined_stereocenters=lambda x: x["standard_smiles"]
-            .apply(find_undefined_stereocenters)
-            .apply(len)
-        ).pipe(flag_undefined_stereochemistry)
+        # Use parallel processing for finding undefined stereocenters
+        logger.debug(f"Finding undefined stereocenters in {len(df)} SMILES strings using parallel processing")
+        applier = ParallelApplier(
+            find_undefined_stereocenters,
+            df["standard_smiles"].tolist(),
+            n_jobs=8,  # Use 8 cores by default
+            backend="loky",
+            custom_desc="Find undefined stereocenters",
+            logger=logger,
+            chunk_size=200,
+        )
+        undefined_stereo_lists = applier()
+        undefined_stereo_counts = [len(x) for x in undefined_stereo_lists]
+
+        df = df.assign(undefined_stereocenters=undefined_stereo_counts).pipe(flag_undefined_stereochemistry)
         logger.trace(f'Unassigned stereocenters: {df["undefined_stereocenters"].unique().tolist()}')
         undefined_stereo_mask = df["undefined_stereocenters"] > 0
         if undefined_stereo_mask.any():
@@ -424,11 +453,13 @@ def aggregate_data(
         current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
         logger.info(f"ID columns for aggregation: {current_extra_id_cols}")
 
-    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+    connectivity_writer = InchiHandling(
+        convert_to="connectivity", n_jobs=4, progress=True, from_smi=True, chunk_size=None
+    )
 
     if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
-            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+            df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}, chunk_size=50
         )
         df = df.assign(id_array=fps)
     elif compound_equality == "connectivity":
@@ -437,6 +468,26 @@ def aggregate_data(
     else:
         raise ValueError(
             f"Invalid compound_pairing value: {compound_equality}. " "Expected 'mixed_fp' or 'connectivity'."
+        )
+
+    # For censored measurements (!=), include relation and pchembl_value in the compound identifier
+    # so they are only aggregated if they have the same value AND relation
+    has_censored = df["standard_relation"].ne("=").any()
+    if has_censored:
+        logger.info(
+            "Detected censored measurements (standard_relation != '='). "
+            "These will only be aggregated if they have identical relation AND pchembl_value."
+        )
+        # Round pchembl_value to 2 decimal places to avoid floating point precision issues
+        rounded_pchembl = df["pchembl_value"].round(2).astype(str)
+        # For censored measurements, append relation + value to the id_array
+        censored_mask = df["standard_relation"] != "="
+        df.loc[censored_mask, "id_array"] = (
+            df.loc[censored_mask, "id_array"].astype(str)
+            + "_"
+            + df.loc[censored_mask, "standard_relation"]
+            + "_"
+            + rounded_pchembl[censored_mask]
         )
 
     # Here we have a repeat index for compounds across all fetched data. Processing which repeats
@@ -533,11 +584,34 @@ def re_aggregate_data(
 
     if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(
-            df["standard_smiles"].tolist(), n_jobs=4, morgan_kwargs={"useChirality": chirality}
+            df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}
         )
         id_array = pd.Series(fps, index=df.index)
     elif compound_equality == "connectivity":
         id_array = df["connectivity"]
+
+    # For censored measurements (!=), include relation and pchembl_value in the compound identifier
+    # so they are only aggregated if they have the same value AND relation
+    if "standard_relation" in df.columns:
+        has_censored = df["standard_relation"].ne("=").any()
+        if has_censored:
+            logger.info(
+                "Detected censored measurements (standard_relation != '='). "
+                "These will only be aggregated if they have identical relation AND pchembl_value."
+            )
+            # Round pchembl_value to 2 decimal places to avoid floating point precision issues
+            rounded_pchembl = df["pchembl_value"].round(2).astype(str)
+            # For censored measurements, append relation + value to the id_array
+            censored_mask = df["standard_relation"] != "="
+            id_array = id_array.copy()  # Create a copy to avoid modifying the original
+            id_array.loc[censored_mask] = (
+                id_array.loc[censored_mask].astype(str)
+                + "_"
+                + df.loc[censored_mask, "standard_relation"]
+                + "_"
+                + rounded_pchembl[censored_mask]
+            )
+
     repeats_idxs = repeated_indices_from_array_series(id_array)
 
     include_metadata = [
@@ -567,7 +641,9 @@ def re_aggregate_data(
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
     )
-    connectivity_writer = InchiHandling(convert_to="connectivity", n_jobs=4, progress=True, from_smi=True)
+    connectivity_writer = InchiHandling(
+        convert_to="connectivity", n_jobs=8, progress=True, from_smi=True, chunk_size=50
+    )
     final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
     # Reorder columns as in the original aggregate_data function

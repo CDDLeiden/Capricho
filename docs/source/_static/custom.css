@@ -1,0 +1,4 @@
+/* Force logo to use dark color (light mode appearance) on white background */
+.document {
+    color-scheme: light;
+}

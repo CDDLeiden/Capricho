@@ -150,6 +150,76 @@ Good balance of data quantity and quality.
 - Useful for large-scale analyses
 - May include off-target effects
 
+## Standard Relations and Censored Data
+
+ChEMBL bioactivity measurements include a `standard_relation` field that indicates the relationship between the measured value and the reported concentration.
+
+### Relation Types
+
+- **`=`**: The measured value equals the reported concentration
+- **`<`**: The compound is active at concentrations _below_ the reported value (_active_ at the reported concentration)
+- **`<<`**: Stronger indication that the compound is active at concentrations _well below_ the reported value (_active_ at the reported concentration)
+- **`>`**: The compound is active at concentrations _above_ the reported value (_inactive_ at the reported concentration)
+- **`>>`**: Stronger indication that the compound is active at concentrations _well above_ the reported value (_inactive_ at the reported concentration)
+- **`~`**: Approximate measurement (CAPRICHO handles these as ±0.5 log units)
+
+### Working with Censored Data
+
+**Important**: ChEMBL only pre-calculates pchembl_value for exact measurements (`standard_relation='='`). To include censored data (`<`, `>`), you *must* use the `--calculate-pchembl` flag:
+
+```bash
+# Default: Only includes exact measurements (=)
+capricho get --target-ids CHEMBL203 --output-path egfr_exact.csv
+
+# Include censored measurements: MUST use --calculate-pchembl
+capricho get --target-ids CHEMBL203 \
+  --standard-relation "=,<,>" \
+  --calculate-pchembl \
+  --output-path egfr_all.csv
+```
+
+Without `--calculate-pchembl`, you'll get an error if you request censored data, but the data will still be fetched:
+```
+ERROR: pchembl_values are only calculated for standard_relation='='.
+If you want to use censored data, please set calculate_pchembl to True.
+```
+
+### Aggregation with Censored Data
+
+When aggregating data with censored measurements, CAPRICHO only combines measurements that have:
+1. Identical `standard_relation` values
+2. In case of identical (`=`) standard_relation, statistics will be calculated for compound-target pairs with multiple exact measurements.
+3. Censored measurements (`<`, `>`, `<<`, `>>`) are only combined with exact measurement matches (e.g.: < 6.0 will not be combined with < 5.0).
+
+This conservative approach prevents mixing incompatible measurement types (e.g., averaging an exact value with a lower bound).
+
+### pchembl_relation: Inverted Relations for -log Scale
+
+When working with pChEMBL values ($-log_{10}(Molar)$), the direction of comparison operators is inverted compared to the original concentration values. CAPRICHO automatically creates a `pchembl_relation` column during binarization to make this relationship explicit:
+
+**Relation Inversion Logic:**
+- `standard_relation` `<` (low concentration, active) → `pchembl_relation` `>` (high pChEMBL, active)
+- `standard_relation` `>` (high concentration, inactive) → `pchembl_relation` `<` (low pChEMBL, inactive)
+- `standard_relation` `=` → `pchembl_relation` `=` (unchanged)
+- `standard_relation` `~` → `pchembl_relation` `~` (unchanged)
+
+**Example Interpretation:**
+For a measurement with `IC50` = 1 µM (pChEMBL = 6.0) and `standard_relation` = `<`:
+- Original: IC50 < 1 µM (active at concentrations below 1 µM)
+- pChEMBL: pchembl_value > 6.0 (higher pChEMBL = more active)
+- With threshold = 6.0: classified as **active (1)**
+
+This inverted relation column is automatically added when you run the `binarize` command and helps interpret how measurements relate to activity thresholds on the -log scale.
+
+### Activity Data Analysis
+
+**For binary classification** (active/inactive), use the `binarize` command which properly handles censored measurements. Following the example above, we have:
+
+```bash
+capricho binarize -i egfr_all.csv -o egfr_binary.csv -t 6.0
+```
+See the CLI reference for detailed binarization options.
+
 ## Quality Control Filters
 
 CAPRICHO provides multiple layers of quality control:
@@ -162,9 +232,13 @@ Focus on specific measurement types relevant to your analysis.
 
 ### Relation Filtering
 ```bash
+# Only exact measurements (default behavior, pchembl pre-calculated by ChEMBL)
 --standard-relation "="
+
+# Include censored data (requires --calculate-pchembl)
+--standard-relation "=,<,>" --calculate-pchembl
 ```
-Include only exact measurements (exclude ">" or "<" relations).
+Choose measurement precision level based on your analysis needs.
 
 ### Date Requirements
 ```bash

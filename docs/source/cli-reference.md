@@ -1,6 +1,6 @@
 # CLI Reference
 
-CAPRICHO provides three main commands: `download`, `explore`, and `get`. This section provides comprehensive documentation for all command-line options.
+CAPRICHO provides four main commands: `download`, `explore`, `get`, and `binarize`. This section provides comprehensive documentation for all command-line options.
 
 ## capricho download
 
@@ -26,8 +26,8 @@ capricho download
 # Download specific version
 capricho download --version 33
 
-# Use custom storage location
-capricho download --prefix /data/chembl/
+# Use custom storage location (this will install version 25 it on ~/.data/old-chembl)
+capricho download --version 25 --prefix data/old-chembl/
 ```
 
 ## capricho explore
@@ -51,7 +51,7 @@ capricho explore [OPTIONS]
 ### Examples
 
 ```bash
-# List all available tables
+# List all available tables on the relational database
 capricho explore --list-tables
 
 # Examine the activities table
@@ -60,8 +60,32 @@ capricho explore --table activities
 # Find tables with 'pchembl' columns
 capricho explore --search-column pchembl
 
-# Run custom query
-capricho explore --query "SELECT target_chembl_id, COUNT(*) FROM activities GROUP BY target_chembl_id LIMIT 10"
+# Check available standard_relation types in ChEMBL
+capricho explore --query "SELECT standard_relation, COUNT(*) as count FROM activities WHERE standard_relation IS NOT NULL GROUP BY standard_relation ORDER BY count DESC"
+```
+
+### Useful Queries for Data Exploration
+
+These queries can help you understand the data before running `capricho get`:
+
+**Count activities by bioactivity type:**
+```bash
+capricho explore --query "SELECT standard_type, COUNT(*) as count FROM activities WHERE standard_type IS NOT NULL GROUP BY standard_type ORDER BY count DESC LIMIT 20"
+```
+
+**Count activities by assay type:**
+```bash
+capricho explore --query "SELECT assay_type, COUNT(*) as count FROM assays GROUP BY assay_type ORDER BY count DESC"
+```
+
+**Check confidence score distribution:**
+```bash
+capricho explore --query "SELECT confidence_score, COUNT(*) as count FROM assays GROUP BY confidence_score ORDER BY confidence_score DESC"
+```
+
+**Check all standard units:**
+```bash
+capricho explore --query "SELECT standard_units, COUNT(*) as count FROM activities WHERE standard_units IS NOT NULL GROUP BY standard_units ORDER BY count DESC LIMIT 30"
 ```
 
 ## capricho get
@@ -91,7 +115,7 @@ Control which bioactivity data to include:
 |---|---|---|
 | `-c`, `--confidence-scores` | Confidence scores to filter, comma-separated | `[7, 8, 9]` |
 | `-biotype`, `--bioactivity-type` | Bioactivity types to filter, comma-separated | `['Potency', 'Kd', 'Ki', 'IC50', 'AC50', 'EC50']` |
-| `-rel`, `--standard-relation` | Filter by standard relation, comma-separated | `['=']` |
+| `-rel`, `--standard-relation` | Filter by standard relation (`=`, `<`, `>`, `~`), comma-separated. **Note:** Including `<` or `>` requires `--calculate-pchembl`. See [Standard Relations](concepts.md). | `['=']` |
 | `-at`, `--assay-types` | Assay types (B, F, A, T, P), comma-separated | `['B', 'F']` |
 | `-cr`, `--chembl-release` | Only fetch data reported **up to** a certain ChEMBL release | `None` |
 | `-reqdoc`, `--require-doc-date` | Filter out bioactivities without a document date | `False` |
@@ -127,6 +151,9 @@ Common bioactivity measurements:
 - **A**: ADMET assay
 - **T**: Toxicity assay
 - **P**: Physicochemical assay
+- **U**: Unclassified
+
+Further information on assay types and confidence scores can be found in the [ChEMBL documentation](https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/chembl-data-questions).
 
 ### Processing & Aggregation Options
 
@@ -134,7 +161,7 @@ Control how data is processed and aggregated:
 
 | Option | Description | Default |
 |---|---|---|
-| `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported | `False` |
+| `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported. **Required when using censored data** (`--standard-relation` includes `<` or `>`). See [Standard Relations](concepts.md). | `False` |
 | `-chiral`, `--chirality` | Consider chirality during fingerprint calculation | `False` |
 | `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers | `False` |
 | `-cure`, `--curate-annotation-errors` | Apply curation for pChEMBL annotation errors | `False` |
@@ -147,7 +174,7 @@ Control how data is processed and aggregated:
 
 #### Compound Equality Methods
 - **connectivity**: (Default) Based on molecular connectivity, ignoring stereochemistry
-- **mixed_fp**: Uses ECFP4 and RDKit fingerprints for similarity determination
+- **mixed_fp**: Uses ECFP4 and RDKit fingerprints (each with 2048 bits) for similarity determination
 
 #### Useful Metadata Columns
 - `organism`: Source organism
@@ -213,3 +240,132 @@ capricho get \
   --confidence-scores 8,9 \
   --output-path small_molecules.csv
 ```
+
+## capricho binarize
+
+Convert aggregated bioactivity data to binary labels (active/inactive) based on a pChEMBL threshold. This command handles censored measurements (< and >) and validates agreement between different measurement types.
+
+```bash
+capricho binarize [OPTIONS]
+```
+
+### Required Options
+
+| Option | Description |
+|---|---|
+| `-i`, `--input-path` | Path to aggregated data file (CSV, TSV, or Parquet) |
+| `-o`, `--output-path` | Path to save the binarized output file |
+
+### Binarization Options
+
+| Option | Description | Default |
+|---|---|---|
+| `-t`, `--threshold` | Activity threshold for binarization (pChEMBL scale) | `6.0` (1 µM) |
+| `-vcol`, `--value-column` | Column to use for binarization | `pchembl_value_mean` |
+| `-cid`, `--compound-id-col` | Column name for compound identifiers | `connectivity` |
+| `-tid`, `--target-id-col` | Column name for target identifiers | `target_chembl_id` |
+| `-rel`, `--relation-col` | Column name for standard_relation values | `standard_relation` |
+| `-bcol`, `--binary-col` | Name for the output binary column | `activity_binary` |
+| `-cmp-mut`, `--compare-across-mutants` | Compare measurements across mutants for conflicts | `False` |
+
+### Understanding pChEMBL Thresholds
+
+The pChEMBL scale is -log10(Molar), where higher values indicate higher activity:
+
+- **pChEMBL 6.0** = 1 µM (common threshold)
+- **pChEMBL 6.5** = 316 nM
+- **pChEMBL 7.0** = 100 nM (stringent threshold)
+- **pChEMBL 5.0** = 10 µM (permissive threshold)
+
+### Handling Standard Relations
+
+The binarization process handles different measurement types:
+
+- **`=`** (discrete): Direct comparison to threshold
+- **`~`** (approximate): Uses lower bound for conservative classification (±0.5 log units)
+- **`<`, `<<`** (censored active): Compound is _more_ active than reported value
+- **`>`, `>>`** (censored inactive): Compound is _less_ active than reported value
+
+### Conflict Detection
+
+The command flags measurements that disagree for the same compound-target pair:
+
+- **Mixed discrete/censored conflicts**: When discrete measurements (`=`, `~`) disagree with censored measurements (`<`, `>`)
+- **Binary label conflicts**: When measurements result in different activity classifications (active vs inactive)
+- **Mutation handling**: Use `--compare-across-mutants` to control whether different mutants are compared
+
+#### Compound Identifiers for Conflict Detection
+
+By default, conflicts are detected using the `connectivity` column (InChI key connectivity layer), which groups compounds by their molecular graph ignoring stereochemistry. You can use a different identifier:
+
+- **`connectivity`** (default): Groups by connectivity layer, ignoring stereochemistry
+- **`smiles`**: Groups by standardized SMILES, which may be more or less permissive depending on your aggregation settings
+
+To use SMILES for conflict detection, specify `-cid smiles`:
+
+```bash
+capricho binarize -i data.csv -o output.csv -cid smiles
+```
+
+This allows you to check for inconsistencies at different levels of molecular identity (e.g., detecting conflicts between stereoisomers when using SMILES, or treating stereoisomers as the same compound when using connectivity).
+
+### Examples
+
+#### Basic Binarization
+```bash
+# Default threshold of 6.0 (1 µM)
+capricho binarize -i aggregated_data.csv -o binarized_data.csv
+```
+
+#### Custom Threshold
+```bash
+# Stringent threshold of 7.0 (100 nM)
+capricho binarize -i egfr_data.csv -o egfr_binary.csv -t 7.0
+```
+
+#### Using Median Values
+```bash
+# Use median instead of mean for binarization
+capricho binarize \
+  -i aggregated_data.csv \
+  -o binary_median.csv \
+  -vcol pchembl_value_median \
+  -t 6.5
+```
+
+#### Compare Across Mutants
+```bash
+# Flag conflicts even when measurements are on different mutants
+capricho binarize \
+  -i kinase_data.csv \
+  -o kinase_binary.csv \
+  -t 6.5 \
+  --compare-across-mutants
+```
+
+### Understanding pchembl_relation
+
+The output file includes a `pchembl_relation` column that adjusts the standard_relation signs for the -log scale used in pChEMBL values. This makes it easier to interpret activity thresholds:
+
+**Example:** For threshold = 6.0 (1 µM)
+- `IC50` with `pchembl_value` = 6.0 and `pchembl_relation` = `>`
+  - -log10[IC50 concentration] > 6.0
+  - IC50 concentration < 1 µM
+  - **active (1)**
+
+The relation inversion happens because pChEMBL values are negative logarithms:
+- `standard_relation` `<` (low concentration) → `pchembl_relation` `>` (high pChEMBL, active)
+- `standard_relation` `>` (high concentration) → `pchembl_relation` `<` (low pChEMBL, inactive)
+- `standard_relation` `=` → `pchembl_relation` `=` (unchanged)
+
+This column is automatically generated during binarization and helps interpret the relationship between measurements and the activity threshold.
+
+### Output Format
+
+The output file contains all original columns plus:
+
+- **Binary activity column** (default: `activity_binary`): 0 (inactive), 1 (active), or null (missing)
+- **pchembl_relation column**: Standard relation adjusted for -log scale (see above)
+- **Conflict flags**: Rows with disagreeing measurements are flagged in the `data_dropping_comment` column
+
+Conflicting measurements are logged with detailed information about the disagreement.

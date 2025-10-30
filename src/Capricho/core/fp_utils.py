@@ -3,10 +3,9 @@
 from functools import partial
 
 import numpy as np
-from joblib import Parallel, delayed, parallel_config
+from job_tqdflex import ParallelApplier
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
-from tqdm import tqdm
 
 
 def smi_to_morganFP(smi, radius: int = 2, nBits=2048, useChirality=False, **kwargs) -> np.ndarray:
@@ -37,6 +36,7 @@ def calculate_mixed_FPs(
     morgan_kwargs: dict = None,
     rdkit_kwargs: dict = None,
     return_stacked: bool = False,
+    chunk_size: int = 50,
 ):
     """Outputs a mixed fingerprint used for compound identification. The motivation for this is
     that either of the fingerprints can fail to identify the same compound, but the combination
@@ -49,6 +49,7 @@ def calculate_mixed_FPs(
         rdkit_kwargs (dict): keyword arguments for the rdkit path fingerprints. Defaults to None.
         return_stacked (bool): if true, will return the stacked fingerprints instead of a list of
             numpy arrays. Defaults to False.
+        chunk_size (int): chunk size to use for the parallel applier. Defaults to 50.
 
     Returns:
         np.ndarray: a mixed fingerprint for the input smiles
@@ -61,13 +62,28 @@ def calculate_mixed_FPs(
     morganfunc = partial(smi_to_morganFP, **morgan_kwargs)
     rdkitfpfunc = partial(smi_to_RDKitFP, **rdkit_kwargs)
 
-    with parallel_config(backend="loky", n_jobs=n_jobs):
-        morgan_fps = Parallel()(
-            delayed(morganfunc)(smi) for smi in tqdm(smiles, desc="Calculating Morgan fingerprints")
-        )
-        rdkit_fps = Parallel()(
-            delayed(rdkitfpfunc)(smi) for smi in tqdm(smiles, desc="Calculating RDKit fingerprints")
-        )
+    morgan_applier = ParallelApplier(
+        morganfunc,
+        smiles,
+        n_jobs=n_jobs,
+        backend="loky",
+        show_progress=True,
+        chunk_size=chunk_size,
+        custom_desc="Calculating Morgan FPs",
+    )
+    rdkit_applier = ParallelApplier(
+        rdkitfpfunc,
+        smiles,
+        n_jobs=n_jobs,
+        backend="loky",
+        show_progress=True,
+        chunk_size=chunk_size,
+        custom_desc="Calculating RDKit FPs",
+    )
+
+    morgan_fps = morgan_applier()
+    rdkit_fps = rdkit_applier()
+
     if return_stacked:
         return np.concatenate([np.concatenate(morgan_fps), np.concatenate(rdkit_fps)], axis=1).shape
     else:

@@ -154,6 +154,11 @@ def process_repeat_mols(
         logger.info(f"{points_dropped} points will be removed from the dataset")
 
     id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
+
+    # Add standard_relation to ID columns to prevent mixing different relation types
+    if "standard_relation" in df.columns:
+        id_cols.append("standard_relation")
+
     multiple_value_cols = [col for col in multiple_value_cols if col not in id_cols]
     multival_cols = [*multiple_value_cols, *extra_multival_cols]
 
@@ -182,7 +187,7 @@ def process_repeat_mols(
     updated_df = updated_df.drop(columns=todrop_cols).rename(columns=rename_cols)
     todrop_processed = updated_df["repeat_mapping"].isin(high_diff_repeats).index
     smiles_canonizer = ChemStandardizer(
-        method="canon", from_smi=True, n_jobs=4, progress=True, isomeric=chirality
+        method="canon", from_smi=True, n_jobs=8, progress=True, isomeric=chirality, chunk_size=None
     )
     if solve_strat == "drop":
         updated_df = updated_df.drop(index=todrop_processed)
@@ -217,9 +222,14 @@ def process_repeat_mols(
         .drop_duplicates()
     )
     logger.info(f"Final number of points: {len(df)}")
-    # Also add the single-read points to the mean / median values
+    # Also add the single-read points to the mean / median / counts values
     with pd.option_context("future.no_silent_downcasting", True):
-        df["pchembl_value_median"] = df["pchembl_value_median"].fillna(df["pchembl_value"]).infer_objects(copy=False)
-        df["pchembl_value_mean"] = df["pchembl_value_mean"].fillna(df["pchembl_value"]).infer_objects(copy=False)
-    df["pchembl_value"] = df["pchembl_value"].apply(format_value) # convert to str for consistency
+        df["pchembl_value_median"] = (
+            df["pchembl_value_median"].fillna(df["pchembl_value"]).infer_objects(copy=False)
+        )
+        df["pchembl_value_mean"] = (
+            df["pchembl_value_mean"].fillna(df["pchembl_value"]).infer_objects(copy=False)
+        )
+        df["pchembl_value_counts"] = df["pchembl_value_counts"].fillna(1).infer_objects(copy=False)
+    df["pchembl_value"] = df["pchembl_value"].apply(format_value)  # convert to str for consistency
     return df

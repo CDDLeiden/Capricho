@@ -34,7 +34,7 @@ class TestRateLimitDecorator(unittest.TestCase):
         execution_times = []
         for line in log_output.split("\n"):
             if "starting execution at" in line:
-                time_str = line.split("starting execution at")[1].split(".")[0]
+                time_str = line.split("starting execution at")[1].strip()
                 execution_times.append(float(time_str))
 
         self.assertGreaterEqual(len(execution_times), num_calls, "Not enough execution start times logged")

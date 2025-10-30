@@ -7,7 +7,6 @@ from typing import List, Optional, Sequence, Tuple, Union
 
 import pandas as pd
 import pystow
-
 from chembl_downloader import download_extract_sqlite, latest, query
 from chembl_downloader.api import _find_sqlite_file
 
@@ -32,6 +31,7 @@ def _get_kwargs_where_clauses(**kwargs):
 
 def _get_config_file(version: Optional[Union[int, str]] = None) -> Path:
     version = version if version is not None else latest()
+    version = str(version) if isinstance(version, int) else version
     return pystow.join(*(PYSTOW_PARTS), name=PYSTOW_CONFIG["name"].format(version=version))
 
 

@@ -13,11 +13,15 @@ from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
 from ..logger import logger, setup_logger
 
 if TYPE_CHECKING:
-    import numpy as np
-    from chembl_downloader import latest
-    from ..chembl.api.downloader import check_and_download_chembl_db
-    from ..chembl.api.sql_explorer import explorer_main
-    from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
+    import numpy as np  # noqa: F401
+    from chembl_downloader import latest  # noqa: F401
+
+    from ..chembl.api.downloader import check_and_download_chembl_db  # noqa: F401
+    from ..chembl.api.sql_explorer import explorer_main  # noqa: F401
+    from .chembl_data_pipeline import (  # noqa: F401
+        aggregate_data,
+        get_standardize_and_clean_workflow,
+    )
 
 DEFAULTS = {
     "molecule_ids": [],
@@ -116,6 +120,11 @@ class ChemblBackend(str, Enum):
 class CompoundEquality(str, Enum):
     mixed_fp = "mixed_fp"
     connectivity = "connectivity"
+
+
+class CompoundIdColumn(str, Enum):
+    connectivity = "connectivity"
+    smiles = "smiles"
 
 
 @app.callback()
@@ -485,11 +494,8 @@ def get_data(
     """
     import numpy as np
     from chembl_downloader import latest
-    from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
-    if standard_relation != ["="]:
-        logger.error("Fetching data using different relation types isn't implemented yet.")
-        raise typer.Exit(code=1)
+    from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
 
     if not output_path.parent.exists():
         output_path.mkdir()
@@ -593,6 +599,169 @@ def get_data(
 
     logger.info(f"Successfully processed and saved data to {output_path}")
     return df
+
+
+@app.command(name="binarize", no_args_is_help=True)
+def binarize_data(
+    ctx: typer.Context,
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "-i",
+            "--input-path",
+            help="Path to aggregated data file (CSV, TSV, or Parquet).",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "-o",
+            "--output-path",
+            help="Path to save the binarized output file.",
+        ),
+    ],
+    threshold: Annotated[
+        float,
+        typer.Option(
+            "-t",
+            "--threshold",
+            help="Activity threshold for binarization (pchembl scale). Default 6.0 = 1 µM.",
+            metavar="float",
+        ),
+    ] = 6.0,
+    value_column: Annotated[
+        str,
+        typer.Option(
+            "-vcol",
+            "--value-column",
+            help="Column to use for binarization (e.g., pchembl_value_mean, pchembl_value_median).",
+            metavar="str",
+        ),
+    ] = "pchembl_value_mean",
+    compound_id_col: Annotated[
+        CompoundIdColumn,
+        typer.Option(
+            "-cid",
+            "--compound-id-col",
+            help="Column name for compound identifiers (connectivity or smiles).",
+        ),
+    ] = CompoundIdColumn.connectivity,
+    target_id_col: Annotated[
+        str,
+        typer.Option(
+            "-tid",
+            "--target-id-col",
+            help="Column name for target identifiers.",
+            metavar="str",
+        ),
+    ] = "target_chembl_id",
+    relation_col: Annotated[
+        str,
+        typer.Option(
+            "-rel",
+            "--relation-col",
+            help="Column name for standard_relation values.",
+            metavar="str",
+        ),
+    ] = "standard_relation",
+    output_binary_col: Annotated[
+        str,
+        typer.Option(
+            "-bcol",
+            "--binary-col",
+            help="Name for the output binary column.",
+            metavar="str",
+        ),
+    ] = "activity_binary",
+    compare_across_mutants: Annotated[
+        bool,
+        typer.Option(
+            "-cmp-mut/-dont-cmp-mut",
+            "--compare-across-mutants/--dont-compare-across-mutants",
+            help="If True, measurements on different mutants are compared for conflicts. Default: False (different mutants are separate compound-target pairs).",
+            is_flag=True,
+            metavar="bool",
+        ),
+    ] = False,
+    conflict_report_path: Annotated[
+        Path | None,
+        typer.Option(
+            "-cr",
+            "--conflict-report-path",
+            help="Optional path to save detailed conflict report as JSON for interactive analysis.",
+            metavar="path",
+        ),
+    ] = None,
+):
+    """
+    Binarize aggregated bioactivity data based on activity threshold.
+
+    This command converts continuous pchembl values to binary labels (0=inactive, 1=active)
+    while properly handling censored measurements (< and >) and validating agreement between
+    discrete (=) and censored measurements for the same compound-target pair.
+
+    The output file also contains a new relation column with signs adjusted for -log scale.
+    E.g.: for threshold of 6.0, `IC50` with `pchembl_value` 6.0 and `pchembl_relation` >
+      - -log[IC50 concentration] > 6.0;
+      - IC50 concentration < 1 µM;
+      - active (1).
+
+    Example:
+        capricho binarize -i aggregated_data.csv -o binarized_data.csv -t 6.5
+    """
+    import pandas as pd
+
+    from ..core.binarization import binarize_aggregated_data
+    from ..core.pandas_helper import save_dataframe
+
+    logger.info(f"Loading aggregated data from {input_path}")
+
+    if input_path.suffix in [".csv", ".csv.gz"]:
+        df = pd.read_csv(input_path)
+    elif input_path.suffix in [".tsv", ".tsv.gz"]:
+        df = pd.read_csv(input_path, sep="\t")
+    elif input_path.suffix == ".parquet":
+        df = pd.read_parquet(input_path)
+    else:
+        logger.error(f"Unsupported file format: {input_path.suffix}. Use .csv, .tsv, .gz, or .parquet")
+        raise typer.Exit(code=1)
+
+    logger.info(f"Loaded {len(df)} rows from {input_path}")
+    logger.info(f"Binarizing data with threshold={threshold} using column '{value_column}'")
+
+    binarized_df = binarize_aggregated_data(
+        df=df,
+        threshold=threshold,
+        value_column=value_column,
+        compound_id_col=compound_id_col.value,
+        target_id_col=target_id_col,
+        relation_col=relation_col,
+        output_binary_col=output_binary_col,
+        compare_across_mutants=compare_across_mutants,
+        conflict_report_path=conflict_report_path,
+    )
+
+    # Ensure out/dir exists, add proper suffix for saving and Save the binarized data.
+    if not output_path.parent.exists():
+        output_path.parent.mkdir(parents=True)
+    if output_path.suffix == "":
+        output_path = output_path.with_suffix(input_path.suffix)
+    save_dataframe(binarized_df, output_path)
+
+    # Log number of actives/inactives
+    n_actives = binarized_df[output_binary_col].sum()
+    n_inactives = len(binarized_df) - n_actives
+    logger.info(
+        f"{n_actives}/{len(binarized_df)} actives ({n_actives / len(binarized_df) * 100:.2f}%); "
+        f"{n_inactives}/{len(binarized_df)} inactives ({n_inactives / len(binarized_df) * 100:.2f}%)."
+    )
+
+    logger.info(f"Binarization complete. Output saved to {output_path}")
+    return binarized_df
 
 
 if __name__ == "__main__":

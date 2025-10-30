@@ -12,7 +12,6 @@ used to annotate processing steps that occurred during the data processing pipel
 
 from typing import Optional
 
-import numpy as np
 import pandas as pd
 
 from ..core.default_fields import (
@@ -173,6 +172,110 @@ def flag_strict_mutant_assays(df: pd.DataFrame, strict_mutant_removal: bool = Fa
         logger.info(
             "No assays to flag for removal based on strict mutant removal criteria in 'assay_description'."
         )
+    return df
+
+
+def flag_missing_document_date(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark activities that lack a document date (year) in the processing comment.
+
+    This function always flags missing document dates for transparency, regardless of whether
+    they will be filtered out. Activities without document dates are flagged in the
+    data_processing_comment column so users can see which data points lack temporal information.
+
+    Args:
+        df: DataFrame to be processed.
+
+    Returns:
+        pd.DataFrame: DataFrame with activities lacking document dates flagged in processing comment.
+    """
+    if "year" not in df.columns:
+        logger.debug("Column 'year' not found in DataFrame. Skipping document date flagging.")
+        return df
+
+    mask = df["year"].isna()
+    num_to_flag = mask.sum()
+
+    if num_to_flag > 0:
+        logger.info(f"Flagging {num_to_flag} activities with missing document date (year) for transparency.")
+        df = add_comment(
+            df,
+            comment="Missing document date",
+            criteria_func=lambda x: x.isna(),
+            target_column="year",
+            comment_type="d",
+        )
+    else:
+        logger.debug("No activities with missing document dates found.")
+
+    return df
+
+
+def flag_incompatible_units(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark activities with units that cannot be converted to pChEMBL in the dropping comment.
+
+    This function flags activities with standard_units that are incompatible with pChEMBL
+    calculation (i.e., not nM, µM, uM, or mM). These activities will have pchembl_value=NaN
+    and are flagged for transparency.
+
+    Args:
+        df: DataFrame to be processed.
+
+    Returns:
+        pd.DataFrame: DataFrame with incompatible units flagged in dropping comment.
+    """
+    if "standard_units" not in df.columns:
+        logger.debug("Column 'standard_units' not found in DataFrame. Skipping incompatible units flagging.")
+        return df
+
+    compatible_units = ["nM", "µM", "uM", "mM"]
+    # Flag rows where standard_units is NOT in compatible_units AND NOT null
+    mask = ~df["standard_units"].isin(compatible_units) & df["standard_units"].notna()
+    num_to_flag = mask.sum()
+
+    if num_to_flag > 0:
+        logger.info(f"Flagging {num_to_flag} activities with incompatible units for pChEMBL calculation.")
+        df = add_comment(
+            df,
+            comment="Incompatible units for pChEMBL calculation",
+            criteria_func=lambda x: ~x.isin(compatible_units) & x.notna(),
+            target_column="standard_units",
+            comment_type="d",
+        )
+    else:
+        logger.debug("No activities with incompatible units found.")
+
+    return df
+
+
+def flag_patent_source(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark activities that originate from patent documents.
+
+    Patent-sourced data in ChEMBL often contains annotation errors or inconsistent
+    measurements compared to peer-reviewed publications. This function flags activities
+    from patents to allow users to assess data quality differences between patent and
+    non-patent sources.
+
+    Args:
+        df: DataFrame to be processed.
+
+    Returns:
+        pd.DataFrame: DataFrame with patent-sourced activities flagged in dropping comment.
+    """
+    mask = df["doc_type"] == "PATENT"
+    num_to_flag = mask.sum()
+
+    if num_to_flag > 0:
+        logger.info(f"Flagging {num_to_flag} activities from patent sources.")
+        df = add_comment(
+            df,
+            comment="Patent source",
+            criteria_func=lambda x: x == "PATENT",
+            target_column="doc_type",
+            comment_type="d",
+        )
+    else:
+        logger.debug("No patent-sourced activities found.")
+
     return df
 
 
@@ -380,6 +483,10 @@ def flag_inter_document_duplication(
 ) -> pd.DataFrame:
     """Marks rows with a potential duplication after SMILES standardization & salt removal.
 
+    This function only flags duplicates for discrete measurements (standard_relation='=').
+    Censored measurements (e.g., '<', '>') are not flagged as duplicates since the same
+    bound can be independently reached in different studies without indicating true duplication.
+
     Args:
         df: DataFrame to be processed.
         key_subset: metadata columns used for identifying duplicates. Defaults to a
@@ -393,21 +500,53 @@ def flag_inter_document_duplication(
         pd.DataFrame: DataFrame with duplicates marked in `data_processing_comment`
                       (or `data_dropping_comment` if comment_type='d' was used).
     """
-    dupli_mask = conflicting_duplicates(df, key_subset=key_subset, diff_subset=diff_subset)
-    n_duplicates = dupli_mask.sum()
-    dupli_idxs = np.compress(dupli_mask.values, dupli_mask.index)
+    # Only check for duplicates in discrete measurements (standard_relation='=')
+    if "standard_relation" not in df.columns:
+        logger.warning(
+            "Column 'standard_relation' not found in DataFrame. Skipping inter-document duplication flagging."
+        )
+        return df
+
+    discrete_mask = df["standard_relation"] == "="
+    num_discrete = discrete_mask.sum()
+    num_censored = (~discrete_mask).sum()
+
+    if num_discrete == 0:
+        logger.info(
+            f"No discrete measurements (standard_relation='=') found. "
+            f"All {num_censored} measurements are censored. Skipping inter-document duplication flagging."
+        )
+        return df
+
+    logger.debug(
+        f"Checking for inter-document duplicates among {num_discrete} discrete measurements. "
+        f"Ignoring {num_censored} censored measurements."
+    )
+
+    # Only check duplicates among discrete measurements
+    df_discrete = df[discrete_mask]
+    dupli_mask_discrete = conflicting_duplicates(df_discrete, key_subset=key_subset, diff_subset=diff_subset)
+    n_duplicates = dupli_mask_discrete.sum()
+
     if n_duplicates > 0:
         logger.info(
-            f"Flagged {n_duplicates} duplicates with same Mol identifiers accross different Documents."
+            f"Flagged {n_duplicates} duplicates with same Mol identifiers across different Documents "
+            f"(only among discrete measurements with standard_relation='=')."
         )
-    return (
-        df.assign(temp_dupli_flag=dupli_mask)
-        .pipe(
-            add_comment,
-            comment="pChEMBL Duplication Across Documents",
-            criteria_func=lambda x, idxs=dupli_idxs: x.index.isin(idxs),
-            target_column="temp_dupli_flag",
-            comment_type="p",
+        # Map the duplicate indices back to the original dataframe
+        dupli_idxs = df_discrete[dupli_mask_discrete].index
+        return (
+            df.assign(temp_dupli_flag=False)
+            .pipe(lambda x: x.assign(temp_dupli_flag=x.index.isin(dupli_idxs)))
+            .pipe(
+                add_comment,
+                comment="pChEMBL Duplication Across Documents",
+                criteria_func=lambda x, idxs=dupli_idxs: x.index.isin(idxs),
+                target_column="temp_dupli_flag",
+                comment_type="p",
+            )
+            .drop(columns=["temp_dupli_flag"])
         )
-        .drop(columns=["temp_dupli_flag"])
-    )
+    else:
+        logger.debug("No inter-document duplicates found among discrete measurements.")
+        return df

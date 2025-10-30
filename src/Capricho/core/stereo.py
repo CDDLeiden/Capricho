@@ -7,7 +7,7 @@ from rdkit import Chem
 from ..logger import logger
 
 
-def find_undefined_stereocenters(input: Union[Chem.Mol | str]) -> List[int]:
+def find_undefined_stereocenters(_input: Union[Chem.Mol | str]) -> List[int]:
     """
     Find atoms that are stereocenters but have undefined chirality.
 
@@ -17,14 +17,16 @@ def find_undefined_stereocenters(input: Union[Chem.Mol | str]) -> List[int]:
     Returns:
         List[int]: List of atom indices that are undefined stereocenters
     """
-    if input is None:
+    if _input is None:
         return []
 
-    if isinstance(input, str):
-        mol = Chem.MolFromSmiles(input)
+    if isinstance(_input, str):
+        if _input.strip(".") == "":
+            return []  # Yes, weird... But if SMILES has only salts, it becomes "." or ".." after removal
+        mol = Chem.MolFromSmiles(_input)
 
-    elif isinstance(input, Chem.Mol):
-        mol = input
+    elif isinstance(_input, Chem.Mol):
+        mol = _input
 
     if mol is None:
         return []
@@ -32,9 +34,9 @@ def find_undefined_stereocenters(input: Union[Chem.Mol | str]) -> List[int]:
     try:
         chiral_centers = Chem.FindMolChiralCenters(mol, includeUnassigned=True, useLegacyImplementation=False)
     except TypeError as e:
-        raise TypeError(f"Something wront with input: {input}") from e
+        raise TypeError(f"Something wront with input: {_input}") from e
     except RuntimeError as e:
-        logger.error(f"Error finding chiral centers in molecule: {input}. Error: {e}")
+        logger.error(f"Error finding chiral centers in molecule: {_input}. Error: {e}")
         return []
 
     undefined_stereo = []  # find atoms with undefined stereochemistry

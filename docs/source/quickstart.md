@@ -2,13 +2,24 @@
 
 This guide will help you get started with CAPRICHO in just a few minutes.
 
+## Tab Completion
+
+CAPRICHO supports tab completion for commands and options. To enable it, run:
+
+```bash
+capricho --install-completion
+```
+
+This will make it easier to discover available commands and options as you type.
+
 ## Basic Workflow
 
-CAPRICHO follows a simple three-step workflow:
+CAPRICHO follows a simple four-step workflow:
 
 1. **Download** ChEMBL database (one-time setup)
 2. **Explore** the data to understand what's available
 3. **Get** curated bioactivity data for your analysis
+4. **Binarize** (optional) convert continuous activity values to binary labels
 
 ## Step 1: Download ChEMBL Database
 
@@ -78,25 +89,61 @@ Aggregate mutant data and include additional metadata:
 capricho get --target-ids CHEMBL203 --aggregate-mutants --metadata-columns organism,tissue --output-path aggregated_data.csv
 ```
 
+## Step 4: Binarize Data (Optional)
+
+If you need binary labels (active/inactive) for classification tasks, you can binarize the aggregated data:
+
+### Basic Binarization
+
+Convert continuous pChEMBL values to binary labels using the default threshold of 6.0 (1 µM):
+
+```bash
+capricho binarize -i egfr_data.csv -o egfr_binary.csv
+```
+
+### Custom Threshold
+
+Use a more stringent threshold of 7.0 (100 nM):
+
+```bash
+capricho binarize -i egfr_data.csv -o egfr_binary.csv -t 7.0
+```
+
+### Using Median Values
+
+Use median instead of mean for binarization:
+
+```bash
+capricho binarize -i egfr_data.csv -o egfr_binary.csv -vcol pchembl_value_median
+```
+
+The binarization process:
+- Handles censored measurements (< and >) intelligently
+- Flags conflicting measurements for the same compound-target pair
+- Outputs a new column `activity_binary` with values 0 (inactive) or 1 (active)
+
 ## Understanding the Output
 
 CAPRICHO generates several files:
 
 - **Main data file** (e.g., `egfr_data.csv`): The curated bioactivity data
 - **Recipe file** (e.g., `egfr_data_recipe.json`): Complete record of parameters used
-- **Log file**: Detailed processing information
+- **Not aggregated file** (e.g., `egfr_data_not_aggregated.csv`): Pre-aggregation data
+- **Removed subset file** (e.g., `egfr_data_removed_subset.csv`): Data filtered out during curation
 
 ### Key Output Columns
 
 The main data file contains these important columns:
 
-- `molecule_chembl_id`: ChEMBL ID for the compound
+- `connectivity`: Molecular connectivity identifier
+- `smiles`: Standardized SMILES representation
 - `target_chembl_id`: ChEMBL ID for the target
-- `standard_value`: Bioactivity measurement
-- `standard_units`: Units of measurement
-- `pchembl_value`: Calculated or reported pChEMBL value
-- `confidence_score`: ChEMBL confidence score (0-9)
-- Various metadata columns
+- `pchembl_value_mean`: Mean pChEMBL value (aggregated)
+- `pchembl_value_median`: Median pChEMBL value (aggregated)
+- `pchembl_value_std`: Standard deviation
+- `standard_relation`: Relation type (=, <, <<, >, >>, ~)
+- `data_dropping_comment`: Flags for filtered data
+- `data_processing_comment`: Processing notes
 
 ## Next Steps
 
