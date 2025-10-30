@@ -71,7 +71,10 @@ def convert_to_log10(df: pd.DataFrame) -> pd.DataFrame:
     if convertible_df.shape[0] > 0:  # Calculate pChEMBL for convertible units
         convertible_df = convertible_df.pipe(flag_calculated_pchembl)
         convertible_df = convertible_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
-        pchembl_inf_or_nan = convertible_df.replace([np.inf, -np.inf], np.nan).query("pchembl_value.isna()")
+        with pd.option_context("future.no_silent_downcasting", True):
+            pchembl_inf_or_nan = convertible_df.replace([np.inf, -np.inf], np.nan).query(
+                "pchembl_value.isna()"
+            )
         if not pchembl_inf_or_nan.empty:
             debug_cols = [
                 "target_chembl_id",
