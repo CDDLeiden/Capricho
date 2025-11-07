@@ -18,13 +18,14 @@ class ProcessingComment(str, Enum):
     CALCULATED_PCHEMBL = "Calculated pChEMBL"
     SALT_SOLVENT_REMOVED = "Salt/solvent removed"
     PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS = "pChEMBL Duplication Across Documents"
+    CORRECTED_STANDARD_RELATION = "Corrected standard_relation from '=' to '<' (censored activity_comment)"
 
 
 class DroppingComment(str, Enum):
     """Dropping comments indicating data quality issues (dropping flags).
 
-    Note: Assay size values shown are examples. Actual thresholds depend on user
-    parameters and should be matched using pattern-based functions.
+    Note: Assay size and insufficient overlap values shown are examples. Actual thresholds
+    depend on user parameters and should be matched using pattern-based functions.
     """
 
     DATA_VALIDITY_COMMENT = "Data Validity Comment Present"
@@ -35,6 +36,11 @@ class DroppingComment(str, Enum):
     ASSAY_SIZE_TOO_SMALL = "Assay size <"  # Example: "Assay size < 20"
     UNIT_ANNOTATION_ERROR = "Unit Annotation Error"
     PATENT_SOURCE = "Patent source"
+    MISSING_DOCUMENT_DATE = "Missing document date"
+    MIXTURE_IN_SMILES = "Mixture in SMILES"
+    INSUFFICIENT_ASSAY_OVERLAP = (
+        "Insufficient assay overlap"  # Example: "Insufficient assay overlap (min_overlap=5)"
+    )
 
 
 def normalize_comment_pattern(comment: str) -> str:
@@ -47,6 +53,7 @@ def normalize_comment_pattern(comment: str) -> str:
         Normalized pattern for matching. For example:
         - "Assay size < 20" -> "Assay size <"
         - "Assay size > 100" -> "Assay size >"
+        - "Insufficient assay overlap (min_overlap=5)" -> "Insufficient assay overlap"
         - "Unit Annotation Error" -> "Unit Annotation Error"
     """
     # Handle assay size patterns by removing the threshold number
@@ -54,6 +61,9 @@ def normalize_comment_pattern(comment: str) -> str:
         return "Assay size <"
     elif comment.startswith("Assay size >"):
         return "Assay size >"
+    # Handle insufficient assay overlap pattern by removing the parameter
+    elif comment.startswith("Insufficient assay overlap"):
+        return "Insufficient assay overlap"
     return comment
 
 
@@ -78,7 +88,7 @@ def get_all_comments() -> list[str]:
 
     Returns:
         List of all comment patterns (dropping and processing combined).
-        Assay size comments are patterns without specific thresholds.
+        Assay size and insufficient overlap comments are patterns without specific thresholds.
     """
     return [
         DroppingComment.DATA_VALIDITY_COMMENT.value,
@@ -87,10 +97,14 @@ def get_all_comments() -> list[str]:
         DroppingComment.MUTATION_KEYWORD.value,
         DroppingComment.ASSAY_SIZE_TOO_LARGE.value,
         DroppingComment.ASSAY_SIZE_TOO_SMALL.value,
+        DroppingComment.INSUFFICIENT_ASSAY_OVERLAP.value,
         DroppingComment.UNIT_ANNOTATION_ERROR.value,
         DroppingComment.PATENT_SOURCE.value,
+        DroppingComment.MISSING_DOCUMENT_DATE.value,
+        DroppingComment.MIXTURE_IN_SMILES.value,
         ProcessingComment.SALT_SOLVENT_REMOVED.value,
         ProcessingComment.CALCULATED_PCHEMBL.value,
+        ProcessingComment.CORRECTED_STANDARD_RELATION.value,
         ProcessingComment.PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS.value,
     ]
 
@@ -319,7 +333,10 @@ def build_query_string(comment: str) -> str:
         return "processing_comment.str.contains('Calculated pChEMBL', regex=False) & (dropping_comment == '')"
 
     # For other processing comments (uses combined processing_comment column)
-    if comment in [ProcessingComment.SALT_SOLVENT_REMOVED.value]:
+    if comment in [
+        ProcessingComment.SALT_SOLVENT_REMOVED.value,
+        ProcessingComment.CORRECTED_STANDARD_RELATION.value,
+    ]:
         return f"processing_comment.str.contains('{comment}', regex=False) & dropping_comment == ''"
 
     # Special handling for potential duplicates (needs to be in both assays, exclude data validity issues)
@@ -347,6 +364,14 @@ def build_query_string(comment: str) -> str:
         return (
             "((data_dropping_comment_x.str.contains('Patent source', regex=False) | "
             "data_dropping_comment_y.str.contains('Patent source', regex=False)) & "
+            "~dropping_comment.str.contains('Data Validity Comment Present', regex=False))"
+        )
+
+    # we need to compare the documents with dates to the ones without to see if it's an issue
+    if comment == DroppingComment.MISSING_DOCUMENT_DATE.value:
+        return (
+            "((data_dropping_comment_x.str.contains('Missing document date', regex=False) | "
+            "data_dropping_comment_y.str.contains('Missing document date', regex=False)) & "
             "~dropping_comment.str.contains('Data Validity Comment Present', regex=False))"
         )
 
