@@ -33,6 +33,7 @@ DEFAULT_ASSAY_MATCH_FIELDS = [
     "assay_cell_type",
     "assay_subcellular_fraction",
     "bao_format",
+    "variant_id",
 ]
 
 ACTIVITY_ID = "activity_id"

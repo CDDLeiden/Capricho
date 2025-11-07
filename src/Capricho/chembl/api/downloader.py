@@ -592,6 +592,7 @@ def get_full_activity_data_sql(
         "d.volume",
         "d.year",
         "d.title",
+        "a.variant_id",
         "vs.mutation",
         "d.chembl_release_id AS chembl_release",
     ]
