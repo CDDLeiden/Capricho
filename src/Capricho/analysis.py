@@ -18,7 +18,7 @@ class ProcessingComment(str, Enum):
     CALCULATED_PCHEMBL = "Calculated pChEMBL"
     SALT_SOLVENT_REMOVED = "Salt/solvent removed"
     PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS = "pChEMBL Duplication Across Documents"
-    CORRECTED_STANDARD_RELATION = "Corrected standard_relation from '=' to '<' (censored activity_comment)"
+    CORRECTED_STANDARD_RELATION = "Corrected standard_relation from = to < (censored activity_comment)"
 
 
 class DroppingComment(str, Enum):
@@ -41,6 +41,7 @@ class DroppingComment(str, Enum):
     INSUFFICIENT_ASSAY_OVERLAP = (
         "Insufficient assay overlap"  # Example: "Insufficient assay overlap (min_overlap=5)"
     )
+    INSUFFICIENT_ASSAY_OVERLAP_WITH_METADATA = "Insufficient assay overlap with metadata matching"  # Example: "Insufficient assay overlap with metadata matching (min_overlap=5)"
 
 
 def normalize_comment_pattern(comment: str) -> str:
@@ -54,6 +55,7 @@ def normalize_comment_pattern(comment: str) -> str:
         - "Assay size < 20" -> "Assay size <"
         - "Assay size > 100" -> "Assay size >"
         - "Insufficient assay overlap (min_overlap=5)" -> "Insufficient assay overlap"
+        - "Insufficient assay overlap with metadata matching (min_overlap=5)" -> "Insufficient assay overlap with metadata matching"
         - "Unit Annotation Error" -> "Unit Annotation Error"
     """
     # Handle assay size patterns by removing the threshold number
@@ -61,7 +63,9 @@ def normalize_comment_pattern(comment: str) -> str:
         return "Assay size <"
     elif comment.startswith("Assay size >"):
         return "Assay size >"
-    # Handle insufficient assay overlap pattern by removing the parameter
+    # Handle insufficient assay overlap patterns by removing the parameter
+    elif comment.startswith("Insufficient assay overlap with metadata matching"):
+        return "Insufficient assay overlap with metadata matching"
     elif comment.startswith("Insufficient assay overlap"):
         return "Insufficient assay overlap"
     return comment
@@ -98,6 +102,7 @@ def get_all_comments() -> list[str]:
         DroppingComment.ASSAY_SIZE_TOO_LARGE.value,
         DroppingComment.ASSAY_SIZE_TOO_SMALL.value,
         DroppingComment.INSUFFICIENT_ASSAY_OVERLAP.value,
+        DroppingComment.INSUFFICIENT_ASSAY_OVERLAP_WITH_METADATA.value,
         DroppingComment.UNIT_ANNOTATION_ERROR.value,
         DroppingComment.PATENT_SOURCE.value,
         DroppingComment.MISSING_DOCUMENT_DATE.value,
@@ -431,15 +436,17 @@ def plot_multi_panel_comparability(
         query_str = build_query_string(obs)
         subset = exploded_subset.query(query_str)
 
-        # Extract actual title with dynamic threshold if it's an assay size comment
+        # Extract actual title with dynamic threshold if it's a parametric comment
         title_str = obs
-        if obs.startswith("Assay size"):
+        if obs.startswith("Assay size") or obs.startswith("Insufficient assay overlap"):
             # Find first occurrence with actual threshold from data
             for col in ["data_dropping_comment_x", "data_dropping_comment_y"]:
                 if col in subset.columns:
                     sample_comments = subset[col].dropna()
                     if len(sample_comments) > 0:
-                        for comment in sample_comments.iloc[0].split("|"):
+                        # Split by " & " since data_dropping_comment uses " & " as separator
+                        for comment in sample_comments.iloc[0].split(" & "):
+                            comment = comment.strip()
                             if normalize_comment_pattern(comment) == obs:
                                 title_str = comment
                                 break

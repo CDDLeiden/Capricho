@@ -132,6 +132,7 @@ def get_standardize_and_clean_workflow(
     min_assay_size: Optional[int] = None,
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
+    max_assay_match: bool = False,
     strict_mutant_removal: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
@@ -168,9 +169,12 @@ def get_standardize_and_clean_workflow(
         max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
             have their activities flagged for removal. Defaults to None (no filtering).
         min_assay_overlap: Minimum number of overlapping compounds between two assays for the same target
-                for their activities to be considered. Defaults to None (no filtering).
-            strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
-                description will be flagged for removal. Defaults to False.
+            for their activities to be considered. Defaults to 0 (no filtering).
+        max_assay_match: If True, only compare assays with matching metadata when checking overlap.
+            When enabled, assays must match on fields defined in DEFAULT_ASSAY_MATCH_FIELDS to be
+            considered compatible partners. Defaults to False.
+        strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
+            description will be flagged for removal. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -266,6 +270,7 @@ def get_standardize_and_clean_workflow(
             assay_col=ASSAY_ID,
             target_col=TARGET_ID,
             comment_col=DATA_DROPPING_COMMENT,
+            max_assay_match=max_assay_match,
         )
 
     cols_to_remove_post_standardization = [

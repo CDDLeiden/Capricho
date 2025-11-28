@@ -7,6 +7,7 @@ import pandas as pd
 from Capricho.chembl.data_flag_functions import (
     flag_censored_activity_comment,
     flag_incompatible_units,
+    flag_insufficient_assay_overlap,
     flag_inter_document_duplication,
     flag_missing_document_date,
     flag_patent_source,
@@ -605,6 +606,217 @@ class TestFlagPatentSource(unittest.TestCase):
         self.assertIn("Existing comment", result.loc[0, "data_dropping_comment"])
         self.assertIn("Patent source", result.loc[0, "data_dropping_comment"])
         self.assertIn("Patent source", result.loc[1, "data_dropping_comment"])
+
+
+class TestFlagInsufficientAssayOverlap(unittest.TestCase):
+    """Tests for flag_insufficient_assay_overlap function with and without metadata matching."""
+
+    def test_basic_overlap_filtering(self):
+        """Test that assays without sufficient overlap are flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL3", "MOL4", "MOL5"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "pchembl_value": [6.0, 6.5, 7.0, 7.5, 8.0],
+                "data_dropping_comment": [None, None, None, None, None],
+            }
+        )
+
+        # ASSAY1 has MOL1, MOL2 (2 compounds)
+        # ASSAY2 has MOL3, MOL4, MOL5 (3 compounds)
+        # Overlap between them: 0 compounds
+        # With min_overlap=2, both assays should be flagged
+
+        result = flag_insufficient_assay_overlap(df, min_overlap=2)
+
+        # All activities should be flagged since no assay pair meets min_overlap
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertTrue(flagged_mask.all(), "All activities should be flagged when overlap is insufficient")
+
+    def test_sufficient_overlap_not_flagged(self):
+        """Test that assays with sufficient overlap are not flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2", "MOL3"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "pchembl_value": [6.0, 6.5, 6.1, 6.6, 7.0],
+                "data_dropping_comment": [None, None, None, None, None],
+            }
+        )
+
+        # ASSAY1 has MOL1, MOL2
+        # ASSAY2 has MOL1, MOL2, MOL3
+        # Overlap: 2 compounds (MOL1, MOL2)
+        # With min_overlap=2, both assays should NOT be flagged
+
+        result = flag_insufficient_assay_overlap(df, min_overlap=2)
+
+        # No activities should be flagged
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertFalse(flagged_mask.any(), "No activities should be flagged when overlap is sufficient")
+
+    def test_metadata_matching_filters_incompatible_assays(self):
+        """Test that with max_assay_match=True, only metadata-compatible assays are compared."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2", "MOL3"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "assay_type": ["B", "B", "F", "F", "F"],  # Different assay types
+                "assay_organism": ["Human", "Human", "Human", "Human", "Human"],
+                "pchembl_value": [6.0, 6.5, 6.1, 6.6, 7.0],
+                "data_dropping_comment": [None, None, None, None, None],
+            }
+        )
+
+        # ASSAY1: type B, has MOL1, MOL2
+        # ASSAY2: type F, has MOL1, MOL2, MOL3
+        # They share 2 compounds, but different assay_type
+        # With max_assay_match=True and min_overlap=2, both should be flagged
+        # because they are not metadata-compatible
+
+        result = flag_insufficient_assay_overlap(
+            df, min_overlap=2, max_assay_match=True, assay_match_fields=["assay_type"]
+        )
+
+        # All activities should be flagged since assays are not metadata-compatible
+        flagged_mask = result["data_dropping_comment"].str.contains(
+            "Insufficient assay overlap with metadata matching", na=False
+        )
+        self.assertTrue(flagged_mask.all(), "All activities should be flagged when assays have incompatible metadata")
+
+    def test_metadata_matching_allows_compatible_assays(self):
+        """Test that with max_assay_match=True, metadata-compatible assays with sufficient overlap pass."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2", "MOL3"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "assay_type": ["B", "B", "B", "B", "B"],  # Same assay type
+                "assay_organism": ["Human", "Human", "Human", "Human", "Human"],
+                "pchembl_value": [6.0, 6.5, 6.1, 6.6, 7.0],
+                "data_dropping_comment": [None, None, None, None, None],
+            }
+        )
+
+        # ASSAY1: type B, has MOL1, MOL2
+        # ASSAY2: type B, has MOL1, MOL2, MOL3
+        # They share 2 compounds and have same assay_type
+        # With max_assay_match=True and min_overlap=2, both should NOT be flagged
+
+        result = flag_insufficient_assay_overlap(
+            df, min_overlap=2, max_assay_match=True, assay_match_fields=["assay_type"]
+        )
+
+        # No activities should be flagged
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertFalse(
+            flagged_mask.any(), "No activities should be flagged when metadata-compatible assays have sufficient overlap"
+        )
+
+    def test_multiple_targets_handled_independently(self):
+        """Test that overlap checking is done independently for each target."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET2", "TARGET2"],  # Different targets
+                "pchembl_value": [6.0, 6.5, 7.0, 7.5],
+                "data_dropping_comment": [None, None, None, None],
+            }
+        )
+
+        # TARGET1: ASSAY1 has MOL1, MOL2 (only one assay, can't form pair)
+        # TARGET2: ASSAY2 has MOL1, MOL2 (only one assay, can't form pair)
+        # With min_overlap=2, nothing should be flagged (single assays per target)
+
+        result = flag_insufficient_assay_overlap(df, min_overlap=2)
+
+        # No activities should be flagged (no pairs to compare)
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertFalse(flagged_mask.any(), "No activities should be flagged when each target has only one assay")
+
+    def test_min_overlap_zero_skips_filtering(self):
+        """Test that min_overlap=0 skips the filtering entirely."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
+                "pchembl_value": [6.0, 6.5],
+                "data_dropping_comment": [None, None],
+            }
+        )
+
+        result = flag_insufficient_assay_overlap(df, min_overlap=0)
+
+        # No activities should be flagged
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertFalse(flagged_mask.any(), "min_overlap=0 should skip all filtering")
+
+    def test_missing_metadata_fields_handled_gracefully(self):
+        """Test that missing metadata fields are handled gracefully when max_assay_match=True."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "assay_type": ["B", "B", "B", "B"],
+                # Missing other DEFAULT_ASSAY_MATCH_FIELDS like assay_organism, etc.
+                "pchembl_value": [6.0, 6.5, 6.1, 6.6],
+                "data_dropping_comment": [None, None, None, None],
+            }
+        )
+
+        # Should not raise an error, but log a warning about missing fields
+        result = flag_insufficient_assay_overlap(df, min_overlap=2, max_assay_match=True)
+
+        # Should still complete successfully
+        self.assertEqual(len(result), 4)
+
+    def test_skips_size_flagged_assays_goldilocks(self):
+        """Test that assays already flagged for size issues are skipped in overlap checking (goldilocks approach)."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL3", "MOL4", "MOL5", "MOL6"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY3", "ASSAY3"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "pchembl_value": [6.0, 6.5, 6.0, 7.0, 6.0, 8.0],
+                "data_dropping_comment": [
+                    "Assay size < 20",
+                    "Assay size < 20",
+                    None,
+                    None,
+                    None,
+                    None,
+                ],
+            }
+        )
+
+        # ASSAY1 is already flagged for size (has MOL1, MOL2)
+        # ASSAY2 has MOL3, MOL4
+        # ASSAY3 has MOL5, MOL6
+        # ASSAY1 shares MOL1 with no one, but it's already size-flagged so should be skipped
+        # ASSAY2 and ASSAY3 have no overlap, so both should be flagged for insufficient overlap
+
+        result = flag_insufficient_assay_overlap(df, min_overlap=1)
+
+        # ASSAY1 should still only have size flag, not overlap flag
+        assay1_comments = result[result["assay_chembl_id"] == "ASSAY1"]["data_dropping_comment"]
+        for comment in assay1_comments:
+            self.assertIn("Assay size < 20", comment)
+            self.assertNotIn("Insufficient assay overlap", comment)
+
+        # ASSAY2 and ASSAY3 should have overlap flag (they don't overlap with each other or ASSAY1)
+        assay2_comments = result[result["assay_chembl_id"] == "ASSAY2"]["data_dropping_comment"]
+        for comment in assay2_comments:
+            self.assertIn("Insufficient assay overlap", comment)
+
+        assay3_comments = result[result["assay_chembl_id"] == "ASSAY3"]["data_dropping_comment"]
+        for comment in assay3_comments:
+            self.assertIn("Insufficient assay overlap", comment)
 
 
 if __name__ == "__main__":

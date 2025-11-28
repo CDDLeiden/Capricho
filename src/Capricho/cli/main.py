@@ -543,6 +543,7 @@ def get_data(
         min_assay_size=min_assay_size,
         max_assay_size=max_assay_size,
         min_assay_overlap=min_assay_overlap,
+        max_assay_match=max_assay_match,
         strict_mutant_removal=strict_mutant_removal,
     )
 
