@@ -1,6 +1,6 @@
 {
-  "command": "capricho get --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --chembl-release 31 --chembl-version 35 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
-  "capricho version": "0.1.dev217+ga513bc3.d20250722",
+  "command": "capricho get --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --chembl-release 31 --chembl-version 36 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
+  "capricho version": "0.1.dev237+g772cd9ff7.d20251014",
   "molecule_ids": [],
   "target_ids": [
     "CHEMBL256"
@@ -39,7 +39,7 @@
   "aggregate_mutants": false,
   "skip_recipe": false,
   "chembl_backend": "downloader",
-  "chembl_version": "35",
+  "chembl_version": "36",
   "require_doc_date": true,
   "max_assay_size": 100,
   "min_assay_size": 20,
