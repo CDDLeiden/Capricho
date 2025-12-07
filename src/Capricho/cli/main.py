@@ -53,6 +53,7 @@ DEFAULTS = {
     "min_assay_overlap": 0,
     "strict_mutant_removal": False,
     "compound_equality": "connectivity",
+    "aggregate_on": "pchembl_value",
 }
 
 DEFAULT_FALSE_ARGS = [
@@ -125,6 +126,11 @@ class CompoundEquality(str, Enum):
 class CompoundIdColumn(str, Enum):
     connectivity = "connectivity"
     smiles = "smiles"
+
+
+class AggregationColumn(str, Enum):
+    pchembl_value = "pchembl_value"
+    standard_value = "standard_value"
 
 
 @app.callback()
@@ -336,6 +342,14 @@ def get_data(
             help="Method for compound equality determination. mixed_fp uses combined ECFP4 and RDKit fingerprints.",
         ),
     ] = DEFAULTS["compound_equality"],
+    aggregate_on: Annotated[
+        AggregationColumn,
+        typer.Option(
+            "-agg-on",
+            "--aggregate-on",
+            help="Column to aggregate statistics on. Use 'standard_value' for non-pChEMBL data (e.g., % inhibition).",
+        ),
+    ] = DEFAULTS["aggregate_on"],
     # --- Metadata & Aggregation ---
     metadata_columns: Annotated[
         str,
@@ -556,6 +570,7 @@ def get_data(
         max_assay_match=max_assay_match,
         output_path=output_path,
         compound_equality=compound_equality.value,
+        value_col=aggregate_on.value,
     )
 
     if not skip_recipe:
@@ -763,6 +778,139 @@ def binarize_data(
 
     logger.info(f"Binarization complete. Output saved to {output_path}")
     return binarized_df
+
+
+@app.command(name="prepare", no_args_is_help=True)
+def prepare_data(
+    ctx: typer.Context,
+    input_path: Annotated[
+        Path,
+        typer.Option(
+            "-i",
+            "--input-path",
+            help="Path to aggregated data file (CSV, TSV, or Parquet).",
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+        ),
+    ],
+    output_path: Annotated[
+        Path,
+        typer.Option(
+            "-o",
+            "--output-path",
+            help="Path to save the activity matrix.",
+        ),
+    ],
+    task_col: Annotated[
+        str,
+        typer.Option(
+            "--task-col",
+            help="Column to use as task identifier (e.g., target_chembl_id).",
+            metavar="str",
+        ),
+    ] = "target_chembl_id",
+    aggregate_on: Annotated[
+        AggregationColumn,
+        typer.Option(
+            "-agg-on",
+            "--aggregate-on",
+            help="Column that was aggregated on during 'capricho get'. Derives the value column as '{aggregate_on}_mean'.",
+        ),
+    ] = AggregationColumn.pchembl_value,
+    compound_col: Annotated[
+        CompoundIdColumn,
+        typer.Option(
+            "--compound-col",
+            help="Column for compound identity (connectivity or smiles).",
+        ),
+    ] = CompoundIdColumn.connectivity,
+    smiles_col: Annotated[
+        str,
+        typer.Option(
+            "--smiles-col",
+            help="Column containing SMILES strings.",
+            metavar="str",
+        ),
+    ] = "smiles",
+    remove_flags: Annotated[
+        Optional[str],
+        typer.Option(
+            "--remove-flags",
+            parser=csv_string,
+            help="Quality flags to remove, comma-separated. Rows with these flags in data_dropping_comment will be filtered out.",
+            metavar="flag1,flag2,...",
+        ),
+    ] = None,
+    id_columns: Annotated[
+        Optional[str],
+        typer.Option(
+            "--id-columns",
+            parser=csv_string,
+            help="Extra columns to combine with task_col for composite task identifiers. "
+            "Use the same columns passed to 'capricho get --id-columns' during aggregation.",
+            metavar="col1,col2,...",
+        ),
+    ] = None,
+):
+    """Transform aggregated bioactivity data into multitask format (activity matrix).
+
+    This command pivots aggregated data to create an activity matrix where rows are
+    compounds and columns are tasks (e.g., targets). This format is suitable for
+    multitask machine learning models.
+
+    Example:
+        capricho prepare -i aggregated_data.csv -o activity_matrix.csv
+        capricho prepare -i data.csv -o matrix.csv --remove-flags "Missing SMILES,Mixture"
+    """
+    import pandas as pd
+
+    from ..core.pandas_helper import save_dataframe
+    from .prepare import prepare_multitask_data
+
+    logger.info(f"Loading aggregated data from {input_path}")
+
+    if input_path.suffix in [".csv", ".csv.gz"]:
+        df = pd.read_csv(input_path)
+    elif input_path.suffix in [".tsv", ".tsv.gz"]:
+        df = pd.read_csv(input_path, sep="\t")
+    elif input_path.suffix == ".parquet":
+        df = pd.read_parquet(input_path)
+    else:
+        logger.error(f"Unsupported file format: {input_path.suffix}. Use .csv, .tsv, .gz, or .parquet")
+        raise typer.Exit(code=1)
+
+    logger.info(f"Loaded {len(df)} rows from {input_path}")
+
+    # Derive value column from aggregate_on
+    value_col = f"{aggregate_on.value}_mean"
+
+    activity_matrix = prepare_multitask_data(
+        df=df,
+        task_col=task_col,
+        value_col=value_col,
+        compound_col=compound_col.value,
+        smiles_col=smiles_col,
+        remove_flags=remove_flags,
+        id_columns=id_columns,
+    )
+
+    # Ensure output directory exists and add proper suffix
+    if not output_path.parent.exists():
+        output_path.parent.mkdir(parents=True)
+    if output_path.suffix == "":
+        output_path = output_path.with_suffix(input_path.suffix)
+
+    save_dataframe(activity_matrix, output_path)
+
+    logger.info(f"Activity matrix saved to {output_path}")
+    logger.info(
+        f"Matrix dimensions: {len(activity_matrix)} compounds x "
+        f"{len(activity_matrix.columns)-1} tasks (plus smiles column)"
+    )
+
+    return activity_matrix
 
 
 if __name__ == "__main__":

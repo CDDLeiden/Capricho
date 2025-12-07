@@ -188,7 +188,9 @@ def apply_func_grpd(grpd, func: callable, idcols: list, *cols: list) -> pd.DataF
     return pd.concat(results, ignore_index=False, axis=1).reset_index()
 
 
-def assign_stats(df: pd.DataFrame, sep="|", value_col="pchembl_value", use_geometric=False) -> pd.DataFrame:
+def assign_stats(
+    df: pd.DataFrame, sep: str = "|", value_col: str = "pchembl_value", use_geometric: bool = True
+) -> pd.DataFrame:
     """Assign statistics to a DataFrame based on a column with multiple values separated by
     a particular separator, e.g. `|` (pipe).
 

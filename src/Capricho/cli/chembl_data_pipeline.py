@@ -406,6 +406,7 @@ def aggregate_data(
     max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
     compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
+    value_col: str = "pchembl_value",
 ):
     """Aggregate the data obtained from ChEMBL by:
     1) Calculate fingerprints and use those to identify same-structure compounds;
@@ -433,6 +434,8 @@ def aggregate_data(
         compound_equality: How to identify same compounds in the dataset. If "mixed_fp", uses
             mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
             uses the first part of the InChI key (connectivity) to identify same compounds. Defaults to "connectivity".
+        value_col: Column name containing the values to aggregate statistics on.
+            Defaults to "pchembl_value". Use "standard_value" for non-pChEMBL data (e.g., % inhibition).
 
     Returns:
         pd.DataFrame: the aggregated data
@@ -475,16 +478,19 @@ def aggregate_data(
             f"Invalid compound_pairing value: {compound_equality}. " "Expected 'mixed_fp' or 'connectivity'."
         )
 
-    # For censored measurements (!=), include relation and pchembl_value in the compound identifier
+    # For censored measurements (!=), include relation and value in the compound identifier
     # so they are only aggregated if they have the same value AND relation
     has_censored = df["standard_relation"].ne("=").any()
     if has_censored:
         logger.info(
             "Detected censored measurements (standard_relation != '='). "
-            "These will only be aggregated if they have identical relation AND pchembl_value."
+            f"These will only be aggregated if they have identical relation AND {value_col}."
         )
-        # Round pchembl_value to 2 decimal places to avoid floating point precision issues
-        rounded_pchembl = df["pchembl_value"].round(2).astype(str)
+        # Round value to some decimal places to avoid floating point precision issues
+        if value_col == "pchembl_value":
+            rounded_value = df[value_col].round(2).astype(str)
+        elif value_col == "standard_value":
+            rounded_value = df[value_col].round(4).astype(str)
         # For censored measurements, append relation + value to the id_array
         censored_mask = df["standard_relation"] != "="
         df.loc[censored_mask, "id_array"] = (
@@ -492,7 +498,7 @@ def aggregate_data(
             + "_"
             + df.loc[censored_mask, "standard_relation"]
             + "_"
-            + rounded_pchembl[censored_mask]
+            + rounded_value[censored_mask]
         )
 
     # Here we have a repeat index for compounds across all fetched data. Processing which repeats
@@ -518,6 +524,7 @@ def aggregate_data(
         chirality=chirality,
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
+        value_col=value_col,
     )
 
     # TODO: we calculate connectivities twice if compound_equality == 'connectivity', which

@@ -175,6 +175,69 @@ class TestStatsMake(unittest.TestCase):
         less_than_row = less_than_rows.iloc[0]
         self.assertEqual(less_than_row['pchembl_value'], '7.00')  # format_value converts to string
 
+    def test_process_repeat_mols_with_custom_value_col(self):
+        """Test that process_repeat_mols works with a custom value column (e.g., standard_value)"""
+        # Create test data with standard_value instead of pchembl_value
+        test_df = pd.DataFrame({
+            'standard_smiles': ['CCO', 'CCO', 'CCC'],
+            'standard_value': [50.0, 75.0, 100.0],  # Use standard_value, not pchembl_value
+            'standard_units': ['%', '%', '%'],
+            'target_chembl_id': ['CHEMBL123', 'CHEMBL123', 'CHEMBL123'],
+            'mutation': ['None', 'None', 'None'],
+            'standard_relation': ['=', '=', '='],
+            'molecule_chembl_id': ['MOL1', 'MOL1', 'MOL2'],
+            'assay_chembl_id': ['ASSAY1', 'ASSAY2', 'ASSAY3'],
+            'assay_description': ['Test assay 1', 'Test assay 2', 'Test assay 3'],
+            'activity_id': [1, 2, 3],
+            'standard_type': ['Inhibition', 'Inhibition', 'Inhibition'],
+            'assay_type': ['A', 'A', 'A'],
+            'confidence_score': [9, 9, 9],
+            'target_organism': ['Homo sapiens', 'Homo sapiens', 'Homo sapiens'],
+            'assay_tissue': ['None', 'None', 'None'],
+            'assay_cell_type': ['None', 'None', 'None'],
+            'relationship_type': ['D', 'D', 'D'],
+            'max_phase': ['None', 'None', 'None'],
+            'oral': ['None', 'None', 'None'],
+            'prodrug': ['None', 'None', 'None'],
+            'withdrawn_flag': ['None', 'None', 'None'],
+            'document_chembl_id': ['DOC1', 'DOC2', 'DOC3'],
+            'canonical_smiles': ['CCO', 'CCO', 'CCC'],
+        })
+
+        # Rows 0 and 1 have same SMILES (repeat), row 2 is different
+        repeat_idxs = [[0, 1]]
+
+        # Process the repeats with custom value_col
+        result_df = stats_make.process_repeat_mols(
+            test_df,
+            repeat_idxs,
+            solve_strat='keep',
+            extra_id_cols=['standard_units'],  # Group by units to prevent mixing
+            aggregate_mutants=False,
+            chirality=False,
+            value_col='standard_value',  # Use standard_value instead of pchembl_value
+        )
+
+        # Check that we have 2 rows (1 aggregated from CCO, 1 single from CCC)
+        self.assertEqual(len(result_df), 2)
+
+        # Check that standard_value statistics columns exist (not pchembl_value)
+        self.assertIn('standard_value_mean', result_df.columns)
+        self.assertIn('standard_value_std', result_df.columns)
+        self.assertIn('standard_value_median', result_df.columns)
+        self.assertIn('standard_value_counts', result_df.columns)
+
+        # Check that pchembl_value columns do NOT exist
+        self.assertNotIn('pchembl_value_mean', result_df.columns)
+        self.assertNotIn('pchembl_value_std', result_df.columns)
+
+        # Check the aggregated row (CCO) has correct statistics
+        cco_rows = result_df[result_df['smiles'].str.contains('CCO', na=False)]
+        if len(cco_rows) > 0:
+            cco_row = cco_rows.iloc[0]
+            self.assertEqual(cco_row['standard_value_counts'], 2)
+            self.assertAlmostEqual(cco_row['standard_value_mean'], (50.0 + 75.0) / 2)
+
 
 if __name__ == "__main__":
     unittest.main()
