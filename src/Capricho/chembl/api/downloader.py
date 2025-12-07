@@ -410,6 +410,15 @@ def get_activity_table_sql(
             a.chembl_id AS assay_chembl_id,
             a.description AS assay_description,
             a.assay_type,
+            a.assay_organism,
+            a.assay_category,
+            a.assay_tax_id,
+            a.assay_strain,
+            a.assay_tissue,
+            a.assay_cell_type,
+            a.assay_subcellular_fraction,
+            a.bao_format,
+            a.variant_id,
             md.chembl_id AS molecule_chembl_id,
             act.standard_flag,
             act.standard_relation,
@@ -634,6 +643,55 @@ def get_full_activity_data_sql(
         version=downloader_configs["version"],
         prefix=downloader_configs["prefix"],
     ).assign(mutation=lambda x: x["mutation"].fillna("WT"))
+
+
+def get_target_names_sql(
+    target_chembl_ids: List[str],
+    prefix: Optional[Sequence[str]] = None,
+    version: Optional[Union[int, str]] = None,
+) -> dict:
+    """Get target names for a list of ChEMBL target IDs using SQL backend.
+
+    Args:
+        target_chembl_ids: list of ChEMBL target IDs.
+        prefix: Optional prefix for an alternative data directory.
+        version: Optional ChEMBL version to use.
+
+    Returns:
+        dict: a dictionary mapping chembl_id to pref_name.
+    """
+    downloader_configs = check_and_download_chembl_db(prefix=prefix, version=version)
+
+    if not target_chembl_ids:
+        raise ValueError("No target IDs provided")
+
+    placeholders = ", ".join([f"'{id}'" for id in target_chembl_ids])
+    where_clause = f"chembl_id IN ({placeholders})"
+
+    query_str = dedent(
+        f"""\
+        SELECT
+            chembl_id,
+            pref_name
+        FROM target_dictionary
+        WHERE
+            {where_clause}
+        """
+    )
+
+    logger.debug(f"Generated SQL query for target names:\n{query_str}")
+
+    result = query(
+        query_str,
+        version=downloader_configs["version"],
+        prefix=downloader_configs["prefix"],
+    )
+
+    if result.empty:
+        logger.warning(f"No targets found for IDs: {target_chembl_ids}")
+        return {}
+
+    return dict(zip(result["chembl_id"], result["pref_name"]))
 
 
 def get_assay_size_sql(
