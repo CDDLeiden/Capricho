@@ -618,6 +618,7 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
                 "molecule_chembl_id": ["MOL1", "MOL2", "MOL3", "MOL4", "MOL5"],
                 "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
                 "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "document_chembl_id": ["DOC1", "DOC1", "DOC1", "DOC1", "DOC1"],
                 "pchembl_value": [6.0, 6.5, 7.0, 7.5, 8.0],
                 "data_dropping_comment": [None, None, None, None, None],
             }
@@ -664,6 +665,7 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
                 "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2", "MOL3"],
                 "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
                 "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "document_chembl_id": ["DOC1", "DOC1", "DOC2", "DOC2", "DOC2"],
                 "assay_type": ["B", "B", "F", "F", "F"],  # Different assay types
                 "assay_organism": ["Human", "Human", "Human", "Human", "Human"],
                 "pchembl_value": [6.0, 6.5, 6.1, 6.6, 7.0],
@@ -685,7 +687,9 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
         flagged_mask = result["data_dropping_comment"].str.contains(
             "Insufficient assay overlap with metadata matching", na=False
         )
-        self.assertTrue(flagged_mask.all(), "All activities should be flagged when assays have incompatible metadata")
+        self.assertTrue(
+            flagged_mask.all(), "All activities should be flagged when assays have incompatible metadata"
+        )
 
     def test_metadata_matching_allows_compatible_assays(self):
         """Test that with max_assay_match=True, metadata-compatible assays with sufficient overlap pass."""
@@ -713,7 +717,8 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
         # No activities should be flagged
         flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
         self.assertFalse(
-            flagged_mask.any(), "No activities should be flagged when metadata-compatible assays have sufficient overlap"
+            flagged_mask.any(),
+            "No activities should be flagged when metadata-compatible assays have sufficient overlap",
         )
 
     def test_multiple_targets_handled_independently(self):
@@ -736,7 +741,9 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
 
         # No activities should be flagged (no pairs to compare)
         flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
-        self.assertFalse(flagged_mask.any(), "No activities should be flagged when each target has only one assay")
+        self.assertFalse(
+            flagged_mask.any(), "No activities should be flagged when each target has only one assay"
+        )
 
     def test_min_overlap_zero_skips_filtering(self):
         """Test that min_overlap=0 skips the filtering entirely."""
@@ -783,6 +790,7 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
                 "molecule_chembl_id": ["MOL1", "MOL2", "MOL3", "MOL4", "MOL5", "MOL6"],
                 "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY3", "ASSAY3"],
                 "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "document_chembl_id": ["DOC1", "DOC1", "DOC2", "DOC2", "DOC3", "DOC3"],
                 "pchembl_value": [6.0, 6.5, 6.0, 7.0, 6.0, 8.0],
                 "data_dropping_comment": [
                     "Assay size < 20",
@@ -817,6 +825,47 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
         assay3_comments = result[result["assay_chembl_id"] == "ASSAY3"]["data_dropping_comment"]
         for comment in assay3_comments:
             self.assertIn("Insufficient assay overlap", comment)
+
+    def test_nan_metadata_values_are_considered_compatible(self):
+        """Test that assays with NaN metadata values are treated as compatible when both have NaN.
+
+        This is a regression test for the issue where NaN != NaN in pandas comparison,
+        which prevented assays with missing metadata from being aggregated together.
+        """
+        import numpy as np
+
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "document_chembl_id": ["DOC1", "DOC1", "DOC2", "DOC2"],  # Different documents
+                "assay_type": ["B", "B", "B", "B"],
+                "assay_organism": [np.nan, np.nan, np.nan, np.nan],  # Both assays have NaN
+                "assay_tissue": [np.nan, np.nan, np.nan, np.nan],
+                "pchembl_value": [6.0, 6.5, 6.1, 6.6],  # Different values for same molecules
+                "data_dropping_comment": [None, None, None, None],
+            }
+        )
+
+        # ASSAY1 and ASSAY2 both have NaN for assay_organism and assay_tissue
+        # They share 2 compounds (MOL1, MOL2)
+        # With max_assay_match=True, they should be considered compatible
+        # because NaN == NaN conceptually (both missing the same metadata)
+
+        result = flag_insufficient_assay_overlap(
+            df,
+            min_overlap=2,
+            max_assay_match=True,
+            assay_match_fields=["assay_type", "assay_organism", "assay_tissue"],
+        )
+
+        # No activities should be flagged since assays have compatible metadata (including matching NaN values)
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertFalse(
+            flagged_mask.any(),
+            "Assays with matching NaN metadata should be considered compatible and not flagged",
+        )
 
 
 if __name__ == "__main__":

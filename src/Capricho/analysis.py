@@ -2,7 +2,7 @@
 
 from enum import Enum
 from itertools import combinations
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -152,7 +152,9 @@ def deaggregate_data(data: pd.DataFrame, sep_str: str = "|") -> pd.DataFrame:
     return deaggregated.reset_index(drop=True)
 
 
-def explode_assay_comparability(subset: pd.DataFrame, sep_str: str = "|") -> pd.DataFrame:
+def explode_assay_comparability(
+    subset: pd.DataFrame, sep_str: str = "|", extra_multival_cols: Optional[list[str]] = None
+) -> pd.DataFrame:
     """Explode dataset to create pairwise comparisons between assays for the same compound.
 
     Takes a subset of data where compounds have measurements across multiple assays (indicated
@@ -165,6 +167,11 @@ def explode_assay_comparability(subset: pd.DataFrame, sep_str: str = "|") -> pd.
     Returns:
         DataFrame with exploded pairwise comparisons, with _x and _y suffixes for each pair.
     """
+    if extra_multival_cols is None:
+        extra_multival_cols = []
+    elif not isinstance(extra_multival_cols, list):
+        raise ValueError("extra_multival_cols must be a list of column names or None")
+
     singleval_cols = [
         "connectivity",
         "target_chembl_id",
@@ -178,7 +185,13 @@ def explode_assay_comparability(subset: pd.DataFrame, sep_str: str = "|") -> pd.
         "data_dropping_comment",
         "standard_type",
         "canonical_smiles",
+        *extra_multival_cols,
     ]
+
+    # Prevent overlap between singleval and multival columns
+    for col in extra_multival_cols:
+        if col in singleval_cols:
+            singleval_cols.remove(col)
 
     exploded_subset = subset[
         [
@@ -412,11 +425,15 @@ def plot_multi_panel_comparability(
         Tuple of (figure, axes array).
     """
     comments_with_data = []  # only display the comments that have data
+    n_data = []  # debugging info only
     for comment in comments:
+        if comment == "Corrected standard_relation from = to < (censored activity_comment)":
+            continue  # skip this comment as it contains discrete data only
         query_str = build_query_string(comment)
         subset = exploded_subset.query(query_str)
         if len(subset) > 0:
             comments_with_data.append(comment)
+            n_data.append(len(subset))
 
     if len(comments_with_data) == 0:  # No data to plot
         fig, ax = plt.subplots(1, 1, figsize=figsize)
@@ -425,7 +442,7 @@ def plot_multi_panel_comparability(
         return fig, np.array([ax])
 
     nrows = int(np.ceil(len(comments_with_data) / ncols))
-    colors = [tuple([*col] + [1]) for col in colormaps["tab10"].colors]
+    colors = [tuple([*col] + [1]) for col in colormaps["tab20"].colors]
 
     fig, axs = plt.subplots(nrows, ncols, figsize=figsize)
     axs_flat = axs.flatten()

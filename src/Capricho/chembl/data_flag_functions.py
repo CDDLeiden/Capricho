@@ -331,8 +331,7 @@ def flag_insufficient_assay_overlap(
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         logger.warning(
-            f"Required columns missing: {missing_cols}. "
-            "Skipping insufficient assay overlap filtering."
+            f"Required columns missing: {missing_cols}. " "Skipping insufficient assay overlap filtering."
         )
         return df
 
@@ -396,16 +395,12 @@ def flag_insufficient_assay_overlap(
             target_data = target_data.merge(
                 group_df[[assay_col] + assay_match_fields].drop_duplicates(subset=[assay_col]),
                 on=assay_col,
-                how="left"
+                how="left",
             )
 
         # Self-join to create all pairs of (assay1, assay2) for the same molecule
         # This finds all overlapping molecules between assays
-        pairs = target_data.merge(
-            target_data,
-            on=molecule_col,
-            suffixes=("_1", "_2")
-        )
+        pairs = target_data.merge(target_data, on=molecule_col, suffixes=("_1", "_2"))
 
         # Filter to only keep assay1 < assay2 to avoid duplicates and self-comparisons
         pairs = pairs[pairs[f"{assay_col}_1"] < pairs[f"{assay_col}_2"]]
@@ -417,16 +412,19 @@ def flag_insufficient_assay_overlap(
         # 2. Different pChEMBL values (excluding 3.0 and 6.0 log unit differences)
         pchembl_diff = np.abs(pairs["pchembl_value_1"] - pairs["pchembl_value_2"])
         pairs = pairs[
-            (pairs["pchembl_value_1"] != pairs["pchembl_value_2"]) &
-            (pchembl_diff != 3.0) &
-            (pchembl_diff != 6.0)
+            (pairs["pchembl_value_1"] != pairs["pchembl_value_2"])
+            & (pchembl_diff != 3.0)
+            & (pchembl_diff != 6.0)
         ]
 
         # 3. Metadata matching if required
         if max_assay_match:
             metadata_match = pd.Series(True, index=pairs.index)
             for field in assay_match_fields:
-                metadata_match &= pairs[f"{field}_1"] == pairs[f"{field}_2"]
+                # Fill NaN values with a sentinel so that NaN == NaN (both missing the same metadata)
+                field1 = pairs[f"{field}_1"].fillna("__MISSING__")
+                field2 = pairs[f"{field}_2"].fillna("__MISSING__")
+                metadata_match &= field1 == field2
             pairs = pairs[metadata_match]
 
         # Count overlapping compounds per assay pair
