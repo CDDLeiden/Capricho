@@ -49,6 +49,7 @@ def _warn_info_post_aggregation_repeats(
     df: pd.DataFrame,
     extra_id_cols: list[str],
     aggregate_mutants: bool = False,
+    value_col: str = "pchembl_value",
     _limit: int = 15,  # limit in the string length for the warning/info logging
 ) -> None:
     def _truncate_dataframe(df: pd.DataFrame, limit: int) -> pd.DataFrame:
@@ -63,11 +64,12 @@ def _warn_info_post_aggregation_repeats(
     else:
         col_subset_dupli_warning = ["connectivity", "mutation", "target_chembl_id", *extra_id_cols]
 
+    value_mean_col = f"{value_col}_mean"
     logging_subset = [  # subset of columns to be displayed on the warning/info logging
         *col_subset_dupli_warning,
         "molecule_chembl_id",
         "assay_chembl_id",
-        "pchembl_value_mean",
+        value_mean_col,
     ]
 
     # Based on the ID columns, we shouldn't have any duplicates. This warning is a safeguard
@@ -77,7 +79,7 @@ def _warn_info_post_aggregation_repeats(
             df[duplics_for_warning]
             .loc[:, logging_subset]
             .sort_values(
-                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
+                by=["target_chembl_id", "connectivity", value_mean_col],
                 ascending=[True, True, False],
             )
         )
@@ -96,7 +98,7 @@ def _warn_info_post_aggregation_repeats(
         dupli_subset = (
             df[duplics_for_info]
             .loc[:, logging_subset]
-            .sort_values(by=target_cpd_col_subset + ["pchembl_value_mean"], ascending=[True, True, False])
+            .sort_values(by=target_cpd_col_subset + [value_mean_col], ascending=[True, True, False])
         )
         truncated_df = _truncate_dataframe(dupli_subset, _limit)
         logger.info(
@@ -119,8 +121,9 @@ def get_standardize_and_clean_workflow(
     calculate_pchembl: bool = False,
     output_path: Optional[Union[str, Path]] = None,
     confidence_scores: list[str] = [7, 8, 9],
-    bioactivity_type: list[str] = ["IC50", "EC50", "AC50", "Ki", "Kd"],
+    bioactivity_type: Optional[list[str]] = None,
     standard_relation: list[str] = ["="],  # TODO: later support data with  >, <, >=, <=...
+    standard_units: Optional[list[str]] = None,
     assay_types: list[str] = ["B", "F"],
     chembl_release: Optional[int] = None,
     save_not_aggregated: bool = True,
@@ -188,7 +191,10 @@ def get_standardize_and_clean_workflow(
     # the standard_value will be transferred to pchembl_value.
     # TODO: I noticed some negative values reported in standard_value, maybe it's because
     # the standard_type was Log? If so, we could try rescuing those values to pchembl_value
-    if calculate_pchembl:
+    if bioactivity_type is None:
+        # No filter on standard_type - fetch all
+        biotypes = None
+    elif calculate_pchembl:
         biotypes = []
         for act in bioactivity_type:
             biotypes.extend([f"Log {act}", f"-Log {act}", act])
@@ -212,6 +218,7 @@ def get_standardize_and_clean_workflow(
         assay_types=assay_types,
         standard_relation=standard_relation,
         standard_type=biotypes,
+        standard_units=standard_units,
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
@@ -296,8 +303,15 @@ def get_standardize_and_clean_workflow(
     stdzer = ChemStandardizer(
         from_smi=True, n_jobs=8, verbose=False, isomeric=chirality, progress=True, chunk_size=1000
     )
+
+    # Filter by bioactivity_type only if it's not None
+    if bioactivity_type is not None:
+        df = full_df.query("standard_type.isin(@bioactivity_type)")
+    else:
+        df = full_df.copy()
+
     df = (
-        full_df.query("standard_type.isin(@bioactivity_type)")
+        df
         # standardize the smiles & clean possible solvents & salts from the string
         .pipe(flag_missing_canonical_smiles)
         .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
@@ -541,7 +555,7 @@ def aggregate_data(
     final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
 
     _warn_info_post_aggregation_repeats(
-        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
+        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants, value_col=value_col
     )
 
     if output_path is not None:
