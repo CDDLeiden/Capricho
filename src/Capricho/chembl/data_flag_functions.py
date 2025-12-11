@@ -660,3 +660,76 @@ def flag_inter_document_duplication(
     else:
         logger.debug("No inter-document duplicates found among discrete measurements.")
         return df
+
+
+def flag_unit_conversion(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark rows where unit conversion was applied to standardize measurements.
+
+    This function flags activities that had their standard_value and standard_units
+    converted to a common unit by unit conversion functions (e.g., convert_permeability_units,
+    convert_molar_concentration_units, etc.). The conversion_factor column (added during
+    conversion) is used to identify which rows were converted.
+
+    If an 'original_unit' column exists (added by newer conversion functions), it will be
+    used to create a more informative comment showing the original -> target unit transformation.
+    Both conversion_factor and original_unit columns are removed after flagging.
+
+    This is a processing flag (comment_type='p') to document data transformations
+    for transparency.
+
+    Args:
+        df: DataFrame to be processed. Must contain 'conversion_factor' column
+            if unit conversion was applied. May optionally contain 'original_unit'
+            for more detailed flagging.
+
+    Returns:
+        pd.DataFrame: DataFrame with converted rows flagged in data_processing_comment.
+            The conversion_factor and original_unit columns are removed after flagging.
+    """
+    if "conversion_factor" not in df.columns:
+        logger.debug("Column 'conversion_factor' not found. Skipping unit conversion flagging.")
+        return df
+
+    mask = df["conversion_factor"].notna()
+    num_converted = mask.sum()
+
+    if num_converted > 0:
+        logger.info(f"Flagging {num_converted} activities with converted units.")
+
+        # Check if we have original_unit and standard_units for detailed comment
+        has_original_unit = "original_unit" in df.columns
+        has_standard_units = "standard_units" in df.columns
+
+        if has_original_unit and has_standard_units:
+            # Create row-specific comments showing original -> target unit
+            for idx in df[mask].index:
+                original = df.loc[idx, "original_unit"]
+                target = df.loc[idx, "standard_units"]
+                comment = f"Unit converted to {target} from {original}"
+                df = add_comment(
+                    df,
+                    comment=comment,
+                    criteria_func=lambda x, i=idx: x.index == i,
+                    target_column="conversion_factor",
+                    comment_type="p",
+                )
+        else:
+            # Generic comment for backward compatibility (permeability conversions)
+            df = add_comment(
+                df,
+                comment="Unit converted to 10^-6 cm/s",
+                criteria_func=lambda x: x.notna(),
+                target_column="conversion_factor",
+                comment_type="p",
+            )
+    else:
+        logger.debug("No activities with converted units found.")
+
+    # Clean up conversion_factor column
+    df = df.drop(columns=["conversion_factor"])
+
+    # Clean up original_unit column if it exists
+    if "original_unit" in df.columns:
+        df = df.drop(columns=["original_unit"])
+
+    return df
