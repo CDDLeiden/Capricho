@@ -204,6 +204,16 @@ def explode_assay_comparability(
         if col in singleval_cols:
             singleval_cols.remove(col)
 
+    # Auto-detect which columns are actually multi-valued (contain the separator).
+    # Columns used as --id-columns during aggregation will be single-valued.
+    # Skip this check for empty DataFrames to preserve original column classification.
+    if len(subset) > 0:
+        for col in list(multival_cols):
+            if col in subset.columns:
+                if not subset[col].astype(str).str.contains(sep_str, regex=False).any():
+                    multival_cols.remove(col)
+                    singleval_cols.append(col)
+
     exploded_subset = subset[
         [
             *singleval_cols,

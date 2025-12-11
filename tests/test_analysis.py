@@ -239,6 +239,45 @@ class TestExplodeAssayComparability(unittest.TestCase):
         self.assertEqual(result.iloc[0]["assay_chembl_id_x"], "ASSAY1")
         self.assertEqual(result.iloc[0]["assay_chembl_id_y"], "ASSAY2")
 
+    def test_explode_with_single_value_columns(self):
+        """Test explosion when some columns are single-valued (e.g., from --id-columns).
+
+        When data is aggregated with --id-columns, those columns become single-valued
+        rather than pipe-delimited. The function should auto-detect this and handle
+        them as single-value columns.
+        """
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL2"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
+                "repeat": [0, 1],
+                "activity_id": ["ACT1|ACT2|ACT3", "ACT4|ACT5"],
+                "assay_chembl_id": ["ASSAY1|ASSAY2|ASSAY3", "ASSAY4|ASSAY5"],
+                "pchembl_value": ["6.0|6.5|7.0", "5.5|6.0"],
+                "data_processing_comment": ["||", "|"],
+                "data_dropping_comment": ["||", "|"],
+                # standard_type is single-valued (as if aggregated with --id-columns standard_type)
+                "standard_type": ["IC50", "Ki"],
+                "canonical_smiles": ["CCCC|CCCC|CCCC", "CCCO|CCCO"],
+            }
+        )
+
+        result = explode_assay_comparability(df)
+
+        # MOL1 has 3 assays -> 3 choose 2 = 3 pairs
+        # MOL2 has 2 assays -> 2 choose 2 = 1 pair
+        # Total = 4 rows
+        self.assertEqual(len(result), 4)
+
+        # Check that standard_type is preserved as single value (not split)
+        mol1_rows = result[result["connectivity"] == "MOL1"]
+        mol2_rows = result[result["connectivity"] == "MOL2"]
+
+        # standard_type should be in columns as _x suffix since it's treated as single-value
+        self.assertIn("standard_type", result.columns)
+        self.assertTrue((mol1_rows["standard_type"] == "IC50").all())
+        self.assertTrue((mol2_rows["standard_type"] == "Ki").all())
+
 
 class TestDeaggregateData(unittest.TestCase):
     """Tests for deaggregate_data function."""
