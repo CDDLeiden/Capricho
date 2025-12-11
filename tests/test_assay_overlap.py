@@ -50,10 +50,23 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
             ("T4", "A8", [f"M{i}" for i in range(30, 32)]),
         ]
 
+        # Track pchembl values by molecule to ensure same molecule has DIFFERENT
+        # pchembl values in different assays (which is what the overlap function counts)
+        molecule_pchembl = {}
+        pchembl_counter = 6.0
+
         data_for_df = []
         activity_id_counter = 1
         for target, assay, molecules in test_scenario_data:
             for molecule in molecules:
+                # Assign different pchembl values for same molecule in different assays
+                # This ensures overlapping molecules have conflicting values
+                if molecule not in molecule_pchembl:
+                    molecule_pchembl[molecule] = {}
+                if assay not in molecule_pchembl[molecule]:
+                    molecule_pchembl[molecule][assay] = pchembl_counter
+                    pchembl_counter += 0.1
+
                 data_for_df.append(
                     {
                         self.target_col: target,
@@ -62,6 +75,10 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
                         # unique identifier / activity like chembl
                         self.activity_col: activity_id_counter,
                         self.comment_col: None,
+                        # Different pchembl values for same molecule in different assays
+                        "pchembl_value": molecule_pchembl[molecule][assay],
+                        # Different documents for different assays to allow overlap counting
+                        "document_chembl_id": f"DOC_{assay}",
                     }
                 )
                 activity_id_counter += 1
@@ -108,18 +125,26 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
 
             if expected_total_flagged_activities > 0:
                 self.assertIn(
-                    f"Flagging {expected_total_flagged_activities} activities from {expected_total_flagged_unique_assays} unique assays "
-                    f"that were part of pairs not meeting the minimum overlap of {min_overlap} compounds.",
+                    f"Flagging activities from {expected_total_flagged_unique_assays} unique assays "
+                    f"that lack a partner with >= {min_overlap} overlapping compounds.",
                     log_output,
                 )
             elif check_no_overlap_log:
                 self.assertIn(
-                    f"No assay pairs found below the minimum overlap of {min_overlap} compounds.", log_output
+                    f"All assays have at least one partner with >= {min_overlap} overlapping compounds.", log_output
                 )
 
+            # Normalize None and empty strings for comparison
+            df_processed_normalized = df_processed.sort_values(by=[self.activity_col]).reset_index(drop=True)
+            df_expected_normalized = df_expected.sort_values(by=[self.activity_col]).reset_index(drop=True)
+
+            # Replace empty strings with None for consistent comparison
+            df_processed_normalized[self.comment_col] = df_processed_normalized[self.comment_col].replace("", None)
+            df_expected_normalized[self.comment_col] = df_expected_normalized[self.comment_col].replace("", None)
+
             pd.testing.assert_frame_equal(
-                df_processed.sort_values(by=[self.activity_col]).reset_index(drop=True),
-                df_expected.sort_values(by=[self.activity_col]).reset_index(drop=True),
+                df_processed_normalized,
+                df_expected_normalized,
                 check_dtype=False,
             )
         finally:
@@ -129,11 +154,14 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
 
     def test_min_overlap_flags_correctly(self):
         # Case 1: min_overlap = 2
-        # T1: A1-A2 overlap 1. Flag A1, A2.
-        # T2: A3-A4 overlap 2 (OK). A3-A5 overlap 1 (Flag A3,A5). A4-A5 overlap 1 (Flag A4,A5).
-        # Globally flagged assays: A1, A2, A3, A4, A5
-        # Activities: A1(3), A2(2), A3(3), A4(3), A5(2) = 13 activities from 5 unique assays
-        self._run_test_and_asserts(self.df_initial, 2, {"A1", "A2", "A3", "A4", "A5"}, 13, 5)
+        # T1: A1-A2 overlap 1 (M1). Flag A1, A2.
+        # T2: A3-A4 overlap 2 (M10, M11) - OK (pass).
+        #     A3-A5 overlap 1 (M10) - but A3 has partner A4 with >= 2.
+        #     A4-A5 overlap 1 (M10) - but A4 has partner A3 with >= 2.
+        #     A5 has no partner with >= 2. Flag A5.
+        # Globally flagged assays: A1, A2, A5
+        # Activities: A1(3), A2(2), A5(2) = 7 activities from 3 unique assays
+        self._run_test_and_asserts(self.df_initial, 2, {"A1", "A2", "A5"}, 7, 3)
 
     def test_min_overlap_all_pass(self):
         # Case 2: min_overlap = 1 (all pairs have at least 1 overlap)
@@ -145,6 +173,7 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
         # T1: A1,A2 flagged.
         # T2: A3,A4,A5 flagged.
         # T3: A6,A7 flagged.
+        # T4: A8 NOT flagged (single assay in target, skipped)
         # Globally flagged assays: A1, A2, A3, A4, A5, A6, A7
         # Activities: A1(3),A2(2) + A3(3),A4(3),A5(2) + A6(5),A7(5) = 5 + 8 + 10 = 23 activities from 7 unique assays
         self._run_test_and_asserts(self.df_initial, 10, {"A1", "A2", "A3", "A4", "A5", "A6", "A7"}, 23, 7)
@@ -172,7 +201,15 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
 
     def test_empty_dataframe(self):
         df_empty = pd.DataFrame(
-            columns=[self.target_col, self.assay_col, self.molecule_col, self.comment_col, self.activity_col]
+            columns=[
+                self.target_col,
+                self.assay_col,
+                self.molecule_col,
+                self.comment_col,
+                self.activity_col,
+                "pchembl_value",
+                "document_chembl_id",
+            ]
         )
         logs_io = StringIO()
         sink_id = logger.add(logs_io, format="{message}", level="DEBUG", enqueue=True)
@@ -211,8 +248,7 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
             log_output = logs_io.getvalue()
 
             self.assertIn(
-                f"One or more required columns ({self.molecule_col}, {self.assay_col}, {self.target_col}) "
-                "not found in DataFrame. Skipping insufficient assay overlap filtering.",
+                f"Required columns missing: ['{self.target_col}']. Skipping insufficient assay overlap filtering.",
                 log_output,
             )
             # The function should return the original df (df_missing_col) in this case

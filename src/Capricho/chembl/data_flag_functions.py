@@ -381,11 +381,29 @@ def flag_insufficient_assay_overlap(
 
     assays_to_flag_globally = set()  # Keep track of assays that don't have a compatible partner
 
+    # Filter out assays already flagged for size issues (goldilocks approach in the Landrum & Riniker paper)
+    # These assays should be skipped in overlap checking
+    size_flagged_mask = df[comment_col].notna() & df[comment_col].astype(str).str.contains(
+        r"Assay size [<>]", regex=True, na=False
+    )
+    size_flagged_assays = set(df[size_flagged_mask][assay_col].unique())
+
+    if size_flagged_assays:
+        logger.debug(
+            f"Skipping {len(size_flagged_assays)} assays already flagged for size issues in overlap checking."
+        )
+
     for target_id, group_df in df.groupby(target_col):
         unique_assays = group_df[assay_col].unique()
 
-        if len(unique_assays) < 2:
-            continue  # Not enough assays for this target to form a pair
+        # Filter out size-flagged assays from overlap checking
+        unique_assays_to_check = [a for a in unique_assays if a not in size_flagged_assays]
+
+        if len(unique_assays_to_check) < 2:
+            continue  # Not enough non-size-flagged assays for this target to form a pair
+
+        # Only include non-size-flagged assays in the analysis
+        group_df = group_df[~group_df[assay_col].isin(size_flagged_assays)]
 
         # Prepare data with necessary columns for vectorized operations
         target_data = group_df[[assay_col, molecule_col, "pchembl_value", "document_chembl_id"]].copy()
@@ -443,8 +461,8 @@ def flag_insufficient_assay_overlap(
                 f"with conflicting pChEMBL values (>= {min_overlap})."
             )
 
-        # Flag assays that don't have any compatible partner
-        for assay_id in unique_assays:
+        # Flag assays that don't have any compatible partner (only non-size-flagged assays)
+        for assay_id in unique_assays_to_check:
             if assay_id not in assays_with_sufficient_overlap:
                 assays_to_flag_globally.add(assay_id)
                 logger.debug(
