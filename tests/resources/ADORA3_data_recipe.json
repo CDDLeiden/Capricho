@@ -1,6 +1,6 @@
 {
   "command": "capricho get --target-ids CHEMBL256 --calculate-pchembl --output-path ADORA3_data.csv --chembl-release 31 --chembl-version 36 --require-doc-date --max-assay-size 100 --min-assay-size 20 --strict-mutant-removal",
-  "capricho version": "0.1.dev237+g772cd9ff7.d20251014",
+  "capricho version": "0.1.dev285+gc3b505a28.d20251211",
   "molecule_ids": [],
   "target_ids": [
     "CHEMBL256"
@@ -46,5 +46,6 @@
   "max_assay_match": false,
   "min_assay_overlap": 0,
   "strict_mutant_removal": true,
-  "compound_equality": "connectivity"
+  "compound_equality": "connectivity",
+  "aggregate_on": "pchembl_value"
 }
