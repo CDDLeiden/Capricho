@@ -42,6 +42,21 @@ capricho get --target-ids CHEMBL203 --compound-equality mixed_fp
 - Building focused datasets for SAR studies
 - Working with well-curated data
 
+### SMILES-Based
+
+The `smiles` method uses standardized SMILES strings directly for exact matching:
+
+```bash
+capricho get --target-ids CHEMBL203 --compound-equality smiles
+```
+
+**Advantages:**
+- Simple and transparent matching logic
+- No additional computation (InChI or fingerprints)
+- Useful when you trust the standardized SMILES
+
+**Note:** This method relies on the standardization performed by the ChEMBL structure pipeline. Beware that different tautomers may not match even if they represent the same compound. Connectivities can be more robust, but may merge stereoisomers.
+
 ## ChEMBL Backends
 
 CAPRICHO supports two different ways to access ChEMBL data, each with distinct advantages.

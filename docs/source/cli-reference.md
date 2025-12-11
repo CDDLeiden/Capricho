@@ -180,8 +180,9 @@ Control how data is processed and aggregated:
 - **standard_value**: Aggregate on raw standard_value column. Uses arithmetic mean. Useful for ADMET data with non-molar units (%, permeability, etc.).
 
 #### Compound Equality Methods
-- **connectivity**: (Default) Based on molecular connectivity, ignoring stereochemistry
+- **connectivity**: (Default) Based on molecular connectivity (InChI key first block), ignoring stereochemistry
 - **mixed_fp**: Uses ECFP4 and RDKit fingerprints (each with 2048 bits) for similarity determination
+- **smiles**: Uses standardized SMILES strings directly for exact string matching
 
 #### Useful Metadata Columns
 - `organism`: Source organism
