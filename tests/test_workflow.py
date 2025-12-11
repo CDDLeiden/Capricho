@@ -219,6 +219,72 @@ class TestFetchFromChEMBL(unittest.TestCase):
             self.assertEqual(cco_row["standard_value_counts"], 2)
             self.assertAlmostEqual(cco_row["standard_value_mean"], (50.0 + 75.0) / 2)
 
+    def test_aggregate_standard_value_without_pchembl_filtering(self):
+        """When aggregating on standard_value, datapoints without pchembl should not be filtered.
+
+        This test ensures that when aggregating on standard_value (e.g., % inhibition),
+        rows with NaN pchembl_value are NOT filtered out or flagged for removal.
+        """
+        test_data = pd.DataFrame(
+            {
+                "activity_id": [1, 2, 3, 4],
+                "molecule_chembl_id": ["CHEMBL1"] * 4,
+                "target_chembl_id": ["TARGET1"] * 4,
+                "standard_smiles": ["CCO", "CCO", "CCC", "CCC"],  # 2 compounds
+                "canonical_smiles": ["CCO", "CCO", "CCC", "CCC"],
+                "standard_value": [50.0, 75.0, 100.0, 80.0],  # % inhibition values
+                "standard_units": ["%", "%", "%", "%"],
+                "pchembl_value": [np.nan, np.nan, np.nan, np.nan],  # No pchembl for % units
+                "standard_relation": ["=", "=", "=", "="],
+                "mutation": ["WT"] * 4,
+                "assay_chembl_id": ["ASSAY1", "ASSAY2", "ASSAY1", "ASSAY2"],
+                "standard_type": ["Inhibition"] * 4,
+                "assay_description": ["Test assay"] * 4,
+                "assay_type": ["A"] * 4,
+                "confidence_score": [9] * 4,
+                "target_organism": ["Homo sapiens"] * 4,
+                "document_chembl_id": ["DOC1"] * 4,
+                "assay_tissue": [""] * 4,
+                "assay_cell_type": [""] * 4,
+                "relationship_type": ["D"] * 4,
+                "max_phase": [1] * 4,
+                "oral": [False] * 4,
+                "prodrug": [False] * 4,
+                "withdrawn_flag": [False] * 4,
+                "doc_type": ["PUBLICATION"] * 4,
+                "doi": ["10.1234/test"] * 4,
+                "journal": ["Test Journal"] * 4,
+                "year": [2020] * 4,
+                "chembl_release": [30] * 4,
+                "data_dropping_comment": [""] * 4,
+                "data_processing_comment": [""] * 4,
+            }
+        )
+
+        aggr_df = aggregate_data(
+            test_data,
+            chirality=False,
+            metadata_cols=[],
+            extra_id_cols=["standard_units"],
+            output_path=None,
+            compound_equality="connectivity",
+            value_col="standard_value",  # Aggregating on standard_value, not pchembl_value
+        )
+
+        # Check that we have 2 rows (both compounds should be included, not filtered out)
+        self.assertEqual(len(aggr_df), 2, f"Expected 2 compounds, got {len(aggr_df)}")
+
+        # Check that data_dropping_comment does NOT contain "Missing pChEMBL" or similar
+        for _, row in aggr_df.iterrows():
+            comment = str(row.get("data_dropping_comment", ""))
+            self.assertNotIn("pchembl", comment.lower(),
+                           f"Row should not be flagged for missing pchembl when aggregating on standard_value. "
+                           f"Got comment: {comment}")
+
+        # Check that aggregation actually worked (2 measurements per compound)
+        self.assertEqual(aggr_df["standard_value_counts"].sum(), 4,
+                        "Total count of all measurements should be 4")
+
     def test_prepare_multitask_data(self):
         """Test that prepare command creates correct activity matrix."""
         test_data = pd.DataFrame(
@@ -374,6 +440,144 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertAlmostEqual(matrix.loc["CONN1", "TARGET1-Kidney"], 7.0)
         self.assertAlmostEqual(matrix.loc["CONN2", "TARGET1-Liver"], 5.5)
         self.assertAlmostEqual(matrix.loc["CONN2", "TARGET1-Kidney"], 8.0)
+
+    def test_aggregate_data_with_standard_units_filter(self):
+        """Test that standard_units is preserved and can be used as an id column."""
+        test_data = pd.DataFrame(
+            {
+                "activity_id": [1, 2, 3, 4],
+                "molecule_chembl_id": ["CHEMBL1"] * 4,
+                "target_chembl_id": ["TARGET1"] * 4,
+                "standard_smiles": ["CCO", "CCO", "CCO", "CCO"],
+                "canonical_smiles": ["CCO", "CCO", "CCO", "CCO"],
+                "standard_value": [50.0, 75.0, 100.0, 80.0],
+                "standard_units": ["%", "%", "nM", "nM"],  # Different units
+                "standard_relation": ["=", "=", "=", "="],
+                "mutation": ["WT"] * 4,
+                "assay_chembl_id": ["ASSAY1", "ASSAY2", "ASSAY1", "ASSAY2"],
+                "standard_type": ["Inhibition", "Inhibition", "IC50", "IC50"],
+                "assay_description": ["Test assay"] * 4,
+                "assay_type": ["A"] * 4,
+                "confidence_score": [9] * 4,
+                "target_organism": ["Homo sapiens"] * 4,
+                "document_chembl_id": ["DOC1"] * 4,
+                "assay_tissue": [""] * 4,
+                "assay_cell_type": [""] * 4,
+                "relationship_type": ["D"] * 4,
+                "max_phase": [1] * 4,
+                "oral": [False] * 4,
+                "prodrug": [False] * 4,
+                "withdrawn_flag": [False] * 4,
+                "doc_type": ["PUBLICATION"] * 4,
+                "doi": ["10.1234/test"] * 4,
+                "journal": ["Test Journal"] * 4,
+                "year": [2020] * 4,
+                "chembl_release": [30] * 4,
+                "data_dropping_comment": [""] * 4,
+                "data_processing_comment": [""] * 4,
+            }
+        )
+
+        # Aggregate with standard_units as an id column to prevent mixing
+        aggr_df = aggregate_data(
+            test_data,
+            chirality=False,
+            metadata_cols=[],
+            extra_id_cols=["standard_units"],
+            output_path=None,
+            compound_equality="connectivity",
+            value_col="standard_value",
+        )
+
+        # Should have 2 rows: one for % units, one for nM units
+        self.assertEqual(len(aggr_df), 2)
+
+        # Check that units are preserved and separate
+        pct_row = aggr_df[aggr_df["standard_units"] == "%"]
+        nm_row = aggr_df[aggr_df["standard_units"] == "nM"]
+
+        self.assertEqual(len(pct_row), 1)
+        self.assertEqual(len(nm_row), 1)
+
+        # Check the aggregated values
+        self.assertAlmostEqual(pct_row.iloc[0]["standard_value_mean"], (50.0 + 75.0) / 2)
+        self.assertAlmostEqual(nm_row.iloc[0]["standard_value_mean"], (100.0 + 80.0) / 2)
+
+    def test_standard_value_and_units_preserved_in_aggregation(self):
+        """Test that standard_value and standard_units are preserved as multivalue columns
+        when aggregating on pchembl_value."""
+        test_data = pd.DataFrame(
+            {
+                "activity_id": [1, 2, 3, 4],
+                "molecule_chembl_id": ["CHEMBL1"] * 4,
+                "target_chembl_id": ["TARGET1"] * 4,
+                "standard_smiles": ["CCO", "CCO", "CCC", "CCC"],
+                "canonical_smiles": ["CCO", "CCO", "CCC", "CCC"],
+                "pchembl_value": [6.0, 7.0, 5.0, 6.0],
+                "standard_value": [10.0, 1.0, 100.0, 50.0],
+                "standard_units": ["nM", "nM", "uM", "uM"],
+                "standard_relation": ["=", "=", "=", "="],
+                "mutation": ["WT"] * 4,
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2"],
+                "standard_type": ["Ki", "Ki", "IC50", "IC50"],
+                "assay_description": ["Test assay"] * 4,
+                "assay_type": ["B"] * 4,
+                "confidence_score": [9] * 4,
+                "target_organism": ["Homo sapiens"] * 4,
+                "document_chembl_id": ["DOC1", "DOC2", "DOC3", "DOC4"],
+                "assay_tissue": [""] * 4,
+                "assay_cell_type": [""] * 4,
+                "relationship_type": ["D"] * 4,
+                "max_phase": [1] * 4,
+                "oral": [False] * 4,
+                "prodrug": [False] * 4,
+                "withdrawn_flag": [False] * 4,
+                "doc_type": ["PUBLICATION"] * 4,
+                "doi": ["10.1234/test"] * 4,
+                "journal": ["Test Journal"] * 4,
+                "year": [2020] * 4,
+                "chembl_release": [30] * 4,
+                "data_dropping_comment": [""] * 4,
+                "data_processing_comment": [""] * 4,
+            }
+        )
+
+        aggr_df = aggregate_data(
+            test_data,
+            chirality=False,
+            metadata_cols=[],
+            output_path=None,
+            compound_equality="connectivity",
+            value_col="pchembl_value",  # Aggregating on pchembl_value, NOT standard_value
+        )
+
+        # Should have 2 rows: one for CCO, one for CCC
+        self.assertEqual(len(aggr_df), 2, f"Expected 2 rows, got {len(aggr_df)}")
+
+        # Verify standard_value column exists
+        self.assertIn("standard_value", aggr_df.columns,
+                      "standard_value column should be preserved in aggregated output")
+
+        # Verify standard_units column exists
+        self.assertIn("standard_units", aggr_df.columns,
+                      "standard_units column should be preserved in aggregated output")
+
+        # Check that the values are preserved (should be pipe-separated multivalue columns)
+        cco_row = aggr_df[aggr_df["smiles"].str.contains("CCO", na=False)]
+        self.assertEqual(len(cco_row), 1, "Should have one row for CCO compound")
+
+        # standard_value should contain both 10.0 and 1.0
+        cco_std_val = cco_row.iloc[0]["standard_value"]
+        self.assertIsNotNone(cco_std_val, "standard_value should not be None for CCO")
+        # Should be a string with pipe-separated values
+        self.assertIn("|", str(cco_std_val),
+                      "standard_value should contain pipe-separated values for multiple measurements")
+
+        # standard_units should contain both nM values
+        cco_std_units = cco_row.iloc[0]["standard_units"]
+        self.assertIsNotNone(cco_std_units, "standard_units should not be None for CCO")
+        self.assertIn("|", str(cco_std_units),
+                      "standard_units should contain pipe-separated values for multiple measurements")
 
 
 if __name__ == "__main__":

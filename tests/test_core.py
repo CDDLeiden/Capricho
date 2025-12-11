@@ -32,7 +32,7 @@ class TestPandasHelper(unittest.TestCase):
 
     def test_assign_stats(self):
         df = pd.DataFrame({"value": ["1|2|3", "4|5|6"]})
-        result = pandas_helper.assign_stats(df, sep="|", value_col="value")
+        result = pandas_helper.assign_stats(df, sep="|", value_col="value", use_geometric=False)
         self.assertIn("value_mean", result.columns)
         self.assertIn("value_std", result.columns)
         self.assertIn("value_median", result.columns)
@@ -119,30 +119,32 @@ class TestStatsMake(unittest.TestCase):
     def test_process_repeat_mols_with_different_standard_relations(self):
         """Test that compounds with different standard_relation values are not aggregated together"""
         # Create test data with same compound (fingerprint) but different standard_relations
-        test_df = pd.DataFrame({
-            'standard_smiles': ['CCO', 'CCO', 'CCO'],
-            'pchembl_value': [6.5, 7.0, 8.0],
-            'target_chembl_id': ['CHEMBL123', 'CHEMBL123', 'CHEMBL123'],
-            'mutation': ['None', 'None', 'None'],
-            'standard_relation': ['=', '<', '='],  # Different relations
-            'molecule_chembl_id': ['MOL1', 'MOL1', 'MOL1'],
-            'assay_chembl_id': ['ASSAY1', 'ASSAY2', 'ASSAY3'],
-            'assay_description': ['Test assay 1', 'Test assay 2', 'Test assay 3'],
-            'activity_id': [1, 2, 3],
-            'standard_type': ['IC50', 'IC50', 'IC50'],
-            'assay_type': ['B', 'B', 'B'],
-            'confidence_score': [9, 9, 9],
-            'target_organism': ['Homo sapiens', 'Homo sapiens', 'Homo sapiens'],
-            'assay_tissue': ['None', 'None', 'None'],
-            'assay_cell_type': ['None', 'None', 'None'],
-            'relationship_type': ['D', 'D', 'D'],
-            'max_phase': ['None', 'None', 'None'],
-            'oral': ['None', 'None', 'None'],
-            'prodrug': ['None', 'None', 'None'],
-            'withdrawn_flag': ['None', 'None', 'None'],
-            'document_chembl_id': ['DOC1', 'DOC2', 'DOC3'],
-            'canonical_smiles': ['CCO', 'CCO', 'CCO'],
-        })
+        test_df = pd.DataFrame(
+            {
+                "standard_smiles": ["CCO", "CCO", "CCO"],
+                "pchembl_value": [6.5, 7.0, 8.0],
+                "target_chembl_id": ["CHEMBL123", "CHEMBL123", "CHEMBL123"],
+                "mutation": ["None", "None", "None"],
+                "standard_relation": ["=", "<", "="],  # Different relations
+                "molecule_chembl_id": ["MOL1", "MOL1", "MOL1"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2", "ASSAY3"],
+                "assay_description": ["Test assay 1", "Test assay 2", "Test assay 3"],
+                "activity_id": [1, 2, 3],
+                "standard_type": ["IC50", "IC50", "IC50"],
+                "assay_type": ["B", "B", "B"],
+                "confidence_score": [9, 9, 9],
+                "target_organism": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+                "assay_tissue": ["None", "None", "None"],
+                "assay_cell_type": ["None", "None", "None"],
+                "relationship_type": ["D", "D", "D"],
+                "max_phase": ["None", "None", "None"],
+                "oral": ["None", "None", "None"],
+                "prodrug": ["None", "None", "None"],
+                "withdrawn_flag": ["None", "None", "None"],
+                "document_chembl_id": ["DOC1", "DOC2", "DOC3"],
+                "canonical_smiles": ["CCO", "CCO", "CCO"],
+            }
+        )
 
         # All rows have same fingerprint, should be identified as repeats
         repeat_idxs = [[0, 1, 2]]
@@ -151,58 +153,63 @@ class TestStatsMake(unittest.TestCase):
         result_df = stats_make.process_repeat_mols(
             test_df,
             repeat_idxs,
-            solve_strat='keep',
+            solve_strat="keep",
             extra_id_cols=[],
             aggregate_mutants=False,
-            chirality=False
+            chirality=False,
         )
 
         # Check that we have 2 separate rows (not 1) because standard_relation differs
         # Rows 0 and 2 have '=' so should aggregate together
         # Row 1 has '<' so should remain separate
-        equal_rows = result_df[result_df['standard_relation'] == '=']
-        less_than_rows = result_df[result_df['standard_relation'] == '<']
+        equal_rows = result_df[result_df["standard_relation"] == "="]
+        less_than_rows = result_df[result_df["standard_relation"] == "<"]
 
         self.assertEqual(len(equal_rows), 1, "Should have 1 row with standard_relation='='")
         self.assertEqual(len(less_than_rows), 1, "Should have 1 row with standard_relation='<'")
 
         # The '=' row should have aggregated pchembl values from rows 0 and 2
+        # Since pchembl values use geometric mean by default
         equal_row = equal_rows.iloc[0]
-        self.assertEqual(equal_row['pchembl_value_counts'], 2)
-        self.assertAlmostEqual(equal_row['pchembl_value_mean'], (6.5 + 8.0) / 2)
+        self.assertEqual(equal_row["pchembl_value_counts"], 2)
+        from scipy.stats.mstats import gmean
+        expected_mean = gmean([6.5, 8.0])
+        self.assertAlmostEqual(equal_row["pchembl_value_mean"], expected_mean)
 
         # The '<' row should have a single pchembl value from row 1
         less_than_row = less_than_rows.iloc[0]
-        self.assertEqual(less_than_row['pchembl_value'], '7.00')  # format_value converts to string
+        self.assertEqual(less_than_row["pchembl_value"], "7.00")  # format_value converts to string
 
     def test_process_repeat_mols_with_custom_value_col(self):
         """Test that process_repeat_mols works with a custom value column (e.g., standard_value)"""
         # Create test data with standard_value instead of pchembl_value
-        test_df = pd.DataFrame({
-            'standard_smiles': ['CCO', 'CCO', 'CCC'],
-            'standard_value': [50.0, 75.0, 100.0],  # Use standard_value, not pchembl_value
-            'standard_units': ['%', '%', '%'],
-            'target_chembl_id': ['CHEMBL123', 'CHEMBL123', 'CHEMBL123'],
-            'mutation': ['None', 'None', 'None'],
-            'standard_relation': ['=', '=', '='],
-            'molecule_chembl_id': ['MOL1', 'MOL1', 'MOL2'],
-            'assay_chembl_id': ['ASSAY1', 'ASSAY2', 'ASSAY3'],
-            'assay_description': ['Test assay 1', 'Test assay 2', 'Test assay 3'],
-            'activity_id': [1, 2, 3],
-            'standard_type': ['Inhibition', 'Inhibition', 'Inhibition'],
-            'assay_type': ['A', 'A', 'A'],
-            'confidence_score': [9, 9, 9],
-            'target_organism': ['Homo sapiens', 'Homo sapiens', 'Homo sapiens'],
-            'assay_tissue': ['None', 'None', 'None'],
-            'assay_cell_type': ['None', 'None', 'None'],
-            'relationship_type': ['D', 'D', 'D'],
-            'max_phase': ['None', 'None', 'None'],
-            'oral': ['None', 'None', 'None'],
-            'prodrug': ['None', 'None', 'None'],
-            'withdrawn_flag': ['None', 'None', 'None'],
-            'document_chembl_id': ['DOC1', 'DOC2', 'DOC3'],
-            'canonical_smiles': ['CCO', 'CCO', 'CCC'],
-        })
+        test_df = pd.DataFrame(
+            {
+                "standard_smiles": ["CCO", "CCO", "CCC"],
+                "standard_value": [50.0, 75.0, 100.0],  # Use standard_value, not pchembl_value
+                "standard_units": ["%", "%", "%"],
+                "target_chembl_id": ["CHEMBL123", "CHEMBL123", "CHEMBL123"],
+                "mutation": ["None", "None", "None"],
+                "standard_relation": ["=", "=", "="],
+                "molecule_chembl_id": ["MOL1", "MOL1", "MOL2"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2", "ASSAY3"],
+                "assay_description": ["Test assay 1", "Test assay 2", "Test assay 3"],
+                "activity_id": [1, 2, 3],
+                "standard_type": ["Inhibition", "Inhibition", "Inhibition"],
+                "assay_type": ["A", "A", "A"],
+                "confidence_score": [9, 9, 9],
+                "target_organism": ["Homo sapiens", "Homo sapiens", "Homo sapiens"],
+                "assay_tissue": ["None", "None", "None"],
+                "assay_cell_type": ["None", "None", "None"],
+                "relationship_type": ["D", "D", "D"],
+                "max_phase": ["None", "None", "None"],
+                "oral": ["None", "None", "None"],
+                "prodrug": ["None", "None", "None"],
+                "withdrawn_flag": ["None", "None", "None"],
+                "document_chembl_id": ["DOC1", "DOC2", "DOC3"],
+                "canonical_smiles": ["CCO", "CCO", "CCC"],
+            }
+        )
 
         # Rows 0 and 1 have same SMILES (repeat), row 2 is different
         repeat_idxs = [[0, 1]]
@@ -211,32 +218,32 @@ class TestStatsMake(unittest.TestCase):
         result_df = stats_make.process_repeat_mols(
             test_df,
             repeat_idxs,
-            solve_strat='keep',
-            extra_id_cols=['standard_units'],  # Group by units to prevent mixing
+            solve_strat="keep",
+            extra_id_cols=["standard_units"],  # Group by units to prevent mixing
             aggregate_mutants=False,
             chirality=False,
-            value_col='standard_value',  # Use standard_value instead of pchembl_value
+            value_col="standard_value",  # Use standard_value instead of pchembl_value
         )
 
         # Check that we have 2 rows (1 aggregated from CCO, 1 single from CCC)
         self.assertEqual(len(result_df), 2)
 
         # Check that standard_value statistics columns exist (not pchembl_value)
-        self.assertIn('standard_value_mean', result_df.columns)
-        self.assertIn('standard_value_std', result_df.columns)
-        self.assertIn('standard_value_median', result_df.columns)
-        self.assertIn('standard_value_counts', result_df.columns)
+        self.assertIn("standard_value_mean", result_df.columns)
+        self.assertIn("standard_value_std", result_df.columns)
+        self.assertIn("standard_value_median", result_df.columns)
+        self.assertIn("standard_value_counts", result_df.columns)
 
         # Check that pchembl_value columns do NOT exist
-        self.assertNotIn('pchembl_value_mean', result_df.columns)
-        self.assertNotIn('pchembl_value_std', result_df.columns)
+        self.assertNotIn("pchembl_value_mean", result_df.columns)
+        self.assertNotIn("pchembl_value_std", result_df.columns)
 
         # Check the aggregated row (CCO) has correct statistics
-        cco_rows = result_df[result_df['smiles'].str.contains('CCO', na=False)]
+        cco_rows = result_df[result_df["smiles"].str.contains("CCO", na=False)]
         if len(cco_rows) > 0:
             cco_row = cco_rows.iloc[0]
-            self.assertEqual(cco_row['standard_value_counts'], 2)
-            self.assertAlmostEqual(cco_row['standard_value_mean'], (50.0 + 75.0) / 2)
+            self.assertEqual(cco_row["standard_value_counts"], 2)
+            self.assertAlmostEqual(cco_row["standard_value_mean"], (50.0 + 75.0) / 2)
 
 
 if __name__ == "__main__":
