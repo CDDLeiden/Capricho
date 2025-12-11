@@ -503,6 +503,68 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertAlmostEqual(pct_row.iloc[0]["standard_value_mean"], (50.0 + 75.0) / 2)
         self.assertAlmostEqual(nm_row.iloc[0]["standard_value_mean"], (100.0 + 80.0) / 2)
 
+    def test_compound_equality_smiles(self):
+        """Test that compound_equality='smiles' uses standardized SMILES for aggregation."""
+        # Two compounds with different connectivities but we'll use SMILES equality
+        test_data = pd.DataFrame(
+            {
+                "activity_id": [1, 2, 3, 4],
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3", "CHEMBL4"],
+                "target_chembl_id": ["TARGET1"] * 4,
+                "standard_smiles": ["CCO", "CCO", "CCC", "CCC"],  # 2 unique SMILES
+                "canonical_smiles": ["CCO", "CCO", "CCC", "CCC"],
+                "pchembl_value": [6.0, 7.0, 5.0, 6.0],
+                "standard_relation": ["=", "=", "=", "="],
+                "mutation": ["WT"] * 4,
+                "assay_chembl_id": ["ASSAY1", "ASSAY2", "ASSAY1", "ASSAY2"],
+                "standard_type": ["IC50"] * 4,
+                "assay_description": ["Test assay"] * 4,
+                "assay_type": ["B"] * 4,
+                "confidence_score": [9] * 4,
+                "target_organism": ["Homo sapiens"] * 4,
+                "document_chembl_id": ["DOC1", "DOC2", "DOC3", "DOC4"],
+                "assay_tissue": [""] * 4,
+                "assay_cell_type": [""] * 4,
+                "relationship_type": ["D"] * 4,
+                "max_phase": [1] * 4,
+                "oral": [False] * 4,
+                "prodrug": [False] * 4,
+                "withdrawn_flag": [False] * 4,
+                "doc_type": ["PUBLICATION"] * 4,
+                "doi": ["10.1234/test"] * 4,
+                "journal": ["Test Journal"] * 4,
+                "year": [2020] * 4,
+                "chembl_release": [30] * 4,
+                "data_dropping_comment": [""] * 4,
+                "data_processing_comment": [""] * 4,
+            }
+        )
+
+        aggr_df = aggregate_data(
+            test_data,
+            chirality=False,
+            metadata_cols=[],
+            extra_id_cols=[],
+            output_path=None,
+            compound_equality="smiles",  # Use SMILES-based equality
+        )
+
+        # Should have 2 rows: one for CCO (2 measurements), one for CCC (2 measurements)
+        self.assertEqual(len(aggr_df), 2, f"Expected 2 compounds, got {len(aggr_df)}")
+
+        # Check that the aggregation happened correctly based on SMILES
+        cco_rows = aggr_df[aggr_df["smiles"].str.contains("CCO", na=False)]
+        self.assertEqual(len(cco_rows), 1, "Expected 1 aggregated row for CCO")
+        self.assertEqual(
+            cco_rows.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements for CCO"
+        )
+
+        ccc_rows = aggr_df[aggr_df["smiles"].str.contains("CCC", na=False)]
+        self.assertEqual(len(ccc_rows), 1, "Expected 1 aggregated row for CCC")
+        self.assertEqual(
+            ccc_rows.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements for CCC"
+        )
+
     def test_standard_value_and_units_preserved_in_aggregation(self):
         """Test that standard_value and standard_units are preserved as multivalue columns
         when aggregating on pchembl_value."""

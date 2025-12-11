@@ -252,40 +252,35 @@ def get_standardize_and_clean_workflow(
     if enable_unit_conversion:
         logger.info("Converting units to standard formats")
 
-        # Convert permeability units to 10^-6 cm/s
-        full_df = convert_permeability_units(
+        full_df = convert_permeability_units(  # Convert to 10^-6 cm/s
             full_df,
             value_col=value_col,
             unit_col="standard_units",
         )
         full_df = flag_unit_conversion(full_df)
 
-        # Convert molar concentration units to nM
-        full_df = convert_molar_concentration_units(
+        full_df = convert_molar_concentration_units(  # Convert to nM
             full_df,
             value_col=value_col,
             unit_col="standard_units",
         )
         full_df = flag_unit_conversion(full_df)
 
-        # Convert mass concentration units to ug/mL
-        full_df = convert_mass_concentration_units(
+        full_df = convert_mass_concentration_units(  # Convert to ug/mL
             full_df,
             value_col=value_col,
             unit_col="standard_units",
         )
         full_df = flag_unit_conversion(full_df)
 
-        # Convert dose units to mg/kg
-        full_df = convert_dose_units(
+        full_df = convert_dose_units(  # Convert to mg/kg
             full_df,
             value_col=value_col,
             unit_col="standard_units",
         )
         full_df = flag_unit_conversion(full_df)
 
-        # Convert time units to hr
-        full_df = convert_time_units(
+        full_df = convert_time_units(  # Conver to hr
             full_df,
             value_col=value_col,
             unit_col="standard_units",
@@ -482,7 +477,7 @@ def aggregate_data(
     aggregate_mutants: bool = False,
     max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
-    compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
+    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
     value_col: str = "pchembl_value",
 ):
     """Aggregate the data obtained from ChEMBL by:
@@ -510,7 +505,8 @@ def aggregate_data(
         output_path: path to save the aggregated data
         compound_equality: How to identify same compounds in the dataset. If "mixed_fp", uses
             mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
-            uses the first part of the InChI key (connectivity) to identify same compounds. Defaults to "connectivity".
+            uses the first part of the InChI key (connectivity) to identify same compounds.
+            If "smiles", uses standardized SMILES strings directly. Defaults to "connectivity".
         value_col: Column name containing the values to aggregate statistics on.
             Defaults to "pchembl_value". Use "standard_value" for non-pChEMBL data (e.g., % inhibition).
 
@@ -542,17 +538,25 @@ def aggregate_data(
         convert_to="connectivity", n_jobs=4, progress=True, from_smi=True, chunk_size=None
     )
 
+    # Track whether we pre-computed connectivity to avoid recalculating after aggregation
+    precomputed_connectivity = None
+
     if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
             df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}, chunk_size=50
         )
         df = df.assign(id_array=fps)
     elif compound_equality == "connectivity":
-        df = df.assign(id_array=lambda x: connectivity_writer(x["standard_smiles"].tolist()))
-    # TODO: if other sensible cpd equality choices come along in the future, we can add here...
+        connectivities = connectivity_writer(df["standard_smiles"].tolist())
+        df = df.assign(id_array=connectivities)
+        # Store connectivity before censored modification so we can reuse it after aggregation
+        precomputed_connectivity = pd.Series(connectivities, index=df.index)
+    elif compound_equality == "smiles":
+        df = df.assign(id_array=df["standard_smiles"].values)
     else:
         raise ValueError(
-            f"Invalid compound_pairing value: {compound_equality}. " "Expected 'mixed_fp' or 'connectivity'."
+            f"Invalid compound_equality value: {compound_equality}. "
+            "Expected 'mixed_fp', 'connectivity', or 'smiles'."
         )
 
     # For censored measurements (!=), include relation and value in the compound identifier
@@ -582,6 +586,11 @@ def aggregate_data(
     # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
     repeats_idxs = repeated_indices_from_array_series(df["id_array"])
 
+    # Build mapping from standard_smiles to connectivity before aggregation
+    # (used to avoid recalculating connectivity after aggregation)
+    if precomputed_connectivity is not None:
+        smiles_to_connectivity = dict(zip(df["standard_smiles"], precomputed_connectivity))
+
     include_metadata = [
         "doc_type",
         "doi",
@@ -597,17 +606,20 @@ def aggregate_data(
         df,
         repeats_idxs,
         solve_strat="keep",
-        extra_id_cols=current_extra_id_cols,  # Use the potentially extended list
+        extra_id_cols=current_extra_id_cols,
         chirality=chirality,
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
         value_col=value_col,
     )
 
-    # TODO: we calculate connectivities twice if compound_equality == 'connectivity', which
-    # is not ideal. I tried creating a SMILES mapping, but we also canonicalize them inside
-    # `process_repeat_mols`, so it doesn't work. Would be nice to fix this in the future
-    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+    # Assign connectivity column - reuse precomputed values when available
+    if precomputed_connectivity is not None:
+        final_data = final_data.assign(
+            connectivity=final_data["smiles"].map(smiles_to_connectivity)
+        )
+    else:
+        final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
     # reorder the columns so that connectivity comes first and processing & dropping comes last
     xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
@@ -634,7 +646,7 @@ def re_aggregate_data(
     extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
     output_path: Optional[Union[str, Path]] = None,
-    compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
+    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
 ) -> pd.DataFrame:
     """Re-aggregate the data obtained from the `aggregate_data` method after dataset
     explosion. Useful for exploring the effect of different `extra_id_cols` and other
@@ -655,7 +667,7 @@ def re_aggregate_data(
         compound_equality: How to identify same compounds in the dataset. If "mixed_fp",
             uses mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
             uses the first part of the InChI key (connectivity) to identify same compounds.
-            Defaults to "connectivity".
+            If "smiles", uses standardized SMILES strings directly. Defaults to "connectivity".
 
     Returns:
         pd.DataFrame: the re-aggregated data
@@ -678,6 +690,13 @@ def re_aggregate_data(
         id_array = pd.Series(fps, index=df.index)
     elif compound_equality == "connectivity":
         id_array = df["connectivity"]
+    elif compound_equality == "smiles":
+        id_array = df["standard_smiles"]
+    else:
+        raise ValueError(
+            f"Invalid compound_equality value: {compound_equality}. "
+            "Expected 'mixed_fp', 'connectivity', or 'smiles'."
+        )
 
     # For censored measurements (!=), include relation and pchembl_value in the compound identifier
     # so they are only aggregated if they have the same value AND relation

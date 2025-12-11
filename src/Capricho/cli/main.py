@@ -124,6 +124,7 @@ class ChemblBackend(str, Enum):
 class CompoundEquality(str, Enum):
     mixed_fp = "mixed_fp"
     connectivity = "connectivity"
+    smiles = "smiles"
 
 
 class CompoundIdColumn(str, Enum):
