@@ -129,6 +129,96 @@ capricho get --target-ids CHEMBL203 --metadata-columns organism,tissue,cell_type
 
 These columns are preserved during aggregation and can help you understand data heterogeneity.
 
+## Non-pChEMBL Aggregation
+
+By default, CAPRICHO aggregates bioactivity data using the `pchembl_value` column, which represents -log10(molar) potency values. However, many ChEMBL assays (especially ADMET assays) report measurements that aren't suitable for pChEMBL conversion, such as:
+
+- **Permeability** (e.g., Caco-2 apparent permeability in cm/s)
+- **Percent inhibition** (e.g., % inhibition at a fixed concentration)
+- **Clearance** (e.g., mL/min/kg)
+- **Half-life** (e.g., hours)
+- **Solubility** (e.g., µg/mL)
+
+For these measurements, use `--aggregate-on standard_value`:
+
+```bash
+capricho get \
+  --assay-ids CHEMBL1112933,CHEMBL3529279 \
+  --assay-types A \
+  --aggregate-on standard_value \
+  --output-path permeability_data.csv
+```
+
+### Key Differences from pChEMBL Aggregation
+
+| Aspect | pchembl_value (default) | standard_value |
+|--------|------------------------|----------------|
+| **Mean type** | Geometric mean | Arithmetic mean |
+| **Units** | Always molar (-log10) | Original units preserved |
+| **Use case** | Potency measurements (IC50, Ki, etc.) | ADMET, physicochemical properties |
+
+### Important: Preventing Unit Mixing
+
+When aggregating on `standard_value`, ensure you don't inadvertently combine measurements with different units. Use `--id-columns` to group by unit type:
+
+```bash
+capricho get \
+  --assay-ids CHEMBL1112933,CHEMBL3529279 \
+  --aggregate-on standard_value \
+  --id-columns standard_units \
+  --output-path permeability_data.csv
+```
+
+This creates separate aggregations for measurements with different `standard_units` values.
+
+## Unit Conversion
+
+ChEMBL contains bioactivity data reported in many different units, even for the same measurement type. For example, permeability might be reported as `cm/s`, `nm/s`, or `10^-6 cm/s`. This heterogeneity makes cross-study aggregation challenging.
+
+The `--convert-units` flag enables automatic unit conversion before aggregation:
+
+```bash
+capricho get \
+  --assay-ids CHEMBL1112933,CHEMBL3529279 \
+  --aggregate-on standard_value \
+  --convert-units \
+  --output-path permeability_data.csv
+```
+
+### Supported Unit Families
+
+| Family | Target Unit | Source Units |
+|--------|------------|--------------|
+| **Permeability** | `10^-6 cm/s` | `cm/s`, `nm/s`, `ucm/s`, `10'-6 cm/s`, etc. |
+| **Molar concentration** | `nM` | `uM`, `µM`, `mM`, `pM`, `M` |
+| **Mass concentration** | `ug/mL` | `ng/ml`, `mg/ml`, `mg/L`, `pg/ml` |
+| **Dose** | `mg/kg` | `ug/kg`, `ug.kg-1`, `mg.kg-1` |
+| **Time** | `hr` | `min`, `s`, `ms`, `day` |
+
+### Transparency
+
+All unit conversions are logged and tracked in the `data_processing_comment` column. This ensures you can always trace which measurements were converted and by what factor.
+
+### Example: Caco-2 Permeability Dataset
+
+```bash
+capricho get \
+  --assay-ids CHEMBL1112933,CHEMBL3529279,CHEMBL3529278 \
+  --assay-types A \
+  --confidence-scores 0,1,2,3,4,5,6,7,8,9 \
+  --aggregate-on standard_value \
+  --convert-units \
+  --id-columns standard_units,assay_cell_type \
+  --drop-unassigned-chiral \
+  --output-path caco2_permeability.csv
+```
+
+This command:
+1. Fetches permeability data from specific Caco-2 assays
+2. Converts all permeability units to `10^-6 cm/s`
+3. Aggregates using arithmetic mean on `standard_value`
+4. Groups by cell type to maintain biological context
+
 ## Confidence Scoring
 
 ChEMBL assigns confidence scores (0-9) based on target specificity:

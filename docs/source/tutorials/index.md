@@ -5,6 +5,7 @@ These tutorials walk you through common CAPRICHO use cases, from basic data retr
 ## Getting Started
 
 - [Basic Data Retrieval](basic-retrieval.md) - Your first CAPRICHO query
+- [Working with ADMET Data](admet-data.md) - Permeability, clearance, and other ADMET endpoints
 - [Understanding Output](understanding-output.md) - Interpreting CAPRICHO results
 - [Quality Control](quality-control.md) - Ensuring data quality
 

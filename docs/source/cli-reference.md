@@ -116,6 +116,7 @@ Control which bioactivity data to include:
 | `-c`, `--confidence-scores` | Confidence scores to filter, comma-separated | `[7, 8, 9]` |
 | `-biotype`, `--bioactivity-type` | Bioactivity types to filter, comma-separated | `['Potency', 'Kd', 'Ki', 'IC50', 'AC50', 'EC50']` |
 | `-rel`, `--standard-relation` | Filter by standard relation (`=`, `<`, `>`, `~`), comma-separated. **Note:** Including `<` or `>` requires `--calculate-pchembl`. See [Standard Relations](concepts.md). | `['=']` |
+| `-units`, `--standard-units` | Filter by standard units, comma-separated. Useful for ADMET data with specific units like `%` (percent inhibition). | `None` |
 | `-at`, `--assay-types` | Assay types (B, F, A, T, P), comma-separated | `['B', 'F']` |
 | `-cr`, `--chembl-release` | Only fetch data reported **up to** a certain ChEMBL release | `None` |
 | `-reqdoc`, `--require-doc-date` | Filter out bioactivities without a document date | `False` |
@@ -162,6 +163,8 @@ Control how data is processed and aggregated:
 | Option | Description | Default |
 |---|---|---|
 | `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported. **Required when using censored data** (`--standard-relation` includes `<` or `>`). See [Standard Relations](concepts.md). | `False` |
+| `-agg-on`, `--aggregate-on` | Column to aggregate statistics on. Use `standard_value` for non-pChEMBL data (e.g., ADMET assays with % inhibition). See [Non-pChEMBL Aggregation](concepts.md#non-pchembl-aggregation). | `pchembl_value` |
+| `-cu`, `--convert-units` | Convert units to standard formats before aggregation. See [Unit Conversion](concepts.md#unit-conversion). | `False` |
 | `-chiral`, `--chirality` | Consider chirality during fingerprint calculation | `False` |
 | `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers | `False` |
 | `-cure`, `--curate-annotation-errors` | Apply curation for pChEMBL annotation errors | `False` |
@@ -171,6 +174,10 @@ Control how data is processed and aggregated:
 | `-cpd-eq`, `--compound-equality` | Method for compound equality determination | `connectivity` |
 | `-mcols`, `--metadata-columns` | Extra metadata columns to keep, comma-separated | `[]` |
 | `-idcols`, `--id-columns` | Extra ID columns for aggregation, comma-separated | `[]` |
+
+#### Aggregation Column Options
+- **pchembl_value**: (Default) Aggregate on pChEMBL values (-log10 molar potency). Uses geometric mean.
+- **standard_value**: Aggregate on raw standard_value column. Uses arithmetic mean. Useful for ADMET data with non-molar units (%, permeability, etc.).
 
 #### Compound Equality Methods
 - **connectivity**: (Default) Based on molecular connectivity, ignoring stereochemistry
@@ -240,6 +247,29 @@ capricho get \
   --confidence-scores 8,9 \
   --output-path small_molecules.csv
 ```
+
+### ADMET Data with Unit Conversion
+
+Retrieve Caco-2 permeability data with unit conversion and aggregation on `standard_value`:
+
+```bash
+capricho get \
+  --assay-ids CHEMBL1112933,CHEMBL3529279,CHEMBL3529278 \
+  --assay-types A \
+  --confidence-scores 0,1,2,3,4,5,6,7,8,9 \
+  --aggregate-on standard_value \
+  --convert-units \
+  --id-columns standard_units,assay_cell_type \
+  --drop-unassigned-chiral \
+  --output-path caco2_permeability.csv
+```
+
+This command:
+- Fetches data from specific Caco-2 permeability assays
+- Uses ADMET assay type (`-at A`)
+- Aggregates on `standard_value` instead of pChEMBL (permeability isn't a potency measurement)
+- Converts permeability units to a common format (`10^-6 cm/s`)
+- Groups by `standard_units` and `assay_cell_type` during aggregation
 
 ## capricho binarize
 

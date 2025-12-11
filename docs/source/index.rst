@@ -33,6 +33,7 @@ Features
 
 * Data retrieval by any ChEMBL identifier (molecule IDs, target IDs, assay IDs, or document IDs)
 * Automated pChEMBL (pXC50) value calculation for bioactivities if not provided through ChEMBL
+* ADMET data support with unit conversion and non-pChEMBL aggregation
 * Customizable filtering options
 * Configurable data aggregation options
 * Save a fetching and processing recipe for reproducibility
