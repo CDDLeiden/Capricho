@@ -234,6 +234,7 @@ def process_bioactivities(
     calculate_pchembl: bool = True,
     curate_annotation_errors: bool = True,
     require_document_date: bool = False,
+    value_col: str = "pchembl_value",
 ) -> pd.DataFrame:
     """Processes the bioactivities DataFrame. Will convert the standard_value
     column to pchembl_value column if the standard_units are in mM, µM, uM, or nM. If the
@@ -241,10 +242,16 @@ def process_bioactivities(
 
     Args:
         bioactivities_df: bioactivity dataframe, e.g.: output from `get_activity_table`.
-        calculate_pchembl: Whether to calculate pChEMBL values.
+        calculate_pchembl: Whether to calculate pChEMBL values. When aggregating on
+            standard_value (value_col != "pchembl_value"), this enables calculation of
+            pchembl_value for compatible units (e.g., nM, µM, mM). Though those are available
+            for high quality data, censored data does not have a pChEMBL value readily available
+            and they'll need to be calculated.
         curate_annotation_errors: Whether to apply activity curation based on pChEMBL values
             diverging in exactly 3.0 (indicate possible annotation errors). Defaults to True.
         require_document_date: Whether to filter out activities without a document year.
+        value_col: Column name for aggregation values. Defaults to "pchembl_value".
+            When set to "standard_value", pchembl_value filtering is skipped.
 
     Returns:
         pd.DataFrame: the processed bioactivities DataFrame.
@@ -260,20 +267,33 @@ def process_bioactivities(
         .drop(columns=["data_validity_comment", "potential_duplicate"])
     )
 
-    # Separate activities with and without pChEMBL values
-    with_pchembl = bioactivities_df.query("~pchembl_value.isna()").copy()
-    without_pchembl = bioactivities_df.query("pchembl_value.isna()").copy()
+    # When aggregating on pchembl_value (default), opportunistically calculate missing values.
+    # When aggregating on standard_value, skip this filtering to avoid unnecessary work.
+    if value_col == "pchembl_value":
+        # Separate activities with and without pChEMBL values
+        with_pchembl = bioactivities_df.query("~pchembl_value.isna()").copy()
+        without_pchembl = bioactivities_df.query("pchembl_value.isna()").copy()
 
-    if calculate_pchembl and not without_pchembl.empty:
-        # Calculate pChEMBL for activities without it (preserves incompatible units)
-        without_pchembl = convert_to_log10(without_pchembl)
-        bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
-    elif not calculate_pchembl and not without_pchembl.empty:
-        # Keep activities without pChEMBL (incompatible units already flagged)
-        bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
+        if calculate_pchembl and not without_pchembl.empty:
+            # Calculate pChEMBL for activities without it (preserves incompatible units)
+            without_pchembl = convert_to_log10(without_pchembl)
+            bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
+        elif not calculate_pchembl and not without_pchembl.empty:
+            # Keep activities without pChEMBL (incompatible units already flagged)
+            bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
+        else:
+            # Either calculate_pchembl=True and no missing values, or calculate_pchembl=False and all have values
+            bioactivities_df = with_pchembl if without_pchembl.empty else bioactivities_df
     else:
-        # Either calculate_pchembl=True and no missing values, or calculate_pchembl=False and all have values
-        bioactivities_df = with_pchembl if without_pchembl.empty else bioactivities_df
+        # When aggregating on non-pchembl values (e.g., standard_value), still opportunistically
+        # calculate pchembl_value for compatible units if requested, but don't filter based on it
+        if calculate_pchembl:
+            without_pchembl = bioactivities_df.query("pchembl_value.isna()").copy()
+            if not without_pchembl.empty:
+                # Calculate pChEMBL for activities without it (preserves incompatible units)
+                without_pchembl = convert_to_log10(without_pchembl)
+                with_pchembl = bioactivities_df.query("~pchembl_value.isna()").copy()
+                bioactivities_df = pd.concat([with_pchembl, without_pchembl], ignore_index=True)
 
     if curate_annotation_errors:
         bioactivities_df = curate_activity_pairs(bioactivities_df)
@@ -302,6 +322,7 @@ def get_bioactivities_workflow(
     document_chembl_ids: Optional[Union[list, str]] = None,
     standard_relation: Optional[List[str]] = None,
     standard_type: Optional[List[str]] = None,
+    standard_units: Optional[List[str]] = None,
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
     chembl_release: Optional[int] = None,
@@ -312,6 +333,7 @@ def get_bioactivities_workflow(
     curate_annotation_errors: bool = True,
     require_document_date: bool = False,
     backend: Literal["downloader", "webresource"] = "downloader",
+    value_col: str = "pchembl_value",
 ):
     """Perform the first step of the bioactivity data retrieval workflow. These are:
 
@@ -358,6 +380,9 @@ def get_bioactivities_workflow(
             or -Log|Log `standard_type`. Defaults to False
         backend: the backend to be used for fetching the data. If downloader, the ChEMBL sql database
             is downloaded and extracted first. Defaults to "downloader".
+        value_col: Column name for values to be used during aggregation. Defaults to "pchembl_value".
+            When set to "standard_value", pchembl filtering is skipped and pchembl values are
+            only calculated opportunistically for compatible units. Defaults to "pchembl_value".
 
         Raises:
             BioactivitiesNotFoundError: If the retrieved bioactivity dataframe is empty.
@@ -370,6 +395,7 @@ def get_bioactivities_workflow(
             document_chembl_ids=document_chembl_ids,
             standard_relation=standard_relation,
             standard_type=standard_type,
+            standard_units=standard_units,
             confidence_scores=confidence_scores,
             assay_types=assay_types,
             chembl_release=chembl_release,
@@ -410,6 +436,7 @@ def get_bioactivities_workflow(
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_document_date,
+        value_col=value_col,
     )
 
     if bioactivities_df.empty:

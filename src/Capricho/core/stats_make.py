@@ -159,12 +159,18 @@ def process_repeat_mols(
     if value_col == "standard_type":
         id_cols.append("standard_units")
 
-    # Replace 'pchembl_value' with value_col if different, and filter to existing columns
+    # Build multivalue columns: include value_col and all multivalue columns except
+    # pchembl_value when it's not the value_col (avoid aggregating unnecessary NaN values)
     effective_multival_cols = []
     for col in multiple_value_cols:
-        if col == "pchembl_value":
-            effective_multival_cols.append(value_col)
+        if col == "pchembl_value" and value_col != "pchembl_value":
+            # Skip pchembl_value when aggregating on other columns (e.g., standard_value)
+            pass
+        elif col == value_col:
+            # Always include the value_col for aggregation
+            effective_multival_cols.append(col)
         elif col not in id_cols and col in df.columns:
+            # Include other multivalue columns
             effective_multival_cols.append(col)
     multival_cols = [*effective_multival_cols, *extra_multival_cols]
 

@@ -36,6 +36,7 @@ DEFAULTS = {
     "drop_unassigned_chiral": False,
     "curate_annotation_errors": True,
     "standard_relation": ["="],
+    "standard_units": None,
     "assay_types": ["B", "F"],
     "log_level": "info",
     "chembl_release": None,
@@ -79,6 +80,8 @@ app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode="markdown",
     context_settings={"help_option_names": ["--help", "-h"], "max_content_width": 88},
+    pretty_exceptions_enable=False,
+    pretty_exceptions_show_locals=False,
 )
 
 
@@ -279,15 +282,15 @@ def get_data(
         ),
     ] = DEFAULTS["confidence_scores"],
     bioactivity_type: Annotated[
-        str,
+        Optional[str],
         typer.Option(
             "-biotype",
             "--bioactivity-type",
             parser=csv_string,
-            help="Bioactivity types to filter, comma-separated.",
+            help="Bioactivity types to filter, comma-separated. If not specified, fetches all types.",
             metavar="Ki,Kd,...",
         ),
-    ] = DEFAULTS["bioactivity_type"],
+    ] = None,
     standard_relation: Annotated[
         str,
         typer.Option(
@@ -298,6 +301,16 @@ def get_data(
             metavar="=,>,<",
         ),
     ] = DEFAULTS["standard_relation"],
+    standard_units: Annotated[
+        Optional[str],
+        typer.Option(
+            "-units",
+            "--standard-units",
+            parser=csv_string,
+            help="Filter by standard units, comma-separated. E.g., '%' for percent inhibition.",
+            metavar="nM,uM,µM,mM",
+        ),
+    ] = None,
     assay_types: Annotated[
         str,
         typer.Option(
@@ -502,6 +515,17 @@ def get_data(
             metavar="bool",
         ),
     ] = DEFAULTS["strict_mutant_removal"],
+    convert_units: Annotated[
+        bool,
+        typer.Option(
+            "-conu/-no-conu",
+            "--convert-units/--no-convert-units",
+            help="Convert units to standard formats: permeability (10^-6 cm/s), "
+            "molar concentration (nM), mass concentration (ug/mL), dose (mg/kg), time (hr).",
+            is_flag=True,
+            metavar="bool",
+        ),
+    ] = DEFAULTS.get("convert_units", False),
 ):
     """
     Filter, download, and process bioactivity data from ChEMBL.
@@ -546,6 +570,7 @@ def get_data(
         confidence_scores=confidence_scores,
         bioactivity_type=bioactivity_type,
         standard_relation=standard_relation,
+        standard_units=standard_units,
         assay_types=assay_types,
         chembl_release=chembl_release,
         save_not_aggregated=(not skip_not_aggregated),
@@ -559,6 +584,8 @@ def get_data(
         min_assay_overlap=min_assay_overlap,
         max_assay_match=max_assay_match,
         strict_mutant_removal=strict_mutant_removal,
+        value_col=aggregate_on.value,
+        enable_unit_conversion=convert_units,
     )
 
     df = aggregate_data(

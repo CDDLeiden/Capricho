@@ -4,6 +4,8 @@ multiple_value_cols = (
     "standard_smiles",
     "canonical_smiles",
     "pchembl_value",
+    "standard_value",
+    "standard_units",
     "assay_chembl_id",
     "assay_description",
     "activity_id",

@@ -476,6 +476,7 @@ def get_full_activity_data_sql(
     document_chembl_ids: Optional[Union[list, str]] = None,
     standard_relation: Optional[List[str]] = None,
     standard_type: Optional[List[str]] = None,
+    standard_units: Optional[List[str]] = None,
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
     chembl_release: Optional[int] = None,
@@ -544,6 +545,10 @@ def get_full_activity_data_sql(
     if standard_type:
         placeholders = ", ".join([f"'{stype}'" for stype in standard_type])
         where_conditions_main.append(f"act.standard_type IN ({placeholders})")
+
+    if standard_units:
+        placeholders = ", ".join([f"'{unit}'" for unit in standard_units])
+        where_conditions_main.append(f"act.standard_units IN ({placeholders})")
 
     if confidence_scores:
         placeholders = ", ".join([f"{score}" for score in confidence_scores])

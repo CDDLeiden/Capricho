@@ -20,9 +20,17 @@ from ..chembl.data_flag_functions import (
     flag_strict_mutant_assays,
     flag_to_remove_mixture_compounds,
     flag_undefined_stereochemistry,
+    flag_unit_conversion,
 )
 from ..chembl.exceptions import BioactivitiesNotFoundError
 from ..chembl.processing import get_bioactivities_workflow
+from ..chembl.unit_conversions import (
+    convert_dose_units,
+    convert_mass_concentration_units,
+    convert_molar_concentration_units,
+    convert_permeability_units,
+    convert_time_units,
+)
 from ..core.default_fields import (
     ASSAY_ID,
     DATA_DROPPING_COMMENT,
@@ -137,6 +145,8 @@ def get_standardize_and_clean_workflow(
     min_assay_overlap: int = 0,
     max_assay_match: bool = False,
     strict_mutant_removal: bool = False,
+    value_col: str = "pchembl_value",
+    enable_unit_conversion: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -225,6 +235,7 @@ def get_standardize_and_clean_workflow(
         chembl_release=chembl_release,
         version=version,
         backend=backend,
+        value_col=value_col,
     )
 
     # Flag activities without document dates for transparency
@@ -236,6 +247,50 @@ def get_standardize_and_clean_workflow(
 
     # Flag activities from patent sources for transparency
     full_df = flag_patent_source(full_df)
+
+    # Convert units if requested
+    if enable_unit_conversion:
+        logger.info("Converting units to standard formats")
+
+        # Convert permeability units to 10^-6 cm/s
+        full_df = convert_permeability_units(
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        # Convert molar concentration units to nM
+        full_df = convert_molar_concentration_units(
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        # Convert mass concentration units to ug/mL
+        full_df = convert_mass_concentration_units(
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        # Convert dose units to mg/kg
+        full_df = convert_dose_units(
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        # Convert time units to hr
+        full_df = convert_time_units(
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
 
     # Filter out activities with standard_relation not in the user-selected values
     # This is important because flag_censored_activity_comment may change '=' to '<'
@@ -280,12 +335,13 @@ def get_standardize_and_clean_workflow(
             max_assay_match=max_assay_match,
         )
 
+    # Columns to remove after standardization
+    # Note: standard_value and standard_units are always preserved as multivalue columns
     cols_to_remove_post_standardization = [
         "type",
         "relation",
         "units",
         "value",
-        "standard_value",  # we'll use pchembl instead
         "type",
         # "description",
     ]
@@ -389,14 +445,21 @@ def get_standardize_and_clean_workflow(
 
     # This part needs to be removed prior to data aggregation. Here, we have either
     # inorganic compounds (SMILES removed from the salt removal step), mixtures (SMILES with "."), or
-    # compounds with missing pchembl values, which are needed for the statistics
+    # compounds with missing activity values, which are needed for the statistics
     missing_smiles_patt = r"Missing Standard SMILES|Missing SMILES|Mixture in SMILES"
     only_salt_entry_patt = r"^\.+$"  # if only salts are present, SMILES will be just "."
-    removed_subset = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
-        "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True) | "
-        "pchembl_value.isna() | "
-        r"standard_smiles.str.contains(@only_salt_entry_patt, regex=True)"
-    ).copy()
+
+    # Build the query dynamically based on which columns exist and which value_col is used
+    query_parts = [
+        "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)",
+        r"standard_smiles.str.contains(@only_salt_entry_patt, regex=True)",
+    ]
+
+    # Only filter by value_col if it exists in the dataframe
+    if value_col in df.columns:
+        query_parts.append(f"{value_col}.isna()")
+
+    removed_subset = df.query(" | ".join(query_parts)).copy()
     if output_path is not None:
         suffixes = "".join(output_path.suffixes)
         new_name = output_path.stem.split(".")[0] + "_removed_subset" + suffixes
