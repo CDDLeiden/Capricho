@@ -700,7 +700,12 @@ def flag_unit_conversion(df: pd.DataFrame) -> pd.DataFrame:
         has_original_unit = "original_unit" in df.columns
         has_standard_units = "standard_units" in df.columns
 
-        if has_original_unit and has_standard_units:
+        if not has_original_unit or not has_standard_units:
+            logger.warning(
+                "Unit conversion flagging requires 'original_unit' and 'standard_units' columns. "
+                "Skipping flagging. This may indicate a bug in the conversion function."
+            )
+        else:
             # Create row-specific comments showing original -> target unit
             for idx in df[mask].index:
                 original = df.loc[idx, "original_unit"]
@@ -713,15 +718,6 @@ def flag_unit_conversion(df: pd.DataFrame) -> pd.DataFrame:
                     target_column="conversion_factor",
                     comment_type="p",
                 )
-        else:
-            # Generic comment for backward compatibility (permeability conversions)
-            df = add_comment(
-                df,
-                comment="Unit converted to 10^-6 cm/s",
-                criteria_func=lambda x: x.notna(),
-                target_column="conversion_factor",
-                comment_type="p",
-            )
     else:
         logger.debug("No activities with converted units found.")
 

@@ -13,12 +13,17 @@ from sklearn.metrics import r2_score
 
 
 class ProcessingComment(str, Enum):
-    """Processing comments added during data curation (non-dropping flags)."""
+    """Processing comments added during data curation (non-dropping flags).
+
+    Note: UNIT_CONVERTED is a pattern-based comment. Actual comments include the
+    original and target units, e.g., "Unit converted to nM from uM".
+    """
 
     CALCULATED_PCHEMBL = "Calculated pChEMBL"
     SALT_SOLVENT_REMOVED = "Salt/solvent removed"
     PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS = "pChEMBL Duplication Across Documents"
     CORRECTED_STANDARD_RELATION = "Corrected standard_relation from = to < (censored activity_comment)"
+    UNIT_CONVERTED = "Unit converted to"  # Example: "Unit converted to nM from uM"
 
 
 class DroppingComment(str, Enum):
@@ -56,6 +61,7 @@ def normalize_comment_pattern(comment: str) -> str:
         - "Assay size > 100" -> "Assay size >"
         - "Insufficient assay overlap (min_overlap=5)" -> "Insufficient assay overlap"
         - "Insufficient assay overlap with metadata matching (min_overlap=5)" -> "Insufficient assay overlap with metadata matching"
+        - "Unit converted to nM from uM" -> "Unit converted to"
         - "Unit Annotation Error" -> "Unit Annotation Error"
     """
     # Handle assay size patterns by removing the threshold number
@@ -68,6 +74,9 @@ def normalize_comment_pattern(comment: str) -> str:
         return "Insufficient assay overlap with metadata matching"
     elif comment.startswith("Insufficient assay overlap"):
         return "Insufficient assay overlap"
+    # Handle unit conversion patterns by removing the specific units
+    elif comment.startswith("Unit converted to"):
+        return "Unit converted to"
     return comment
 
 
@@ -92,7 +101,8 @@ def get_all_comments() -> list[str]:
 
     Returns:
         List of all comment patterns (dropping and processing combined).
-        Assay size and insufficient overlap comments are patterns without specific thresholds.
+        Assay size, insufficient overlap, and unit conversion comments are patterns
+        without specific thresholds/units.
     """
     return [
         DroppingComment.DATA_VALIDITY_COMMENT.value,
@@ -111,6 +121,7 @@ def get_all_comments() -> list[str]:
         ProcessingComment.CALCULATED_PCHEMBL.value,
         ProcessingComment.CORRECTED_STANDARD_RELATION.value,
         ProcessingComment.PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS.value,
+        ProcessingComment.UNIT_CONVERTED.value,
     ]
 
 
@@ -356,6 +367,10 @@ def build_query_string(comment: str) -> str:
         ProcessingComment.CORRECTED_STANDARD_RELATION.value,
     ]:
         return f"processing_comment.str.contains('{comment}', regex=False) & dropping_comment == ''"
+
+    # Special handling for unit conversion (pattern-based, uses combined processing_comment column)
+    if comment == ProcessingComment.UNIT_CONVERTED.value:
+        return "processing_comment.str.contains('Unit converted to', regex=False) & dropping_comment == ''"
 
     # Special handling for potential duplicates (needs to be in both assays, exclude data validity issues)
     if comment == DroppingComment.POTENTIAL_DUPLICATE.value:

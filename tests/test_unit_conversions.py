@@ -169,17 +169,19 @@ class TestFlagUnitConversion(unittest.TestCase):
                 "standard_value": [1e6, 10.0],
                 "standard_units": ["10^-6 cm/s", "10^-6 cm/s"],
                 "conversion_factor": [1e6, 0.1],
+                "original_unit": ["cm/s", "nm/s"],
                 "data_processing_comment": [None, None],
             }
         )
 
         result = flag_unit_conversion(df)
 
-        # Check that both rows are flagged
-        self.assertIn("Unit converted", str(result.loc[0, "data_processing_comment"]))
-        self.assertIn("Unit converted", str(result.loc[1, "data_processing_comment"]))
-        # Check that conversion_factor column is removed
+        # Check that both rows are flagged with dynamic comments
+        self.assertIn("Unit converted to 10^-6 cm/s from cm/s", str(result.loc[0, "data_processing_comment"]))
+        self.assertIn("Unit converted to 10^-6 cm/s from nm/s", str(result.loc[1, "data_processing_comment"]))
+        # Check that conversion_factor and original_unit columns are removed
         self.assertNotIn("conversion_factor", result.columns)
+        self.assertNotIn("original_unit", result.columns)
 
     def test_no_conversion_factor_column(self):
         """Test that function handles missing conversion_factor column gracefully."""
@@ -199,6 +201,7 @@ class TestFlagUnitConversion(unittest.TestCase):
                 "standard_value": [1e6, 5.0, 10.0],
                 "standard_units": ["10^-6 cm/s", "unknown", "10^-6 cm/s"],
                 "conversion_factor": [1e6, None, 0.1],
+                "original_unit": ["cm/s", None, "nm/s"],
                 "data_processing_comment": [None, None, None],
             }
         )
@@ -206,14 +209,15 @@ class TestFlagUnitConversion(unittest.TestCase):
         result = flag_unit_conversion(df)
 
         # Check that only converted rows are flagged
-        self.assertIn("Unit converted", str(result.loc[0, "data_processing_comment"]))
+        self.assertIn("Unit converted to 10^-6 cm/s from cm/s", str(result.loc[0, "data_processing_comment"]))
         self.assertTrue(
             pd.isna(result.loc[1, "data_processing_comment"])
             or result.loc[1, "data_processing_comment"] in [None, "", pd.NA]
         )
-        self.assertIn("Unit converted", str(result.loc[2, "data_processing_comment"]))
-        # Check that conversion_factor column is removed
+        self.assertIn("Unit converted to 10^-6 cm/s from nm/s", str(result.loc[2, "data_processing_comment"]))
+        # Check that conversion_factor and original_unit columns are removed
         self.assertNotIn("conversion_factor", result.columns)
+        self.assertNotIn("original_unit", result.columns)
 
     def test_append_to_existing_comment(self):
         """Test that flagging appends to existing data_processing_comment."""
@@ -222,6 +226,7 @@ class TestFlagUnitConversion(unittest.TestCase):
                 "standard_value": [1e6],
                 "standard_units": ["10^-6 cm/s"],
                 "conversion_factor": [1e6],
+                "original_unit": ["cm/s"],
                 "data_processing_comment": ["Existing comment"],
             }
         )
@@ -231,7 +236,28 @@ class TestFlagUnitConversion(unittest.TestCase):
         # Check that new comment is appended to existing one
         comment = result.loc[0, "data_processing_comment"]
         self.assertIn("Existing comment", str(comment))
-        self.assertIn("Unit converted", str(comment))
+        self.assertIn("Unit converted to 10^-6 cm/s from cm/s", str(comment))
+
+    def test_missing_original_unit_logs_warning(self):
+        """Test that missing original_unit column logs a warning and skips flagging."""
+        df = pd.DataFrame(
+            {
+                "standard_value": [1e6],
+                "standard_units": ["10^-6 cm/s"],
+                "conversion_factor": [1e6],
+                "data_processing_comment": [None],
+            }
+        )
+
+        result = flag_unit_conversion(df)
+
+        # Should not add any comment since original_unit is missing
+        self.assertTrue(
+            pd.isna(result.loc[0, "data_processing_comment"])
+            or result.loc[0, "data_processing_comment"] in [None, "", pd.NA]
+        )
+        # conversion_factor should still be removed
+        self.assertNotIn("conversion_factor", result.columns)
 
 
 class TestIntegration(unittest.TestCase):

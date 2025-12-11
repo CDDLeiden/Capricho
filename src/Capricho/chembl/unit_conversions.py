@@ -1,7 +1,7 @@
 """Functions for converting ChEMBL bioactivity units to standardized formats.
 
-ABOUTME: Provides unit conversion functions for ChEMBL bioactivity data standardization.
-ABOUTME: Supports permeability, molar concentration, mass concentration, dose, and time units.
+Provides unit conversion functions for ChEMBL bioactivity data standardization.
+Supports permeability, molar concentration, mass concentration, dose, and time units.
 """
 
 import pandas as pd
@@ -31,7 +31,7 @@ def convert_permeability_units(
 
     Returns:
         pd.DataFrame: DataFrame with converted values and standardized units where applicable.
-            Adds a 'conversion_factor' column for transparency (can be dropped later).
+            Adds 'conversion_factor' and 'original_unit' columns for transparency.
 
     Examples:
         >>> df = pd.DataFrame({
@@ -84,6 +84,9 @@ def convert_permeability_units(
 
     # Map conversion factors
     df["conversion_factor"] = df["temp_unit"].map(conversions)
+
+    # Store original unit for transparency before conversion
+    df["original_unit"] = df[unit_col].where(df["conversion_factor"].notna())
 
     # Identify rows that can be converted:
     # - Must have a known conversion factor
@@ -221,7 +224,9 @@ def convert_molar_concentration_units(
         df.loc[mask_convertible, unit_col] = target_label
 
         # Log summary of conversions by original unit
-        conversion_summary = df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        conversion_summary = (
+            df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        )
         logger.debug("Conversion summary by original unit:")
         for unit, row in conversion_summary.iterrows():
             logger.debug(f"  {unit}: {row['count']} measurements (factor: {row['first']})")
@@ -336,7 +341,9 @@ def convert_mass_concentration_units(
         df.loc[mask_convertible, unit_col] = target_label
 
         # Log summary of conversions by original unit
-        conversion_summary = df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        conversion_summary = (
+            df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        )
         logger.debug("Conversion summary by original unit:")
         for unit, row in conversion_summary.iterrows():
             logger.debug(f"  {unit}: {row['count']} measurements (factor: {row['first']})")
@@ -441,7 +448,9 @@ def convert_dose_units(
         df.loc[mask_convertible, unit_col] = target_label
 
         # Log summary of conversions by original unit
-        conversion_summary = df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        conversion_summary = (
+            df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        )
         logger.debug("Conversion summary by original unit:")
         for unit, row in conversion_summary.iterrows():
             logger.debug(f"  {unit}: {row['count']} measurements (factor: {row['first']})")
@@ -558,7 +567,9 @@ def convert_time_units(
         df.loc[mask_convertible, unit_col] = target_label
 
         # Log summary of conversions by original unit
-        conversion_summary = df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        conversion_summary = (
+            df[mask_convertible].groupby("temp_unit")["conversion_factor"].agg(["first", "count"])
+        )
         logger.debug("Conversion summary by original unit:")
         for unit, row in conversion_summary.iterrows():
             logger.debug(f"  {unit}: {row['count']} measurements (factor: {row['first']})")
