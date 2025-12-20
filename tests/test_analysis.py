@@ -278,6 +278,41 @@ class TestExplodeAssayComparability(unittest.TestCase):
         self.assertTrue((mol1_rows["standard_type"] == "IC50").all())
         self.assertTrue((mol2_rows["standard_type"] == "Ki").all())
 
+    def test_explode_with_custom_value_column(self):
+        """Test explosion with standard_value instead of pchembl_value."""
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL2"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
+                "repeat": [0, 1],
+                "activity_id": ["ACT1|ACT2", "ACT3|ACT4"],
+                "assay_chembl_id": ["ASSAY1|ASSAY2", "ASSAY3|ASSAY4"],
+                "standard_value": ["100.0|200.0", "50.0|75.0"],
+                "data_processing_comment": ["|", "|"],
+                "data_dropping_comment": ["|", "|"],
+                "standard_type": ["Pc|Pc", "Pc|Pc"],
+                "canonical_smiles": ["CCCC|CCCC", "CCCO|CCCO"],
+            }
+        )
+
+        result = explode_assay_comparability(df, value_column="standard_value")
+
+        # MOL1 has 2 assays -> 1 pair, MOL2 has 2 assays -> 1 pair
+        # Total = 2 rows
+        self.assertEqual(len(result), 2)
+
+        # Check that standard_value_x and standard_value_y columns exist
+        self.assertIn("standard_value_x", result.columns)
+        self.assertIn("standard_value_y", result.columns)
+        # pchembl columns should NOT exist
+        self.assertNotIn("pchembl_value_x", result.columns)
+        self.assertNotIn("pchembl_value_y", result.columns)
+
+        # Verify values
+        mol1_row = result[result["connectivity"] == "MOL1"].iloc[0]
+        self.assertEqual(mol1_row["standard_value_x"], "100.0")
+        self.assertEqual(mol1_row["standard_value_y"], "200.0")
+
 
 class TestDeaggregateData(unittest.TestCase):
     """Tests for deaggregate_data function."""

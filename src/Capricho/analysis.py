@@ -164,7 +164,10 @@ def deaggregate_data(data: pd.DataFrame, sep_str: str = "|") -> pd.DataFrame:
 
 
 def explode_assay_comparability(
-    subset: pd.DataFrame, sep_str: str = "|", extra_multival_cols: Optional[list[str]] = None
+    subset: pd.DataFrame,
+    sep_str: str = "|",
+    extra_multival_cols: Optional[list[str]] = None,
+    value_column: str = "pchembl_value",
 ) -> pd.DataFrame:
     """Explode dataset to create pairwise comparisons between assays for the same compound.
 
@@ -174,6 +177,10 @@ def explode_assay_comparability(
     Args:
         subset: DataFrame with multi-valued columns separated by sep_str.
         sep_str: Separator string used to delimit multiple values in columns.
+        extra_multival_cols: Additional columns to treat as multi-valued.
+        value_column: The column containing activity values to compare. Defaults to
+            "pchembl_value" but can be set to "standard_value" for non-pChEMBL data
+            (e.g., Caco-2 permeability, percent inhibition).
 
     Returns:
         DataFrame with exploded pairwise comparisons, with _x and _y suffixes for each pair.
@@ -191,7 +198,7 @@ def explode_assay_comparability(
     multival_cols = [
         "activity_id",
         "assay_chembl_id",
-        "pchembl_value",
+        value_column,
         "data_processing_comment",
         "data_dropping_comment",
         "standard_type",
@@ -273,48 +280,90 @@ def plot_subset(
     title: str = "",
     color: str = "slategray",
     figsize: Tuple[float, float] = (5, 5),
+    value_column: str = "pchembl_value",
+    log_transform: bool = False,
+    axis_label: Optional[str] = None,
+    axis_limits: Optional[Tuple[float, float]] = None,
+    reference_lines: bool = True,
 ) -> Tuple[plt.Figure, plt.Axes]:
-    """Create scatter plot comparing pChEMBL values across assays with correlation metrics.
+    """Create scatter plot comparing values across assays with correlation metrics.
 
     Args:
-        subset: DataFrame with pchembl_value_x and pchembl_value_y columns.
+        subset: DataFrame with {value_column}_x and {value_column}_y columns.
         title: Plot title.
         color: Color for scatter points.
         figsize: Figure size as (width, height) tuple.
+        value_column: Base name of the value column (without _x/_y suffix).
+            Defaults to "pchembl_value".
+        log_transform: If True, apply -log10 transformation to values before plotting.
+            Use for concentration values (nM, µM, etc.) but NOT for percentages or pChEMBL.
+        axis_label: Custom axis label. If None, defaults to "pChEMBL value" for pchembl_value
+            or the value_column name otherwise. For log-transformed data, prepends "-log10".
+        axis_limits: Tuple of (min, max) for both axes. If None, defaults to (3, 12) for
+            pchembl_value, (0, 100) for percentage data, or auto-detects from data.
+        reference_lines: If True, draw identity and ±1/±0.3 reference lines. These are
+            most meaningful for pChEMBL-scale data.
 
     Returns:
         Tuple of (figure, axes) objects.
     """
     fig, ax = plt.subplots(figsize=figsize)
     subset = subset.copy()
-    subset["pchembl_value_x"] = subset["pchembl_value_x"].astype(float)
-    subset["pchembl_value_y"] = subset["pchembl_value_y"].astype(float)
+
+    x_col = f"{value_column}_x"
+    y_col = f"{value_column}_y"
+
+    subset[x_col] = subset[x_col].astype(float)
+    subset[y_col] = subset[y_col].astype(float)
+
+    xp = subset[x_col].copy()
+    yp = subset[y_col].copy()
+
+    if log_transform:
+        # Apply -log10(x + 1) transformation to handle zero values gracefully
+        xp = -np.log10(xp + 1)
+        yp = -np.log10(yp + 1)
 
     ax.scatter(
-        subset["pchembl_value_x"],
-        subset["pchembl_value_y"],
+        xp,
+        yp,
         alpha=0.3,
         edgecolors="none",
         color=color,
     )
     ax.set_title(title)
 
-    # Add reference lines
-    ax.plot((3, 12), (3, 12), "k-", label="Identity $(y=x)$")
-    ax.plot((3, 12), (2, 11), "k--")
-    ax.plot((3, 12), (4, 13), "k--", label="$y=x±1$")
-    ax.plot((3, 12), (2.7, 11.7), "k-.")
-    ax.plot((3, 12), (3.3, 12.3), "k-.", label="$y=x±0.3$")
+    # Determine axis limits
+    if axis_limits is not None:
+        lim_min, lim_max = axis_limits
+    elif value_column == "pchembl_value":
+        # pChEMBL values typically range from 3-12
+        lim_min, lim_max = 3, 12
+    else:
+        # Auto-detect from (possibly transformed) data
+        all_vals = np.concatenate([xp, yp])
+        data_min, data_max = np.nanmin(all_vals), np.nanmax(all_vals)
+        margin = (data_max - data_min) * 0.1
+        lim_min = data_min - margin
+        lim_max = data_max + margin
 
-    ax.set_xlim(3, 12)
-    ax.set_ylim(3, 12)
+    if reference_lines and (value_column == "pchembl_value" or log_transform):
+        # Reference lines are most meaningful for pChEMBL-scale data
+        ax.plot((lim_min, lim_max), (lim_min, lim_max), "k-", label="Identity $(y=x)$")
+        ax.plot((lim_min, lim_max), (lim_min - 1, lim_max - 1), "k--")
+        ax.plot((lim_min, lim_max), (lim_min + 1, lim_max + 1), "k--", label="$y=x±1$")
+        ax.plot((lim_min, lim_max), (lim_min - 0.3, lim_max - 0.3), "k-.")
+        ax.plot((lim_min, lim_max), (lim_min + 0.3, lim_max + 0.3), "k-.", label="$y=x±0.3$")
+    elif reference_lines:
+        # For percentage or other linear data, just draw identity line
+        ax.plot((lim_min, lim_max), (lim_min, lim_max), "k-", label="Identity $(y=x)$")
+
+    ax.set_xlim(lim_min, lim_max)
+    ax.set_ylim(lim_min, lim_max)
     ax.spines["right"].set_visible(False)
     ax.spines["top"].set_visible(False)
 
     # Calculate correlation metrics
-    xp = subset["pchembl_value_x"]
-    yp = subset["pchembl_value_y"]
-
     r, _ = stats.spearmanr(xp, yp)
     tau, _ = stats.kendalltau(xp, yp)
     r2 = r2_score(xp, yp)
@@ -328,25 +377,46 @@ def plot_subset(
         horizontalalignment="right",
     )
 
-    ax.set_ylabel("Assay 2 pChEMBL value")
-    ax.set_xlabel("Assay 1 pChEMBL value")
+    # Determine axis labels
+    if axis_label is not None:
+        label_base = axis_label
+    elif value_column == "pchembl_value":
+        label_base = "pChEMBL value"
+    elif log_transform:
+        label_base = f"-log10({value_column})"
+    else:
+        label_base = value_column
+
+    ax.set_ylabel(f"Assay 2 {label_base}")
+    ax.set_xlabel(f"Assay 1 {label_base}")
 
     handles, labels = ax.get_legend_handles_labels()
-    ax.legend(
-        handles[1:],
-        labels[1:],
-        title="",
-        bbox_to_anchor=(1.05, 0, 1, 0.2),
-        loc="lower left",
-        mode="expand",
-        frameon=False,
-    )
+    if len(handles) > 1:
+        ax.legend(
+            handles[1:],
+            labels[1:],
+            title="",
+            bbox_to_anchor=(1.05, 0, 1, 0.2),
+            loc="lower left",
+            mode="expand",
+            frameon=False,
+        )
+    elif len(handles) == 1:
+        ax.legend(
+            handles,
+            labels,
+            title="",
+            bbox_to_anchor=(1.05, 0, 1, 0.2),
+            loc="lower left",
+            mode="expand",
+            frameon=False,
+        )
     fig.tight_layout()
 
     return fig, ax
 
 
-def build_query_string(comment: str) -> str:
+def build_query_string(comment: str, value_column: str = "pchembl_value") -> str:
     """Build query string for filtering data by specific comment flags.
 
     This function replicates the original notebook logic for querying exploded datasets.
@@ -354,6 +424,8 @@ def build_query_string(comment: str) -> str:
 
     Args:
         comment: The comment pattern to search for (may be normalized pattern like "Assay size <").
+        value_column: Base name of the value column (without _x/_y suffix).
+            Used for duplicate checking queries. Defaults to "pchembl_value".
 
     Returns:
         Query string suitable for pd.DataFrame.query().
@@ -364,7 +436,7 @@ def build_query_string(comment: str) -> str:
         return (
             "(data_processing_comment_x.str.contains('pChEMBL Duplication Across Documents', regex=False) & "
             "data_processing_comment_y.str.contains('pChEMBL Duplication Across Documents', regex=False) & "
-            "pchembl_value_x == pchembl_value_y)"
+            f"{value_column}_x == {value_column}_y)"
         )
 
     # Special handling for calculated pChEMBL (uses combined processing_comment column)
@@ -436,6 +508,11 @@ def plot_multi_panel_comparability(
     title: str = "Comparability Across Flagged Data",
     figsize: Tuple[float, float] = (20, 8),
     ncols: int = 5,
+    value_column: str = "pchembl_value",
+    log_transform: bool = False,
+    axis_label: Optional[str] = None,
+    axis_limits: Optional[Tuple[float, float]] = None,
+    reference_lines: bool = True,
 ) -> Tuple[plt.Figure, np.ndarray]:
     """Create multi-panel plot showing comparability for different data quality flags.
 
@@ -445,16 +522,28 @@ def plot_multi_panel_comparability(
         title: Overall figure title.
         figsize: Figure size as (width, height) tuple.
         ncols: Number of columns in subplot grid.
+        value_column: Base name of the value column (without _x/_y suffix).
+            Defaults to "pchembl_value".
+        log_transform: If True, apply -log10 transformation to values before plotting.
+            Use for concentration values (nM, µM, etc.) but NOT for percentages or pChEMBL.
+        axis_label: Custom axis label. If None, defaults to "pChEMBL value" for pchembl_value
+            or the value_column name otherwise.
+        axis_limits: Tuple of (min, max) for both axes. If None, defaults to (3, 12) for
+            pchembl_value, or auto-detects from data.
+        reference_lines: If True, draw identity and ±1/±0.3 reference lines.
 
     Returns:
         Tuple of (figure, axes array).
     """
+    x_col = f"{value_column}_x"
+    y_col = f"{value_column}_y"
+
     comments_with_data = []  # only display the comments that have data
     n_data = []  # debugging info only
     for comment in comments:
         if comment == "Corrected standard_relation from = to < (censored activity_comment)":
             continue  # skip this comment as it contains discrete data only
-        query_str = build_query_string(comment)
+        query_str = build_query_string(comment, value_column=value_column)
         subset = exploded_subset.query(query_str)
         if len(subset) > 0:
             comments_with_data.append(comment)
@@ -470,12 +559,41 @@ def plot_multi_panel_comparability(
     colors = [tuple([*col] + [1]) for col in colormaps["tab20"].colors]
 
     fig, axs = plt.subplots(nrows, ncols, figsize=figsize)
-    axs_flat = axs.flatten()
+    axs_flat = axs.flatten() if nrows > 1 else [axs] if ncols == 1 else axs
+
+    # Determine axis limits
+    if axis_limits is not None:
+        lim_min, lim_max = axis_limits
+    elif value_column == "pchembl_value":
+        # pChEMBL values typically range from 3-12
+        lim_min, lim_max = 3, 12
+    else:
+        # Auto-detect from (possibly transformed) data
+        all_x = exploded_subset[x_col].astype(float)
+        all_y = exploded_subset[y_col].astype(float)
+        if log_transform:
+            all_x = -np.log10(all_x + 1)
+            all_y = -np.log10(all_y + 1)
+        all_vals = np.concatenate([all_x, all_y])
+        data_min, data_max = np.nanmin(all_vals), np.nanmax(all_vals)
+        margin = (data_max - data_min) * 0.1
+        lim_min = data_min - margin
+        lim_max = data_max + margin
+
+    # Determine axis labels
+    if axis_label is not None:
+        label_base = axis_label
+    elif value_column == "pchembl_value":
+        label_base = "pChEMBL value"
+    elif log_transform:
+        label_base = f"-log10({value_column})"
+    else:
+        label_base = value_column
 
     for idx, color, obs, ax in zip(
         range(1, len(comments_with_data) + 1), colors, comments_with_data, axs_flat
     ):
-        query_str = build_query_string(obs)
+        query_str = build_query_string(obs, value_column=value_column)
         subset = exploded_subset.query(query_str)
 
         # Extract actual title with dynamic threshold if it's a parametric comment
@@ -496,12 +614,19 @@ def plot_multi_panel_comparability(
                             break
 
         subset = subset.copy()
-        subset["pchembl_value_x"] = subset["pchembl_value_x"].astype(float)
-        subset["pchembl_value_y"] = subset["pchembl_value_y"].astype(float)
+        subset[x_col] = subset[x_col].astype(float)
+        subset[y_col] = subset[y_col].astype(float)
+
+        xp = subset[x_col].copy()
+        yp = subset[y_col].copy()
+
+        if log_transform:
+            xp = -np.log10(xp + 1)
+            yp = -np.log10(yp + 1)
 
         ax.scatter(
-            subset["pchembl_value_x"],
-            subset["pchembl_value_y"],
+            xp,
+            yp,
             alpha=0.3,
             edgecolors="none",
             label=title_str,
@@ -510,19 +635,19 @@ def plot_multi_panel_comparability(
         ax.set_title(f"{idx}. {title_str}")
 
         # Add reference lines
-        ax.plot((3, 12), (3, 12), "k-", label="Identity $(y=x)$")
-        ax.plot((3, 12), (2, 11), "k--")
-        ax.plot((3, 12), (4, 13), "k--", label="$y=x±1$")
-        ax.plot((3, 12), (2.7, 11.7), "k-.")
-        ax.plot((3, 12), (3.3, 12.3), "k-.", label="$y=x±0.3$")
+        if reference_lines and (value_column == "pchembl_value" or log_transform):
+            ax.plot((lim_min, lim_max), (lim_min, lim_max), "k-", label="Identity $(y=x)$")
+            ax.plot((lim_min, lim_max), (lim_min - 1, lim_max - 1), "k--")
+            ax.plot((lim_min, lim_max), (lim_min + 1, lim_max + 1), "k--", label="$y=x±1$")
+            ax.plot((lim_min, lim_max), (lim_min - 0.3, lim_max - 0.3), "k-.")
+            ax.plot((lim_min, lim_max), (lim_min + 0.3, lim_max + 0.3), "k-.", label="$y=x±0.3$")
+        elif reference_lines:
+            ax.plot((lim_min, lim_max), (lim_min, lim_max), "k-", label="Identity $(y=x)$")
 
-        ax.set_xlim(3, 12)
-        ax.set_ylim(3, 12)
+        ax.set_xlim(lim_min, lim_max)
+        ax.set_ylim(lim_min, lim_max)
         ax.spines["right"].set_visible(False)
         ax.spines["top"].set_visible(False)
-
-        xp = subset["pchembl_value_x"]
-        yp = subset["pchembl_value_y"]
 
         try:
             r, _ = stats.spearmanr(xp, yp)
@@ -541,21 +666,22 @@ def plot_multi_panel_comparability(
         )
 
         if idx in [1, ncols + 1]:
-            ax.set_ylabel("Assay 2 pChEMBL value")
+            ax.set_ylabel(f"Assay 2 {label_base}")
         if idx > (nrows - 1) * ncols:
-            ax.set_xlabel("Assay 1 pChEMBL value")
+            ax.set_xlabel(f"Assay 1 {label_base}")
 
         if idx == len(comments_with_data):
             handles, labels = ax.get_legend_handles_labels()
-            ax.legend(
-                handles[1:],
-                labels[1:],
-                title="",
-                bbox_to_anchor=(1.05, 0, 1, 0.2),
-                loc="lower left",
-                mode="expand",
-                frameon=False,
-            )
+            if len(handles) > 1:
+                ax.legend(
+                    handles[1:],
+                    labels[1:],
+                    title="",
+                    bbox_to_anchor=(1.05, 0, 1, 0.2),
+                    loc="lower left",
+                    mode="expand",
+                    frameon=False,
+                )
 
     # Hide unused subplots
     for ax in axs_flat[len(comments_with_data) :]:
