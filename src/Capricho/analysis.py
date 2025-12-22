@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from loguru import logger as log
 from matplotlib import colormaps
 from scipy import stats
 from sklearn.metrics import r2_score
@@ -161,6 +162,283 @@ def deaggregate_data(data: pd.DataFrame, sep_str: str = "|") -> pd.DataFrame:
     deaggregated = pd.concat([data.drop(index=aggregated_rows.index), exploded])
 
     return deaggregated.reset_index(drop=True)
+
+
+def deduplicate_aggregated_values(
+    data: pd.DataFrame,
+    value_column: str = "pchembl_value",
+    sep_str: str = "|",
+) -> pd.DataFrame:
+    """Remove duplicate values within aggregated rows based on the value column.
+
+    When data is aggregated, identical values from different documents may appear
+    multiple times (e.g., "8.00|8.00|8.00|6.92"). This function removes duplicate
+    values, keeping only the first occurrence of each unique value within each row.
+
+    This is useful for removing cross-document duplicates before recalculating
+    statistics (mean, median, std), as duplicate values can skew the distribution.
+
+    Args:
+        data: DataFrame with aggregated (pipe-delimited) columns.
+        value_column: Column containing the values to deduplicate on.
+            Defaults to "pchembl_value".
+        sep_str: Separator string used to delimit multiple values in columns.
+
+    Returns:
+        DataFrame with deduplicated values. Rows that had duplicates will have
+        fewer pipe-delimited entries. Single-value rows are unchanged.
+    """
+    if len(data) == 0:
+        return data.copy()
+
+    data = data.copy()
+
+    # Find columns with pipe separators (multi-value columns)
+    cols_with_pipe = data.apply(lambda col: col.astype(str).str.contains(sep_str, regex=False)).any()
+    cols_with_pipe = np.compress(cols_with_pipe.values, cols_with_pipe.index).tolist()
+
+    if not cols_with_pipe or value_column not in cols_with_pipe:
+        return data
+
+    # Process each row that has aggregated values
+    mask = data[value_column].astype(str).str.contains(sep_str, regex=False)
+
+    if not mask.any():
+        return data
+
+    def dedupe_row(row):
+        """Deduplicate a single row based on value_column, keeping first occurrence."""
+        values = str(row[value_column]).split(sep_str)
+
+        # Find indices of first occurrence of each unique value
+        seen = {}
+        keep_indices = []
+        for i, val in enumerate(values):
+            if val not in seen:
+                seen[val] = i
+                keep_indices.append(i)
+
+        # If no duplicates found, return row unchanged
+        if len(keep_indices) == len(values):
+            return row
+
+        # Apply the same indices to all pipe-delimited columns
+        new_row = row.copy()
+        for col in cols_with_pipe:
+            col_values = str(row[col]).split(sep_str)
+            # Handle case where column has fewer values than value_column
+            if len(col_values) >= len(values):
+                new_values = [col_values[i] for i in keep_indices]
+                new_row[col] = sep_str.join(new_values)
+
+        return new_row
+
+    # Apply deduplication to rows with aggregated values
+    deduplicated_rows = data.loc[mask].apply(dedupe_row, axis=1)
+    data.loc[mask] = deduplicated_rows
+
+    return data
+
+
+def resolve_annotation_errors(
+    data: pd.DataFrame,
+    strategy: str = "first",
+    mol_id_col: str = "molecule_chembl_id",
+    assay_id_col: str = "assay_chembl_id",
+    value_col: str = "pchembl_value",
+    year_col: str = "year",
+) -> pd.DataFrame:
+    """Resolve unit annotation errors by keeping measurements from earliest documents.
+
+    Unit annotation errors occur when measurements for the same molecule across different
+    assays differ by exactly 3.0 or 6.0 log units (suggesting 1000x or 1,000,000x unit
+    conversion errors). This function detects such pairs and keeps only the measurement
+    from the earliest document, assuming later measurements copied the value incorrectly.
+
+    This function operates on exploded (non-aggregated) data where each row is a single
+    measurement.
+
+    Args:
+        data: DataFrame with exploded bioactivity data (one measurement per row).
+        strategy: Resolution strategy. Currently only "first" is supported, which keeps
+            the measurement from the earliest document year.
+        mol_id_col: Column name for molecule identifiers.
+        assay_id_col: Column name for assay identifiers.
+        value_col: Column name for activity values (e.g., pchembl_value).
+        year_col: Column name for document year.
+
+    Returns:
+        DataFrame with annotation errors resolved (problematic measurements removed).
+    """
+    if len(data) == 0:
+        return data.copy()
+
+    if strategy != "first":
+        raise ValueError(f"Unknown strategy: {strategy}. Only 'first' is supported.")
+
+    data = data.copy()
+
+    # Convert value column to numeric for comparison
+    data["__value_numeric__"] = pd.to_numeric(data[value_col], errors="coerce")
+
+    # Convert year to numeric, treating 'nan' string as NaN
+    data["__year_numeric__"] = data[year_col].replace("nan", np.nan)
+    data["__year_numeric__"] = pd.to_numeric(data["__year_numeric__"], errors="coerce")
+
+    # Track indices to remove
+    indices_to_remove = set()
+    pairs_detected = 0
+
+    log.trace(f"Starting annotation error detection for {len(data)} measurements")
+
+    # Group by molecule and find problematic pairs
+    for mol_id, group in data.groupby(mol_id_col):
+        if len(group) < 2:
+            continue
+
+        # Get all pairs of measurements from different assays
+        for i, (idx_a, row_a) in enumerate(group.iterrows()):
+            for idx_b, row_b in list(group.iterrows())[i + 1 :]:
+                # Skip if same assay
+                if row_a[assay_id_col] == row_b[assay_id_col]:
+                    continue
+
+                # Check if values differ by ~3.0 or ~6.0
+                val_a = row_a["__value_numeric__"]
+                val_b = row_b["__value_numeric__"]
+
+                if pd.isna(val_a) or pd.isna(val_b):
+                    continue
+
+                diff = abs(val_a - val_b)
+                is_annotation_error = np.isclose(diff, 3.0, rtol=1e-9, atol=1e-9) or np.isclose(
+                    diff, 6.0, rtol=1e-9, atol=1e-9
+                )
+
+                if not is_annotation_error:
+                    continue
+
+                pairs_detected += 1
+
+                # Found a problematic pair - resolve by keeping earliest
+                year_a = row_a["__year_numeric__"]
+                year_b = row_b["__year_numeric__"]
+                assay_a = row_a[assay_id_col]
+                assay_b = row_b[assay_id_col]
+
+                log.trace(
+                    f"Detected annotation error pair for {mol_id}: "
+                    f"assay {assay_a} (value={val_a:.2f}, year={year_a}) vs "
+                    f"assay {assay_b} (value={val_b:.2f}, year={year_b}), "
+                    f"diff={diff:.2f}"
+                )
+
+                # Handle NaN years: remove the one with NaN year, keep valid year
+                if pd.isna(year_a) and pd.isna(year_b):
+                    # Both NaN - can't resolve, remove both
+                    log.trace(f"  -> Both years NaN, removing BOTH measurements")
+                    indices_to_remove.add(idx_a)
+                    indices_to_remove.add(idx_b)
+                elif pd.isna(year_a):
+                    # A has NaN year, keep B
+                    log.trace(
+                        f"  -> Year A is NaN, keeping B (assay {assay_b}, value={val_b:.2f}, year={year_b})"
+                    )
+                    indices_to_remove.add(idx_a)
+                elif pd.isna(year_b):
+                    # B has NaN year, keep A
+                    log.trace(
+                        f"  -> Year B is NaN, keeping A (assay {assay_a}, value={val_a:.2f}, year={year_a})"
+                    )
+                    indices_to_remove.add(idx_b)
+                elif year_a <= year_b:
+                    # A is earlier or same, remove B
+                    log.trace(
+                        f"  -> A is earlier/same ({year_a} <= {year_b}), "
+                        f"keeping A (assay {assay_a}, value={val_a:.2f}), removing B"
+                    )
+                    indices_to_remove.add(idx_b)
+                else:
+                    # B is earlier, remove A
+                    log.trace(
+                        f"  -> B is earlier ({year_b} < {year_a}), "
+                        f"keeping B (assay {assay_b}, value={val_b:.2f}), removing A"
+                    )
+                    indices_to_remove.add(idx_a)
+
+    log.trace(
+        f"Annotation error detection complete: found {pairs_detected} problematic pairs, "
+        f"removing {len(indices_to_remove)} unique measurements"
+    )
+
+    # Remove problematic rows
+    result = data.drop(index=list(indices_to_remove))
+
+    # Clean up temporary columns
+    result = result.drop(columns=["__value_numeric__", "__year_numeric__"])
+
+    return result.reset_index(drop=True)
+
+
+def recalculate_aggregated_stats(
+    data: pd.DataFrame,
+    value_column: str = "pchembl_value",
+    sep_str: str = "|",
+) -> pd.DataFrame:
+    """Recalculate statistics (mean, median, std, counts) from pipe-delimited values.
+
+    After deduplication or other modifications to the pipe-delimited value column,
+    the pre-computed statistics (mean, median, std, counts) may be stale. This
+    function recalculates them from the current pipe-delimited values.
+
+    Args:
+        data: DataFrame with aggregated data containing value_column and
+            corresponding stats columns ({value_column}_mean, _median, _std, _counts).
+        value_column: Column containing pipe-delimited values.
+            Defaults to "pchembl_value".
+        sep_str: Separator string used to delimit multiple values.
+
+    Returns:
+        DataFrame with recalculated statistics columns.
+    """
+    if len(data) == 0:
+        return data.copy()
+
+    data = data.copy()
+
+    # Stats column names
+    mean_col = f"{value_column}_mean"
+    median_col = f"{value_column}_median"
+    std_col = f"{value_column}_std"
+    counts_col = f"{value_column}_counts"
+
+    def calc_stats(val_str):
+        """Calculate stats from pipe-delimited string."""
+        if pd.isna(val_str) or val_str == "":
+            return np.nan, np.nan, np.nan, 0
+
+        vals = str(val_str).split(sep_str)
+        vals = [float(v) for v in vals if v.strip()]
+
+        if len(vals) == 0:
+            return np.nan, np.nan, np.nan, 0
+        elif len(vals) == 1:
+            return vals[0], vals[0], 0.0, 1
+        else:
+            return np.mean(vals), np.median(vals), np.std(vals, ddof=1), len(vals)
+
+    # Apply calculation to each row
+    stats = data[value_column].apply(lambda x: pd.Series(calc_stats(x)))
+    stats.columns = [mean_col, median_col, std_col, counts_col]
+
+    # Update the stats columns
+    for col in [mean_col, median_col, std_col, counts_col]:
+        if col in data.columns:
+            data[col] = stats[col]
+        else:
+            data[col] = stats[col]
+
+    return data
 
 
 def explode_assay_comparability(

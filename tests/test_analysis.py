@@ -469,6 +469,382 @@ class TestDeaggregateData(unittest.TestCase):
         self.assertEqual(len(result[result["connectivity"] == "MOL2"]), 2)
 
 
+class TestDeduplicateAggregatedValues(unittest.TestCase):
+    """Tests for deduplicate_aggregated_values function."""
+
+    def test_deduplicate_identical_values(self):
+        """Test that identical pchembl values within a row are deduplicated."""
+        from Capricho.analysis import deduplicate_aggregated_values
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1"],
+                "pchembl_value": ["8.00|8.00|8.00|6.92"],
+                "activity_id": ["ACT1|ACT2|ACT3|ACT4"],
+                "document_chembl_id": ["DOC1|DOC2|DOC3|DOC4"],
+                "data_processing_comment": [
+                    "pChEMBL Duplication Across Documents|pChEMBL Duplication Across Documents||"
+                ],
+            }
+        )
+
+        result = deduplicate_aggregated_values(df)
+
+        # Should keep only unique pchembl values: 8.00 and 6.92
+        self.assertEqual(len(result), 1)
+        pchembl_vals = result.iloc[0]["pchembl_value"].split("|")
+        self.assertEqual(len(pchembl_vals), 2)
+        self.assertIn("8.00", pchembl_vals)
+        self.assertIn("6.92", pchembl_vals)
+
+    def test_deduplicate_keeps_first_occurrence(self):
+        """Test that deduplication keeps first occurrence of each value."""
+        from Capricho.analysis import deduplicate_aggregated_values
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1"],
+                "pchembl_value": ["8.00|6.50|8.00"],
+                "activity_id": ["ACT1|ACT2|ACT3"],
+                "document_chembl_id": ["DOC1|DOC2|DOC3"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = deduplicate_aggregated_values(df)
+
+        # First 8.00 should be kept (ACT1, DOC1)
+        pchembl_vals = result.iloc[0]["pchembl_value"].split("|")
+        activity_ids = result.iloc[0]["activity_id"].split("|")
+        doc_ids = result.iloc[0]["document_chembl_id"].split("|")
+
+        self.assertEqual(len(pchembl_vals), 2)
+        # Check order: 8.00 first, then 6.50
+        self.assertEqual(pchembl_vals[0], "8.00")
+        self.assertEqual(pchembl_vals[1], "6.50")
+        self.assertEqual(activity_ids[0], "ACT1")
+        self.assertEqual(doc_ids[0], "DOC1")
+
+    def test_deduplicate_no_duplicates(self):
+        """Test that rows without duplicates are unchanged."""
+        from Capricho.analysis import deduplicate_aggregated_values
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1"],
+                "pchembl_value": ["8.00|7.50|6.92"],
+                "activity_id": ["ACT1|ACT2|ACT3"],
+                "document_chembl_id": ["DOC1|DOC2|DOC3"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = deduplicate_aggregated_values(df)
+
+        # No duplicates, should remain unchanged
+        self.assertEqual(result.iloc[0]["pchembl_value"], "8.00|7.50|6.92")
+        self.assertEqual(result.iloc[0]["activity_id"], "ACT1|ACT2|ACT3")
+
+    def test_deduplicate_single_value_rows(self):
+        """Test that single-value rows are unchanged."""
+        from Capricho.analysis import deduplicate_aggregated_values
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL2"],
+                "pchembl_value": ["8.00", "7.50|7.50"],
+                "activity_id": ["ACT1", "ACT2|ACT3"],
+                "document_chembl_id": ["DOC1", "DOC2|DOC3"],
+                "data_processing_comment": ["", "|"],
+            }
+        )
+
+        result = deduplicate_aggregated_values(df)
+
+        # MOL1 unchanged (single value)
+        mol1 = result[result["connectivity"] == "MOL1"].iloc[0]
+        self.assertEqual(mol1["pchembl_value"], "8.00")
+
+        # MOL2 deduplicated (7.50|7.50 -> 7.50)
+        mol2 = result[result["connectivity"] == "MOL2"].iloc[0]
+        self.assertEqual(mol2["pchembl_value"], "7.50")
+
+    def test_deduplicate_preserves_other_columns(self):
+        """Test that columns not involved in deduplication are preserved."""
+        from Capricho.analysis import deduplicate_aggregated_values
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1"],
+                "target_chembl_id": ["TARGET1"],
+                "smiles": ["CCCC"],
+                "pchembl_value": ["8.00|8.00"],
+                "activity_id": ["ACT1|ACT2"],
+                "document_chembl_id": ["DOC1|DOC2"],
+                "data_processing_comment": ["|"],
+                "pchembl_value_mean": [8.0],
+                "pchembl_value_counts": [2.0],
+            }
+        )
+
+        result = deduplicate_aggregated_values(df)
+
+        # Single-value columns should be preserved
+        self.assertEqual(result.iloc[0]["connectivity"], "MOL1")
+        self.assertEqual(result.iloc[0]["target_chembl_id"], "TARGET1")
+        self.assertEqual(result.iloc[0]["smiles"], "CCCC")
+
+    def test_deduplicate_empty_dataframe(self):
+        """Test that empty DataFrame is handled gracefully."""
+        from Capricho.analysis import deduplicate_aggregated_values
+
+        df = pd.DataFrame(
+            {
+                "connectivity": [],
+                "pchembl_value": [],
+                "activity_id": [],
+                "document_chembl_id": [],
+                "data_processing_comment": [],
+            }
+        )
+
+        result = deduplicate_aggregated_values(df)
+
+        self.assertEqual(len(result), 0)
+
+
+class TestRecalculateAggregatedStats(unittest.TestCase):
+    """Tests for recalculate_aggregated_stats function."""
+
+    def test_recalculate_stats_after_dedup(self):
+        """Test that stats are recalculated after deduplication."""
+        from Capricho.analysis import recalculate_aggregated_stats
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1"],
+                "pchembl_value": ["8.00|6.00"],  # Already deduplicated
+                "pchembl_value_mean": [7.33],  # Old mean from 8.00|8.00|6.00
+                "pchembl_value_median": [8.0],
+                "pchembl_value_std": [1.15],
+                "pchembl_value_counts": [3.0],
+            }
+        )
+
+        result = recalculate_aggregated_stats(df)
+
+        # New mean should be (8.0 + 6.0) / 2 = 7.0
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_mean"], 7.0, places=2)
+        # New median should be 7.0
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_median"], 7.0, places=2)
+        # New count should be 2
+        self.assertEqual(result.iloc[0]["pchembl_value_counts"], 2)
+
+    def test_recalculate_stats_single_value(self):
+        """Test that single values get correct stats."""
+        from Capricho.analysis import recalculate_aggregated_stats
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1"],
+                "pchembl_value": ["8.00"],
+                "pchembl_value_mean": [8.0],
+                "pchembl_value_median": [8.0],
+                "pchembl_value_std": [0.0],
+                "pchembl_value_counts": [1.0],
+            }
+        )
+
+        result = recalculate_aggregated_stats(df)
+
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_mean"], 8.0)
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_median"], 8.0)
+        self.assertEqual(result.iloc[0]["pchembl_value_counts"], 1)
+
+    def test_recalculate_stats_multiple_rows(self):
+        """Test recalculation works for multiple rows."""
+        from Capricho.analysis import recalculate_aggregated_stats
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL2"],
+                "pchembl_value": ["8.00|6.00|7.00", "5.50"],
+                "pchembl_value_mean": [7.0, 5.5],
+                "pchembl_value_median": [7.0, 5.5],
+                "pchembl_value_std": [1.0, 0.0],
+                "pchembl_value_counts": [3.0, 1.0],
+            }
+        )
+
+        result = recalculate_aggregated_stats(df)
+
+        # MOL1: mean of 8, 6, 7 = 7.0
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_mean"], 7.0, places=2)
+        self.assertEqual(result.iloc[0]["pchembl_value_counts"], 3)
+
+        # MOL2: single value, unchanged
+        self.assertAlmostEqual(result.iloc[1]["pchembl_value_mean"], 5.5)
+        self.assertEqual(result.iloc[1]["pchembl_value_counts"], 1)
+
+    def test_recalculate_stats_empty_dataframe(self):
+        """Test that empty DataFrame is handled gracefully."""
+        from Capricho.analysis import recalculate_aggregated_stats
+
+        df = pd.DataFrame(
+            {
+                "connectivity": [],
+                "pchembl_value": [],
+                "pchembl_value_mean": [],
+                "pchembl_value_median": [],
+                "pchembl_value_std": [],
+                "pchembl_value_counts": [],
+            }
+        )
+
+        result = recalculate_aggregated_stats(df)
+
+        self.assertEqual(len(result), 0)
+
+
+class TestResolveAnnotationErrors(unittest.TestCase):
+    """Tests for resolve_annotation_errors function."""
+
+    def test_resolve_keeps_earliest_document(self):
+        """Test that resolution keeps measurement from earliest document."""
+        from Capricho.analysis import resolve_annotation_errors
+
+        # Two measurements for same molecule, different assays, differ by 3.0
+        # Value 5.0 from 2010, value 8.0 from 2015 - should keep 5.0
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL1"],
+                "pchembl_value": ["5.00", "8.00"],
+                "year": ["2010", "2015"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2"],
+                "molecule_chembl_id": ["CHEMBL123", "CHEMBL123"],
+                "activity_id": ["ACT1", "ACT2"],
+            }
+        )
+
+        result = resolve_annotation_errors(df, strategy="first")
+
+        # Should keep only the 2010 measurement (value=5.0)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["pchembl_value"], "5.00")
+        self.assertEqual(result.iloc[0]["year"], "2010")
+
+    def test_resolve_6_log_unit_difference(self):
+        """Test that 6.0 log unit differences are also detected."""
+        from Capricho.analysis import resolve_annotation_errors
+
+        # Differ by 6.0: 4.0 vs 10.0
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL1"],
+                "pchembl_value": ["4.00", "10.00"],
+                "year": ["2012", "2008"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2"],
+                "molecule_chembl_id": ["CHEMBL123", "CHEMBL123"],
+                "activity_id": ["ACT1", "ACT2"],
+            }
+        )
+
+        result = resolve_annotation_errors(df, strategy="first")
+
+        # Should keep 2008 measurement (value=10.0)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["pchembl_value"], "10.00")
+        self.assertEqual(result.iloc[0]["year"], "2008")
+
+    def test_resolve_no_error_unchanged(self):
+        """Test that measurements without annotation errors are unchanged."""
+        from Capricho.analysis import resolve_annotation_errors
+
+        # Two measurements differ by 1.5 (not 3.0 or 6.0) - no error
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL1"],
+                "pchembl_value": ["5.00", "6.50"],
+                "year": ["2010", "2015"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2"],
+                "molecule_chembl_id": ["CHEMBL123", "CHEMBL123"],
+                "activity_id": ["ACT1", "ACT2"],
+            }
+        )
+
+        result = resolve_annotation_errors(df, strategy="first")
+
+        # Both should be kept
+        self.assertEqual(len(result), 2)
+
+    def test_resolve_same_assay_ignored(self):
+        """Test that pairs from the same assay are not flagged."""
+        from Capricho.analysis import resolve_annotation_errors
+
+        # Same assay - even with 3.0 difference, not an annotation error
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL1"],
+                "pchembl_value": ["5.00", "8.00"],
+                "year": ["2010", "2015"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1"],  # Same assay
+                "molecule_chembl_id": ["CHEMBL123", "CHEMBL123"],
+                "activity_id": ["ACT1", "ACT2"],
+            }
+        )
+
+        result = resolve_annotation_errors(df, strategy="first")
+
+        # Both should be kept (same assay doesn't trigger annotation error)
+        self.assertEqual(len(result), 2)
+
+    def test_resolve_multiple_molecules(self):
+        """Test resolution works across multiple molecules."""
+        from Capricho.analysis import resolve_annotation_errors
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL1", "MOL2", "MOL2"],
+                "pchembl_value": ["5.00", "8.00", "6.00", "7.00"],
+                "year": ["2010", "2015", "2012", "2014"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2", "ASSAY3", "ASSAY4"],
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL1", "CHEMBL2", "CHEMBL2"],
+                "activity_id": ["ACT1", "ACT2", "ACT3", "ACT4"],
+            }
+        )
+
+        result = resolve_annotation_errors(df, strategy="first")
+
+        # MOL1 has 3.0 diff -> keep earliest (2010, value=5.0)
+        # MOL2 has 1.0 diff -> keep both
+        self.assertEqual(len(result), 3)
+        mol1_vals = result[result["connectivity"] == "MOL1"]["pchembl_value"].tolist()
+        mol2_vals = result[result["connectivity"] == "MOL2"]["pchembl_value"].tolist()
+        self.assertEqual(mol1_vals, ["5.00"])
+        self.assertEqual(sorted(mol2_vals), ["6.00", "7.00"])
+
+    def test_resolve_nan_years_excluded(self):
+        """Test that measurements with nan years are handled gracefully."""
+        from Capricho.analysis import resolve_annotation_errors
+
+        df = pd.DataFrame(
+            {
+                "connectivity": ["MOL1", "MOL1"],
+                "pchembl_value": ["5.00", "8.00"],
+                "year": ["nan", "2015"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2"],
+                "molecule_chembl_id": ["CHEMBL123", "CHEMBL123"],
+                "activity_id": ["ACT1", "ACT2"],
+            }
+        )
+
+        result = resolve_annotation_errors(df, strategy="first")
+
+        # Should keep 2015 (the one with valid year) since nan is not comparable
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["year"], "2015")
+
+
 class TestEnumValues(unittest.TestCase):
     """Tests for enum value correctness."""
 
