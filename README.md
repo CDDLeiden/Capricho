@@ -32,12 +32,12 @@ The development of CAPRICHO is guided by two core principles:
 
 The most recent release can be installed from PyPI with uv:
 ```shell
-uv pip install chembl_downloader
+uv pip install capricho
 ```
 
 or with pip:
 ```shell
-python -m pip install chembl_downloader
+python -m pip install capricho
 ```
 
 Alternatively, install directly from the GitHub repository with uv using the command:

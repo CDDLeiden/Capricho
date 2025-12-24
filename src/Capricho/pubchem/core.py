@@ -1,4 +1,5 @@
 from joblib import Parallel, delayed
+from loguru import logger
 from tqdm import tqdm
 
 try:
@@ -51,5 +52,5 @@ def get_multiple_compounds(cpd_list, input_type: str = "name", n_jobs=4) -> list
         return results
 
     except Exception as e:
-        print(f"Error in parallel processing: {str(e)}")
+        logger.error(f"Error in parallel processing: {str(e)}")
         return []

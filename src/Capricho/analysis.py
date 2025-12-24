@@ -336,7 +336,7 @@ def resolve_annotation_errors(
                 # Handle NaN years: remove the one with NaN year, keep valid year
                 if pd.isna(year_a) and pd.isna(year_b):
                     # Both NaN - can't resolve, remove both
-                    log.trace(f"  -> Both years NaN, removing BOTH measurements")
+                    log.trace("  -> Both years NaN, removing BOTH measurements")
                     indices_to_remove.add(idx_a)
                     indices_to_remove.add(idx_b)
                 elif pd.isna(year_a):

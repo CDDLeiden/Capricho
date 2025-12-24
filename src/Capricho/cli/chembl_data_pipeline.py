@@ -130,7 +130,7 @@ def get_standardize_and_clean_workflow(
     output_path: Optional[Union[str, Path]] = None,
     confidence_scores: list[str] = [7, 8, 9],
     bioactivity_type: Optional[list[str]] = None,
-    standard_relation: list[str] = ["="],  # TODO: later support data with  >, <, >=, <=...
+    standard_relation: list[str] = ["="],
     standard_units: Optional[list[str]] = None,
     assay_types: list[str] = ["B", "F"],
     chembl_release: Optional[int] = None,
@@ -199,8 +199,6 @@ def get_standardize_and_clean_workflow(
     # -log | log transformed values reported as Log XC50, -Log XC50, etc, might not
     # have a pchembl value, but *could* still be used.  If standard_type contains `Log`,
     # the standard_value will be transferred to pchembl_value.
-    # TODO: I noticed some negative values reported in standard_value, maybe it's because
-    # the standard_type was Log? If so, we could try rescuing those values to pchembl_value
     if bioactivity_type is None:
         # No filter on standard_type - fetch all
         biotypes = None
@@ -375,7 +373,6 @@ def get_standardize_and_clean_workflow(
         .reset_index(drop=True)
         .copy()
     )
-    # TODO: The curate bioactivity errors steps need to be performed here, after the standardization
 
     # make sure we don't have Nan, can result from merging pChEMBL-lacking calculated values
     df[DATA_PROCESSING_COMMENT] = df[DATA_PROCESSING_COMMENT].fillna("")
@@ -615,9 +612,7 @@ def aggregate_data(
 
     # Assign connectivity column - reuse precomputed values when available
     if precomputed_connectivity is not None:
-        final_data = final_data.assign(
-            connectivity=final_data["smiles"].map(smiles_to_connectivity)
-        )
+        final_data = final_data.assign(connectivity=final_data["smiles"].map(smiles_to_connectivity))
     else:
         final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 

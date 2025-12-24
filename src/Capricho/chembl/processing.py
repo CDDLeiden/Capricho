@@ -1,6 +1,5 @@
 """Module holding functionalities for the ChEMBL API."""
 
-import re
 from typing import List, Literal, Optional, Sequence, Tuple, Union
 
 import numpy as np
@@ -106,7 +105,6 @@ def convert_to_log10(df: pd.DataFrame) -> pd.DataFrame:
     return result_df
 
 
-# TODO: Consider whether we should do this across pairs identified from fingerprints or molecule IDs
 def curate_activity_pairs(
     df: pd.DataFrame,
     mol_id_col: str = "molecule_chembl_id",
