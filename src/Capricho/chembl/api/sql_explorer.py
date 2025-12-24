@@ -1,9 +1,7 @@
 """Explore the ChEMBL database schema without loading the entire database."""
 
-import pandas as pd
-from tabulate import tabulate
-
 import chembl_downloader
+import pandas as pd
 
 from .downloader import check_and_download_chembl_db
 
@@ -136,15 +134,15 @@ def explore_table(conn, table_name):
         print(f"{'='*80}")
 
         print("\nCOLUMNS:")
-        print(tabulate(columns, headers="keys", tablefmt="psql"))
+        print(columns.to_markdown(index=False))
 
         if relationships:
             print("\nRELATIONSHIPS:")
             rel_df = pd.DataFrame(relationships)
-            print(tabulate(rel_df, headers="keys", tablefmt="psql"))
+            print(rel_df.to_markdown(index=False))
 
         print("\nSAMPLE DATA:")
-        print(tabulate(sample, headers="keys", tablefmt="psql", maxcolwidths=[None, 30, 30, 30, 30]))
+        print(sample.to_markdown(index=False))
 
     except Exception as e:
         print(f"Error exploring table {table_name}: {str(e)}")
@@ -172,7 +170,7 @@ def explorer_main(
         if list_tables:
             tables_df = list_all_tables(conn)
             print("\nTABLES IN CHEMBL DATABASE:")
-            print(tabulate(tables_df, headers="keys", tablefmt="psql", showindex=False))
+            print(tables_df.to_markdown(index=False))
 
         elif table:
             explore_table(conn, table)
@@ -181,7 +179,7 @@ def explorer_main(
             results = search_tables_for_column(conn, search_column)
             if results:
                 print(f"\nTables containing columns matching '{search_column}':")
-                print(tabulate(pd.DataFrame(results), headers="keys", tablefmt="psql", showindex=False))
+                print(pd.DataFrame(results).to_markdown(index=False))
             else:
                 print(f"No columns found matching '{search_column}'")
 
@@ -189,7 +187,7 @@ def explorer_main(
             try:
                 result = pd.read_sql(query, conn)
                 print("\nQuery Result:")
-                print(tabulate(result, headers="keys", tablefmt="psql"))
+                print(result.to_markdown(index=False))
             except Exception as e:
                 print(f"Error executing query: {str(e)}")
 
@@ -203,7 +201,7 @@ def explorer_main(
 
             # Print top 20 tables by row count
             print("\nTop 20 tables by row count:")
-            print(tabulate(tables_df.head(20), headers="keys", tablefmt="psql", showindex=False))
+            print(tables_df.head(20).to_markdown(index=False))
 
             # Suggest some common tables to explore
             print("\nSuggested tables to explore:")
