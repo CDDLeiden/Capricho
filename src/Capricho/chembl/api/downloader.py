@@ -44,8 +44,8 @@ def check_and_download_chembl_db(
     ChEMBL version is used across different query functions.
 
     Args:
-        prefix: Optional prefix for an alternative data directory. If passed, will create
-            a new configuration file under `~/.data/chembl_downloader_config_{version}.json`
+        prefix: Optional prefix for an alternative data directory with path components passed as a list of strings.
+            If passed, will create a new configuration file under `~/.data/chembl_downloader_config_{version}.json`
             pointing to the new data directory. Defaults to None.
         version: Optional ChEMBL version to download. If not provided, will download the latest
             available version. Defaults to None.

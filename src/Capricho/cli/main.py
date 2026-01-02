@@ -166,15 +166,19 @@ def download(
         typer.Option("--version", "-v", help="ChEMBL version to download. Defaults to the latest."),
     ] = None,
     prefix: Annotated[
-        Optional[Path],
-        typer.Option("--prefix", "-p", help="Custom pystow storage path. Defaults to ~/.data/chembl/."),
+        Optional[str],
+        typer.Option(
+            "--prefix",
+            "-p",
+            help="Custom pystow storage path. Defaults to None, saving to ~/.data/chembl/.",
+        ),
     ] = None,
 ):
     """Download ChEMBL SQL database using chembl_downloader."""
     from ..chembl.api.downloader import check_and_download_chembl_db
 
     logger.info(f"Starting ChEMBL download command for version: {version or 'latest'}")
-    check_and_download_chembl_db(prefix=str(prefix) if prefix else None, version=version)
+    check_and_download_chembl_db(prefix=prefix.split("/") if prefix else None, version=version)
     raise typer.Exit()
 
 
@@ -1046,13 +1050,9 @@ def prepare_data(
     # Apply deduplication if requested
     if deduplicate:
         logger.info("Deduplicating identical values within aggregated rows...")
-        initial_total = df[value_col].apply(
-            lambda x: len(str(x).split("|")) if pd.notna(x) else 0
-        ).sum()
+        initial_total = df[value_col].apply(lambda x: len(str(x).split("|")) if pd.notna(x) else 0).sum()
         df = deduplicate_aggregated_values(df, value_column=value_col)
-        final_total = df[value_col].apply(
-            lambda x: len(str(x).split("|")) if pd.notna(x) else 0
-        ).sum()
+        final_total = df[value_col].apply(lambda x: len(str(x).split("|")) if pd.notna(x) else 0).sum()
         logger.info(f"Deduplication removed {initial_total - final_total} duplicate values")
 
         # Recalculate statistics
@@ -1062,7 +1062,9 @@ def prepare_data(
     # Resolve annotation errors if requested
     if resolve_annotation_error is not None:
         if resolve_annotation_error != "first":
-            logger.error(f"Unknown resolution strategy: {resolve_annotation_error}. Only 'first' is supported.")
+            logger.error(
+                f"Unknown resolution strategy: {resolve_annotation_error}. Only 'first' is supported."
+            )
             raise typer.Exit(code=1)
 
         logger.info("Resolving unit annotation errors (3.0 or 6.0 log unit differences)...")
@@ -1157,6 +1159,7 @@ def prepare_data(
                 if flags_to_remove:
                     # Escape special regex chars and join with |
                     import re
+
                     escaped_flags = [re.escape(f) for f in flags_to_remove]
                     drop_flags_pattern = "|".join(escaped_flags)
 
@@ -1174,9 +1177,7 @@ def prepare_data(
                         title="Cleaned Data Comparability",
                         value_column=value_col,
                     )
-                    clean_plot_path = plot_path.with_name(
-                        plot_path.stem + "_cleaned" + plot_path.suffix
-                    )
+                    clean_plot_path = plot_path.with_name(plot_path.stem + "_cleaned" + plot_path.suffix)
                     fig_clean.savefig(clean_plot_path, dpi=300, bbox_inches="tight")
                     plt.close(fig_clean)
                     logger.info(f"Cleaned comparability plot saved to {clean_plot_path}")
@@ -1192,9 +1193,7 @@ def prepare_data(
                     ncols=5,
                     value_column=value_col,
                 )
-                multi_plot_path = plot_path.with_name(
-                    plot_path.stem + "_flags" + plot_path.suffix
-                )
+                multi_plot_path = plot_path.with_name(plot_path.stem + "_flags" + plot_path.suffix)
                 fig_multi.savefig(multi_plot_path, dpi=300, bbox_inches="tight")
                 plt.close(fig_multi)
                 logger.info(f"Flags comparability plot saved to {multi_plot_path}")
