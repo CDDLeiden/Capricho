@@ -110,6 +110,48 @@ capricho get --target-ids CHEMBL203 --chembl-backend webresource
 - One-off analyses
 - When disk space is limited
 
+## Data Flagging
+
+A core principle of CAPRICHO is **never silently dropping data**. Instead of removing problematic entries during the `get` command, CAPRICHO flags them and lets users decide what to filter during the `prepare` step.
+
+### Two Types of Flags
+
+CAPRICHO maintains two separate flag columns:
+
+**`data_dropping_comment`** - Quality flags indicating data concerns:
+- Potential duplicates across documents
+- Data validity comments from ChEMBL
+- Unit annotation errors (3.0 or 6.0 log unit differences)
+- Patent sources
+- Undefined stereochemistry
+- Assay size issues
+- Insufficient assay overlap
+
+These include max curation standards from [Landrum & Riniker (2024)](https://doi.org/10.1021/acs.jcim.4c00049).
+
+**`data_processing_comment`** - Processing flags documenting transformations:
+- Salt/solvent removal from SMILES
+- SMILES standardization
+- pChEMBL calculation
+- Unit conversions
+
+### The Two-Phase Workflow
+
+1. **`capricho get`**: Fetches and curates data, adding flags to all entries
+2. **`capricho prepare`**: Filters data based on quality flags according to your project's needs
+
+This separation ensures transparency - you can inspect flagged data before deciding what to remove:
+
+```bash
+# Step 1: Get data with all flags
+capricho get --target-ids CHEMBL203 -o egfr_data.csv
+
+# Step 2: Filter based on your quality requirements
+capricho prepare -i egfr_data.csv -o egfr_clean.csv \
+    --drop-potential-duplicate \
+    --drop-data-validity
+```
+
 ## Data Aggregation
 
 CAPRICHO provides several options for handling duplicate measurements and aggregating data.
@@ -236,24 +278,27 @@ This command:
 
 ## Confidence Scoring
 
-ChEMBL assigns confidence scores (0-9) based on target specificity:
+ChEMBL assigns confidence scores (0-9) based on target assignment certainty. See the [ChEMBL documentation](https://chembl.gitbook.io/chembl-interface-documentation/frequently-asked-questions/chembl-data-questions#what-is-the-confidence-score) for full details.
 
-### High Confidence (8-9)
-- **9**: Direct single protein target
-- **8**: Direct protein complex/family target
+| Score | Description |
+|-------|-------------|
+| 9 | Direct single protein target assigned |
+| 8 | Homologous single protein target assigned |
+| 7 | Direct protein complex subunits assigned |
+| 6 | Homologous protein complex subunits assigned |
+| 5 | Multiple direct protein targets may be assigned (e.g., PROTEIN FAMILY) |
+| 4 | Multiple homologous protein targets may be assigned (e.g., PROTEIN FAMILY) |
+| 3 | Target assigned is molecular non-protein target |
+| 1 | Target assigned is non-molecular |
+| 0 | Default value - Target assignment has yet to be curated |
 
-Best for focused target analysis and SAR studies.
+### Recommended Usage
 
-### Medium Confidence (6-7)
-- **7**: Direct target with homologues
-- **6**: Molecular target assigned
+- **High confidence (8-9)**: Best for focused target analysis and SAR studies
+- **Medium confidence (6-7)**: Good balance of data quantity and quality
+- **Lower confidence (0-5)**: Useful for large-scale analyses, but may include less specific target assignments
 
-Good balance of data quantity and quality.
-
-### Lower Confidence (0-5)
-- Include broader, less specific data
-- Useful for large-scale analyses
-- May include off-target effects
+**Note on ADMET data**: Confidence scores reflect target assignment certainty, not measurement reliability. ADMET assays (permeability, clearance, solubility, etc.) typically have low confidence scores because they measure whole-cell or physicochemical properties rather than specific protein targets. A low confidence score for an ADMET assay does not indicate unreliable data - use `--confidence-scores 0,1,2,3,4,5,6,7,8,9` when retrieving ADMET data.
 
 ## Standard Relations and Censored Data
 
@@ -363,24 +408,29 @@ CAPRICHO ensures full reproducibility through several mechanisms:
 
 ### Recipe Files
 
-Every run generates a JSON recipe file containing:
-- All command-line parameters
-- ChEMBL version used
-- Timestamp and environment info
-- Data processing steps
+Every run generates a JSON recipe file containing the full command and all parameters used:
 
 ```json
 {
-  "command": "capricho get --target-ids CHEMBL203",
-  "parameters": {
-    "target_ids": ["CHEMBL203"],
-    "confidence_scores": [7, 8, 9],
-    "bioactivity_type": ["IC50", "Ki"]
-  },
-  "chembl_version": "33",
-  "timestamp": "2024-01-15T10:30:00"
+  "command": "capricho get --target-ids CHEMBL203 --output-path egfr_data.csv",
+  "capricho version": "0.1.0",
+  "molecule_ids": [],
+  "target_ids": ["CHEMBL203"],
+  "assay_ids": [],
+  "document_ids": [],
+  "calculate_pchembl": false,
+  "output_path": "egfr_data.csv",
+  "confidence_scores": [7, 8, 9],
+  "bioactivity_type": ["Potency", "Kd", "Ki", "IC50", "AC50", "EC50"],
+  "standard_relation": ["="],
+  "assay_types": ["B", "F"],
+  "chembl_version": "36",
+  "compound_equality": "connectivity",
+  "aggregate_on": "pchembl_value"
 }
 ```
+
+This allows exact reproduction of your data curation workflow.
 
 ### Version Control
 
@@ -395,21 +445,24 @@ All filtering steps are logged and flagged data is preserved for inspection.
 
 ## Output Structure
 
-Understanding CAPRICHO's output helps you make the most of your curated data:
+Understanding CAPRICHO's output helps you make the most of your curated data. Each `capricho get` run produces multiple files:
 
-### Main Data File
-- Curated bioactivity measurements
+### Main Data File (`*_data.csv`)
+- Aggregated bioactivity measurements
 - Standardized column names
-- Quality flags and metadata
+- Quality and processing flags in dedicated columns
 
-### Pre-aggregation Data
-- Raw data before aggregation steps
-- Useful for understanding curation impact
+### Recipe File (`*_recipe.json`)
+- Complete record of all parameters used
+- Enables exact reproduction of the workflow
+
+### Pre-aggregation Data (`*_not_aggregated.csv`)
+- Individual measurements before aggregation
+- Useful for understanding how data was combined
 - Can be skipped with `--skip-not-aggregated`
 
-### Log Files
-- Detailed processing information
-- Quality control statistics
-- Warning and error messages
+### Removed Subset (`*_removed_subset.csv`)
+- Entries that were filtered out during curation
+- Allows inspection of what was excluded and why
 
 This multi-file approach ensures transparency while providing clean, analysis-ready data.
