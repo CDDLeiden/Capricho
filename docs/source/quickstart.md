@@ -14,12 +14,13 @@ This will make it easier to discover available commands and options as you type.
 
 ## Basic Workflow
 
-CAPRICHO follows a simple four-step workflow:
+CAPRICHO follows the workflow:
 
-1. **Download** ChEMBL database (one-time setup)
-2. **Explore** the data to understand what's available
-3. **Get** curated bioactivity data for your analysis
-4. **Binarize** (optional) convert continuous activity values to binary labels
+1. **Download** ChEMBL database (one-time setup);
+2. **Explore** the data to understand what's available;
+3. **Get** curated bioactivity data for your analysis;
+4. **Prepare** the data by cleaning concerning quality flags according to the projects' needs and optionally output an activity matrix for multitask ML;
+5. **Binarize** (optional) convert continuous activity values to binary labels for classification.
 
 ## Step 1: Download ChEMBL Database
 
@@ -29,7 +30,7 @@ First, download the ChEMBL database to your local machine:
 capricho download
 ```
 
-This downloads the latest ChEMBL version to `~/.data/chembl/` by default. You can specify a different version or location:
+This downloads the latest ChEMBL version to `~/.data/chembl/` by default. Defining a custom subdirectory is supported with the `--prefix` option, but the path will be saved under the default `~/.data/` location, as defined by [pystow](https://pystow.readthedocs.io/en/latest/). For example:
 
 ```bash
 capricho download --version 33 --prefix /path/to/custom/location
@@ -89,16 +90,46 @@ Aggregate mutant data and include additional metadata:
 capricho get --target-ids CHEMBL203 --aggregate-mutants --metadata-columns organism,tissue --output-path aggregated_data.csv
 ```
 
-## Step 4: Binarize Data (Optional)
+## Step 4: Prepare Data for ML
 
-If you need binary labels (active/inactive) for classification tasks, you can binarize the aggregated data:
+The `prepare` command filters data based on quality flags, and outputs the cleaned data and an activity matrix suitable for multitask machine learning.
+
+Quality and processing flags are introduced to all data fetched with the `get` command, including the max curation standards introduced by [Landrum & Riniker (2024)](https://doi.org/10.1021/acs.jcim.4c00049) and marking any modifications made by CAPRICHO during curation, respectively.
+
+### Basic Preparation
+
+Transform aggregated data into a multitask activity matrix:
+
+```bash
+capricho prepare -i egfr_data.csv -o egfr_matrix.csv
+```
+
+### Filtering Quality Flags
+
+Remove entries with specific quality concerns:
+
+```bash
+capricho prepare -i egfr_data.csv -o egfr_matrix.csv \
+    --drop-potential-duplicate \
+    --drop-data-validity
+```
+
+The prepare command outputs:
+- **Activity matrix** (e.g., `egfr_matrix.csv`): Rows are compounds, columns are targets
+- **Prepared data** (e.g., `egfr_prepared.csv`): Filtered data before pivoting
+
+See [CLI Reference](cli-reference.md) for all available quality flags (`--drop-undefined-stereo`, `--drop-unit-error`, etc.).
+
+## Step 5: Binarize Data (Optional)
+
+If you need binary labels (active/inactive) for classification tasks, you can binarize the prepared data:
 
 ### Basic Binarization
 
 Convert continuous pChEMBL values to binary labels using the default threshold of 6.0 (1 µM):
 
 ```bash
-capricho binarize -i egfr_data.csv -o egfr_binary.csv
+capricho binarize -i egfr_prepared.csv -o egfr_binary.csv
 ```
 
 ### Custom Threshold
@@ -106,7 +137,7 @@ capricho binarize -i egfr_data.csv -o egfr_binary.csv
 Use a more stringent threshold of 7.0 (100 nM):
 
 ```bash
-capricho binarize -i egfr_data.csv -o egfr_binary.csv -t 7.0
+capricho binarize -i egfr_prepared.csv -o egfr_binary.csv -t 7.0
 ```
 
 ### Using Median Values
@@ -114,7 +145,7 @@ capricho binarize -i egfr_data.csv -o egfr_binary.csv -t 7.0
 Use median instead of mean for binarization:
 
 ```bash
-capricho binarize -i egfr_data.csv -o egfr_binary.csv -vcol pchembl_value_median
+capricho binarize -i egfr_prepared.csv -o egfr_binary.csv -vcol pchembl_value_median
 ```
 
 The binarization process:
