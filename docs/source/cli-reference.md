@@ -1,6 +1,6 @@
 # CLI Reference
 
-CAPRICHO provides four main commands: `download`, `explore`, `get`, and `binarize`. This section provides comprehensive documentation for all command-line options.
+CAPRICHO provides five main commands: `download`, `explore`, `get`, `prepare`, and `binarize`. This section provides comprehensive documentation for all command-line options.
 
 ## capricho download
 
@@ -27,7 +27,7 @@ capricho download
 capricho download --version 33
 
 # Use custom storage location (this will install version 25 it on ~/.data/old-chembl)
-capricho download --version 25 --prefix data/old-chembl/
+capricho download --version 25 --prefix old-chembl/
 ```
 
 ## capricho explore
@@ -271,6 +271,151 @@ This command:
 - Aggregates on `standard_value` instead of pChEMBL (permeability isn't a potency measurement)
 - Converts permeability units to a common format (`10^-6 cm/s`)
 - Groups by `standard_units` and `assay_cell_type` during aggregation
+
+## capricho prepare
+
+Clean aggregated bioactivity data by filtering entries based on quality and processing flags introduced during `capricho get`. Optionally, transform the cleaned data into a multitask activity matrix where rows are compounds and columns are tasks (e.g., targets).
+
+```bash
+capricho prepare [OPTIONS]
+```
+
+### Required Options
+
+| Option | Description |
+|---|---|
+| `-i`, `--input-path` | Path to aggregated data file (CSV, TSV, or Parquet) |
+| `-o`, `--output-path` | Path to save the output file |
+
+### Quality Flag Filtering Options
+
+These flags remove entries with specific quality concerns. Each flag corresponds to a comment added during `capricho get`:
+
+| Option | Description | Default |
+|---|---|---|
+| `--drop-undefined-stereo` | Drop entries with undefined stereochemistry | `False` |
+| `--drop-potential-duplicate` | Drop entries flagged as potential duplicates across documents | `False` |
+| `--drop-data-validity` | Drop entries with data validity comments from ChEMBL | `False` |
+| `--drop-unit-error` | Drop entries with unit annotation errors (3.0 or 6.0 log unit differences) | `False` |
+| `--drop-patent` | Drop entries from patent sources | `False` |
+| `--drop-mixture` | Drop entries containing mixtures in SMILES | `False` |
+| `--drop-assay-size` | Drop entries outside assay size bounds (both too small and too large) | `False` |
+| `--drop-insufficient-overlap` | Drop entries from assays with insufficient compound overlap | `False` |
+| `--remove-flags` | Custom quality flags to remove, comma-separated. Rows with these flags in `data_dropping_comment` will be filtered out. | `None` |
+
+### Data Cleaning Options
+
+| Option | Description | Default |
+|---|---|---|
+| `--deduplicate` | Remove duplicate pChEMBL values within aggregated rows and recalculate statistics | `False` |
+| `--resolve-annotation-error` | Resolve unit annotation errors by keeping measurement from earliest document. Use `first` to enable. | `None` |
+
+### Activity Matrix Options
+
+These options control the optional multitask activity matrix output:
+
+| Option | Description | Default |
+|---|---|---|
+| `--task-col` | Column to use as task identifier | `target_chembl_id` |
+| `--compound-col` | Column for compound identity (`connectivity` or `smiles`) | `connectivity` |
+| `--smiles-col` | Column containing SMILES strings | `smiles` |
+| `-agg-on`, `--aggregate-on` | Column that was aggregated on during `capricho get`. Derives the value column as `{aggregate_on}_mean`. | `pchembl_value` |
+| `--id-columns` | Extra columns to combine with `task_col` for composite task identifiers. Use the same columns passed to `capricho get --id-columns` during aggregation. | `None` |
+
+### Output Options
+
+| Option | Description | Default |
+|---|---|---|
+| `--plot` | Path to save comparability plots (e.g., `comparability.png`). If not provided, no plot is generated. | `None` |
+
+### Understanding Quality Flags
+
+Quality flags are added to the `data_dropping_comment` column during `capricho get`. Common flags include:
+
+- **Undefined stereochemistry**: Compounds with unassigned chiral centers
+- **Potential duplicate**: Quality flag introduced by the ChEMBL team, indicting that compound-target pair reported in multiple documents with identical values
+- **Data validity comment**: ChEMBL's own data quality annotations
+- **Unit annotation error**: Measurements differing by exactly 3.0 or 6.0 log units (suggesting unit conversion errors)
+- **Patent source**: Data from patent documents (often lower quality)
+- **Mixture in SMILES**: SMILES containing multiple components (`.` separator)
+- **Assay size too small/large**: Assays outside the specified size bounds
+- **Insufficient assay overlap**: Assays without enough shared compounds for reliable comparison
+
+### Output Files
+
+The prepare command generates two files:
+
+- **Prepared data** (`*_prepared.csv`): The cleaned data after filtering quality flags
+- **Activity matrix** (specified by `-o`): Rows are compounds (indexed by `compound_col`), columns are tasks, plus a `smiles` column. Suitable for multitask ML models.
+
+### Examples
+
+#### Basic Preparation
+```bash
+# Clean data and output activity matrix
+capricho prepare -i egfr_data.csv -o egfr_matrix.csv
+```
+
+#### Filtering Quality Flags
+```bash
+# Remove potential duplicates and data validity issues
+capricho prepare -i egfr_data.csv -o egfr_clean.csv \
+    --drop-potential-duplicate \
+    --drop-data-validity
+```
+
+#### Strict Quality Filtering
+```bash
+# Apply multiple quality filters for high-confidence data
+capricho prepare -i kinase_data.csv -o kinase_clean.csv \
+    --drop-potential-duplicate \
+    --drop-data-validity \
+    --drop-unit-error \
+    --drop-undefined-stereo \
+    --drop-patent
+```
+
+#### With Deduplication
+```bash
+# Remove duplicate values and recalculate statistics
+capricho prepare -i data.csv -o clean_data.csv \
+    --deduplicate \
+    --drop-potential-duplicate
+```
+
+#### Resolve Annotation Errors
+```bash
+# Keep earliest measurement when annotation errors are detected
+capricho prepare -i data.csv -o clean_data.csv \
+    --resolve-annotation-error first \
+    --drop-unit-error
+```
+
+#### Generate Comparability Plots
+```bash
+# Output plots showing data comparability across assays
+capricho prepare -i data.csv -o clean_data.csv \
+    --drop-potential-duplicate \
+    --plot comparability.png
+```
+
+This generates two plots:
+- `comparability_cleaned.png`: Comparability of data after filtering
+- `comparability_flags.png`: Multi-panel view showing remaining flags
+
+#### Composite Task Identifiers
+```bash
+# Use id-columns if data was aggregated with --id-columns
+capricho prepare -i data.csv -o matrix.csv \
+    --id-columns assay_cell_type,standard_units
+```
+
+#### Custom Flag Removal
+```bash
+# Remove entries with custom flags
+capricho prepare -i data.csv -o clean_data.csv \
+    --remove-flags "Censored activity comment,Mutant assay"
+```
 
 ## capricho binarize
 
