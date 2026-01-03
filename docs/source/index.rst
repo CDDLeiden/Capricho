@@ -16,7 +16,7 @@ CAPRICHO (**C**\hEMBL **A**\ggregation **P**\ackage with **R**\obust **I**\nspec
    installation
    quickstart
    cli-reference
-   tutorials/index
+   guides/index
    api/index
    concepts
 

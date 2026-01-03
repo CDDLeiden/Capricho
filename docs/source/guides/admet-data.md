@@ -184,6 +184,5 @@ capricho get \
 
 ## Next Steps
 
-- See [Unit Conversion](../concepts.md#unit-conversion) for details on supported conversions
-- See [Non-pChEMBL Aggregation](../concepts.md#non-pchembl-aggregation) for aggregation details
-- Explore [Quality Control](quality-control.md) for additional filtering options
+- See [Concepts](../concepts.md) for details on unit conversion and aggregation
+- See [CLI Reference](../cli-reference.md) for all available options
