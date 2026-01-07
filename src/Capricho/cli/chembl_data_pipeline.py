@@ -35,7 +35,6 @@ from ..core.default_fields import (
     ASSAY_ID,
     DATA_DROPPING_COMMENT,
     DATA_PROCESSING_COMMENT,
-    DEFAULT_ASSAY_MATCH_FIELDS,
     MOLECULE_ID,
     TARGET_ID,
 )
@@ -143,7 +142,6 @@ def get_standardize_and_clean_workflow(
     min_assay_size: Optional[int] = None,
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
-    max_assay_match: bool = False,
     strict_mutant_removal: bool = False,
     value_col: str = "pchembl_value",
     enable_unit_conversion: bool = False,
@@ -183,9 +181,6 @@ def get_standardize_and_clean_workflow(
             have their activities flagged for removal. Defaults to None (no filtering).
         min_assay_overlap: Minimum number of overlapping compounds between two assays for the same target
             for their activities to be considered. Defaults to 0 (no filtering).
-        max_assay_match: If True, only compare assays with matching metadata when checking overlap.
-            When enabled, assays must match on fields defined in DEFAULT_ASSAY_MATCH_FIELDS to be
-            considered compatible partners. Defaults to False.
         strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
             description will be flagged for removal. Defaults to False.
 
@@ -325,7 +320,6 @@ def get_standardize_and_clean_workflow(
             assay_col=ASSAY_ID,
             target_col=TARGET_ID,
             comment_col=DATA_DROPPING_COMMENT,
-            max_assay_match=max_assay_match,
         )
 
     # Columns to remove after standardization
@@ -472,7 +466,6 @@ def aggregate_data(
     extra_id_cols: list[str] = [],
     extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
-    max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
     compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
     value_col: str = "pchembl_value",
@@ -497,8 +490,6 @@ def aggregate_data(
             separated by `;` in the final dataframe. Defaults to [].
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
-        max_assay_match: If True, includes assay metadata fields used by Landrum & Riniker, 2024
-            for the max assay match. Defaults to False.
         output_path: path to save the aggregated data
         compound_equality: How to identify same compounds in the dataset. If "mixed_fp", uses
             mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
@@ -511,25 +502,6 @@ def aggregate_data(
         pd.DataFrame: the aggregated data
     """
     current_extra_id_cols = list(extra_id_cols)  # mutable copy
-
-    if max_assay_match:
-        logger.info(
-            f"Assay metadata matching for aggregation is enabled. Adding fields to ID columns: {DEFAULT_ASSAY_MATCH_FIELDS}"
-        )
-        # Ensure these columns exist in the DataFrame
-        missing_metadata_cols = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col not in df.columns]
-        if missing_metadata_cols:
-            logger.warning(
-                f"Assay metadata matching enabled for aggregation, but the following "
-                f"DEFAULT_ASSAY_MATCH_FIELDS are missing from the DataFrame and will be ignored: {missing_metadata_cols}"
-            )
-            fields_to_add = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col in df.columns]
-        else:  # Use only the fields that are actually present
-            fields_to_add = DEFAULT_ASSAY_MATCH_FIELDS
-
-        current_extra_id_cols.extend(fields_to_add)
-        current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
-        logger.info(f"ID columns for aggregation: {current_extra_id_cols}")
 
     connectivity_writer = InchiHandling(
         convert_to="connectivity", n_jobs=4, progress=True, from_smi=True, chunk_size=None

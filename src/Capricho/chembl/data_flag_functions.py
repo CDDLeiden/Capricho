@@ -286,8 +286,6 @@ def flag_insufficient_assay_overlap(
     assay_col: str = ASSAY_ID,
     target_col: str = TARGET_ID,
     comment_col: str = DATA_DROPPING_COMMENT,
-    max_assay_match: bool = False,
-    assay_match_fields: Optional[list[str]] = None,
 ) -> pd.DataFrame:
     """Mark activities from assay pairs (for the same target) that don't meet the minimum
     compound overlap criterium, useful for analysis assessing the comparability of assays
@@ -301,10 +299,6 @@ def flag_insufficient_assay_overlap(
     2. The difference is not exactly 3.0 or 6.0 log units (likely censored/inactive measurements)
     3. Assays are from DIFFERENT documents (same-document overlaps are excluded)
 
-    When max_assay_match is True, only assay pairs with matching metadata (as defined by
-    assay_match_fields) are compared for overlap. Assays that don't have any compatible
-    partner with sufficient overlap will be flagged for removal.
-
     Args:
         df: DataFrame to be processed.
         min_overlap: Minimum number of overlapping compounds required. Defaults to 0
@@ -312,9 +306,6 @@ def flag_insufficient_assay_overlap(
         assay_col: Name of the assay identifier column. Defaults to assay_chembl_id.
         target_col: Name of the target identifier column. Defaults to target_chembl_id.
         comment_col: Name of the column to store dropping comments. Defaults to data_dropping_comment.
-        max_assay_match: If True, only compare assays with matching metadata fields. Defaults to False.
-        assay_match_fields: List of metadata fields that must match for assays to be compared.
-            Only used when max_assay_match is True. If None, uses a default set of fields.
 
     Returns:
         pd.DataFrame: DataFrame with activities from low-overlap assay pairs flagged.
@@ -350,33 +341,6 @@ def flag_insufficient_assay_overlap(
         "  - Excluding overlaps within the same document"
     )
 
-    # Validate assay_match_fields if max_assay_match is enabled
-    if max_assay_match:
-        if assay_match_fields is None:
-            from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
-
-            assay_match_fields = DEFAULT_ASSAY_MATCH_FIELDS
-
-        # Check which match fields are available in the DataFrame
-        missing_fields = [col for col in assay_match_fields if col not in df.columns]
-        if missing_fields:
-            logger.warning(
-                f"max_assay_match enabled but the following match fields are missing from DataFrame: {missing_fields}. "
-                f"These fields will be ignored for metadata matching."
-            )
-            assay_match_fields = [col for col in assay_match_fields if col in df.columns]
-
-        if not assay_match_fields:
-            logger.warning(
-                "max_assay_match enabled but no match fields are available in DataFrame. "
-                "Falling back to standard overlap checking without metadata matching."
-            )
-            max_assay_match = False
-        else:
-            logger.info(
-                f"max_assay_match enabled. Assay pairs will only be compared if they match on: {assay_match_fields}"
-            )
-
     import numpy as np
 
     assays_to_flag_globally = set()  # Keep track of assays that don't have a compatible partner
@@ -408,14 +372,6 @@ def flag_insufficient_assay_overlap(
         # Prepare data with necessary columns for vectorized operations
         target_data = group_df[[assay_col, molecule_col, "pchembl_value", "document_chembl_id"]].copy()
 
-        # Add metadata columns if max_assay_match is enabled
-        if max_assay_match:
-            target_data = target_data.merge(
-                group_df[[assay_col] + assay_match_fields].drop_duplicates(subset=[assay_col]),
-                on=assay_col,
-                how="left",
-            )
-
         # Self-join to create all pairs of (assay1, assay2) for the same molecule
         # This finds all overlapping molecules between assays
         pairs = target_data.merge(target_data, on=molecule_col, suffixes=("_1", "_2"))
@@ -434,16 +390,6 @@ def flag_insufficient_assay_overlap(
             & (pchembl_diff != 3.0)
             & (pchembl_diff != 6.0)
         ]
-
-        # 3. Metadata matching if required
-        if max_assay_match:
-            metadata_match = pd.Series(True, index=pairs.index)
-            for field in assay_match_fields:
-                # Fill NaN values with a sentinel so that NaN == NaN (both missing the same metadata)
-                field1 = pairs[f"{field}_1"].fillna("__MISSING__")
-                field2 = pairs[f"{field}_2"].fillna("__MISSING__")
-                metadata_match &= field1 == field2
-            pairs = pairs[metadata_match]
 
         # Count overlapping compounds per assay pair
         overlap_counts = pairs.groupby([f"{assay_col}_1", f"{assay_col}_2"]).size()
@@ -472,19 +418,11 @@ def flag_insufficient_assay_overlap(
 
     if assays_to_flag_globally:
         num_assays_flagged = len(assays_to_flag_globally)
-
-        if max_assay_match:
-            comment_text = f"Insufficient assay overlap with metadata matching (min_overlap={min_overlap})"
-            logger.info(
-                f"Flagging activities from {num_assays_flagged} unique assays "
-                f"that lack a metadata-compatible partner with >= {min_overlap} overlapping compounds."
-            )
-        else:
-            comment_text = f"Insufficient assay overlap (min_overlap={min_overlap})"
-            logger.info(
-                f"Flagging activities from {num_assays_flagged} unique assays "
-                f"that lack a partner with >= {min_overlap} overlapping compounds."
-            )
+        comment_text = f"Insufficient assay overlap (min_overlap={min_overlap})"
+        logger.info(
+            f"Flagging activities from {num_assays_flagged} unique assays "
+            f"that lack a partner with >= {min_overlap} overlapping compounds."
+        )
 
         # Use add_comment helper for consistency
         df = add_comment(
@@ -495,12 +433,7 @@ def flag_insufficient_assay_overlap(
             comment_type="d",
         )
     else:
-        if max_assay_match:
-            logger.info(
-                f"All assays have at least one metadata-compatible partner with >= {min_overlap} overlapping compounds."
-            )
-        else:
-            logger.info(f"All assays have at least one partner with >= {min_overlap} overlapping compounds.")
+        logger.info(f"All assays have at least one partner with >= {min_overlap} overlapping compounds.")
 
     return df
 

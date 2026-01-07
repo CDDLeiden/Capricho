@@ -166,16 +166,6 @@ capricho get --target-ids CHEMBL203 --aggregate-mutants
 
 This is useful when you want to study the target in general rather than specific mutations.
 
-### Assay Matching
-
-The `--max-assay-match` option enforces strict metadata matching between assays:
-
-```bash
-capricho get --target-ids CHEMBL203 --max-assay-match
-```
-
-This ensures that only assays with identical metadata (organism, tissue, etc.) are aggregated together.
-
 ### Metadata Columns
 
 Include additional metadata in your analysis:

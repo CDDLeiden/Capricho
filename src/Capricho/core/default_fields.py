@@ -25,19 +25,6 @@ multiple_value_cols = (
     "withdrawn_flag",
 )
 
-DEFAULT_ASSAY_MATCH_FIELDS = [
-    "assay_type",
-    "assay_organism",
-    "assay_category",
-    "assay_tax_id",
-    "assay_strain",
-    "assay_tissue",
-    "assay_cell_type",
-    "assay_subcellular_fraction",
-    "bao_format",
-    "variant_id",
-]
-
 ACTIVITY_ID = "activity_id"
 MOLECULE_ID = "molecule_chembl_id"
 ASSAY_ID = "assay_chembl_id"

@@ -169,7 +169,6 @@ Control how data is processed and aggregated:
 | `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers | `False` |
 | `-cure`, `--curate-annotation-errors` | Apply curation for pChEMBL annotation errors | `False` |
 | `-mutagg`, `--aggregate-mutants` | Aggregate data on targets regardless of mutation | `False` |
-| `-maxm`, `--max-assay-match` | Perform strict assay metadata matching | `False` |
 | `-smr`, `--strict-mutant-removal` | Flag assays with mutant-related keywords for removal | `False` |
 | `-cpd-eq`, `--compound-equality` | Method for compound equality determination | `connectivity` |
 | `-mcols`, `--metadata-columns` | Extra metadata columns to keep, comma-separated | `[]` |
@@ -224,29 +223,6 @@ capricho get \
   --aggregate-mutants \
   --metadata-columns organism,tissue \
   --output-path high_quality_dataset.csv
-```
-
-### Comprehensive Kinase Dataset
-```bash
-capricho get \
-  --target-ids CHEMBL203,CHEMBL204,CHEMBL279,CHEMBL1844 \
-  --confidence-scores 7,8,9 \
-  --bioactivity-type IC50,Ki,Kd \
-  --calculate-pchembl \
-  --aggregate-mutants \
-  --max-assay-match \
-  --compound-equality mixed_fp \
-  --metadata-columns organism,tissue,cell_type,assay_description \
-  --output-path kinase_comprehensive.csv
-```
-
-### Small Molecule Dataset via Web API
-```bash
-capricho get \
-  --molecule-ids CHEMBL25,CHEMBL941,CHEMBL1023 \
-  --chembl-backend webresource \
-  --confidence-scores 8,9 \
-  --output-path small_molecules.csv
 ```
 
 ### ADMET Data with Unit Conversion
@@ -371,8 +347,7 @@ capricho prepare -i kinase_data.csv -o kinase_clean.csv \
     --drop-potential-duplicate \
     --drop-data-validity \
     --drop-unit-error \
-    --drop-undefined-stereo \
-    --drop-patent
+    --drop-undefined-stereo
 ```
 
 #### With Deduplication

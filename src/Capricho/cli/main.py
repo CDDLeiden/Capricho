@@ -9,7 +9,6 @@ import typer
 from typing_extensions import Annotated
 
 from .. import __version__
-from ..core.default_fields import DEFAULT_ASSAY_MATCH_FIELDS
 from ..logger import logger, setup_logger
 
 if TYPE_CHECKING:
@@ -50,7 +49,6 @@ DEFAULTS = {
     "require_doc_date": False,
     "max_assay_size": None,
     "min_assay_size": None,
-    "max_assay_match": False,
     "min_assay_overlap": 0,
     "strict_mutant_removal": False,
     "compound_equality": "connectivity",
@@ -65,7 +63,6 @@ DEFAULT_FALSE_ARGS = [
     "aggregate_mutants",
     "skip_recipe",
     "require_doc_date",
-    "max_assay_match",
     "strict_mutant_removal",
 ]
 
@@ -500,16 +497,6 @@ def get_data(
             metavar="bool",
         ),
     ] = DEFAULTS["require_doc_date"],
-    max_assay_match: Annotated[
-        bool,
-        typer.Option(
-            "-maxm/-no-maxm",
-            "--max-assay-match/--no-max-assay-match",
-            help=f"Perform strict assay metadata matching based on: {', '.join(DEFAULT_ASSAY_MATCH_FIELDS)}.",
-            is_flag=True,
-            metavar="bool",
-        ),
-    ] = DEFAULTS["max_assay_match"],
     strict_mutant_removal: Annotated[
         bool,
         typer.Option(
@@ -587,7 +574,6 @@ def get_data(
         min_assay_size=min_assay_size,
         max_assay_size=max_assay_size,
         min_assay_overlap=min_assay_overlap,
-        max_assay_match=max_assay_match,
         strict_mutant_removal=strict_mutant_removal,
         value_col=aggregate_on.value,
         enable_unit_conversion=convert_units,
@@ -599,7 +585,6 @@ def get_data(
         extra_multival_cols=metadata_columns,
         extra_id_cols=id_columns,
         aggregate_mutants=aggregate_mutants,
-        max_assay_match=max_assay_match,
         output_path=output_path,
         compound_equality=compound_equality.value,
         value_col=aggregate_on.value,
