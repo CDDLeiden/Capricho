@@ -72,7 +72,7 @@ capricho --install-completion
 ```
 
 ### Key Features
-- **Four main commands**: `download`, `explore`, `get`, `binarize`
+- **Five main commands**: `download`, `explore`, `get`, `prepare`, `binarize`
 - **Flexible filtering**: By confidence, assay type, bioactivity type
 - **Transparent processing**: All filtering steps are logged and flagged
 - **Reproducible workflows**: Automatic recipe generation
@@ -88,14 +88,6 @@ For comprehensive documentation including detailed CLI options, advanced usage, 
 - [CLI Reference](docs/cli-reference.md) 
 - [Tutorials](docs/tutorials/)
 - [API Reference](docs/api/)
-
-## Key Concepts
-
-**Compound Equality**: Choose between `connectivity` (default, ignores stereochemistry) or `mixed_fp` (fingerprint-based similarity).
-
-**Backends**: Use `downloader` for local SQL queries (faster) or `webresource` for live API access.
-
-**Reproducibility**: Every run generates a `_recipe.json` file with exact parameters used.
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
