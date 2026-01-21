@@ -15,7 +15,6 @@ from ..chembl.data_flag_functions import (
     flag_missing_canonical_smiles,
     flag_missing_document_date,
     flag_missing_standard_smiles,
-    flag_patent_source,
     flag_salt_or_solvent_removal,
     flag_strict_mutant_assays,
     flag_to_remove_mixture_compounds,
@@ -237,9 +236,6 @@ def get_standardize_and_clean_workflow(
 
     # Correct censored activity comments (inactive/inconclusive) with incorrect standard_relation='='
     full_df = flag_censored_activity_comment(full_df)
-
-    # Flag activities from patent sources for transparency
-    full_df = flag_patent_source(full_df)
 
     # Convert units if requested
     if enable_unit_conversion:

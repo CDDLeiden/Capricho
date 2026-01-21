@@ -903,14 +903,6 @@ def prepare_data(
             is_flag=True,
         ),
     ] = False,
-    drop_patent: Annotated[
-        bool,
-        typer.Option(
-            "--drop-patent/--keep-patent",
-            help="Drop entries from patent sources.",
-            is_flag=True,
-        ),
-    ] = False,
     drop_mixture: Annotated[
         bool,
         typer.Option(
@@ -1018,8 +1010,6 @@ def prepare_data(
         flags_to_remove.append(DroppingComment.DATA_VALIDITY_COMMENT.value)
     if drop_unit_error:
         flags_to_remove.append(DroppingComment.UNIT_ANNOTATION_ERROR.value)
-    if drop_patent:
-        flags_to_remove.append(DroppingComment.PATENT_SOURCE.value)
     if drop_mixture:
         flags_to_remove.append(DroppingComment.MIXTURE_IN_SMILES.value)
     if drop_assay_size:

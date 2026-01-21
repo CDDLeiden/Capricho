@@ -273,7 +273,6 @@ These flags remove entries with specific quality concerns. Each flag corresponds
 | `--drop-potential-duplicate` | Drop entries flagged as potential duplicates across documents | `False` |
 | `--drop-data-validity` | Drop entries with data validity comments from ChEMBL | `False` |
 | `--drop-unit-error` | Drop entries with unit annotation errors (3.0 or 6.0 log unit differences) | `False` |
-| `--drop-patent` | Drop entries from patent sources | `False` |
 | `--drop-mixture` | Drop entries containing mixtures in SMILES | `False` |
 | `--drop-assay-size` | Drop entries outside assay size bounds (both too small and too large) | `False` |
 | `--drop-insufficient-overlap` | Drop entries from assays with insufficient compound overlap | `False` |
@@ -312,7 +311,6 @@ Quality flags are added to the `data_dropping_comment` column during `capricho g
 - **Potential duplicate**: Quality flag introduced by the ChEMBL team, indicting that compound-target pair reported in multiple documents with identical values
 - **Data validity comment**: ChEMBL's own data quality annotations
 - **Unit annotation error**: Measurements differing by exactly 3.0 or 6.0 log units (suggesting unit conversion errors)
-- **Patent source**: Data from patent documents (often lower quality)
 - **Mixture in SMILES**: SMILES containing multiple components (`.` separator)
 - **Assay size too small/large**: Assays outside the specified size bounds
 - **Insufficient assay overlap**: Assays without enough shared compounds for reliable comparison

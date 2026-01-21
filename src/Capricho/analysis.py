@@ -41,7 +41,6 @@ class DroppingComment(str, Enum):
     ASSAY_SIZE_TOO_LARGE = "Assay size >"  # Example: "Assay size > 100"
     ASSAY_SIZE_TOO_SMALL = "Assay size <"  # Example: "Assay size < 20"
     UNIT_ANNOTATION_ERROR = "Unit Annotation Error"
-    PATENT_SOURCE = "Patent source"
     MISSING_DOCUMENT_DATE = "Missing document date"
     MIXTURE_IN_SMILES = "Mixture in SMILES"
     INSUFFICIENT_ASSAY_OVERLAP = (
@@ -115,7 +114,6 @@ def get_all_comments() -> list[str]:
         DroppingComment.INSUFFICIENT_ASSAY_OVERLAP.value,
         DroppingComment.INSUFFICIENT_ASSAY_OVERLAP_WITH_METADATA.value,
         DroppingComment.UNIT_ANNOTATION_ERROR.value,
-        DroppingComment.PATENT_SOURCE.value,
         DroppingComment.MISSING_DOCUMENT_DATE.value,
         DroppingComment.MIXTURE_IN_SMILES.value,
         ProcessingComment.SALT_SOLVENT_REMOVED.value,
@@ -750,14 +748,6 @@ def build_query_string(comment: str, value_column: str = "pchembl_value") -> str
             "(data_dropping_comment_y.str.contains('Unit Annotation Error', regex=False) & "
             "data_dropping_comment_x.str.contains('Unit Annotation Error', regex=False))) & "
             "~dropping_comment.str.contains('Data Validity Comment Present', regex=False)"
-        )
-
-    # Special handling for patent sources (exclude data validity issues)
-    if comment == DroppingComment.PATENT_SOURCE.value:
-        return (
-            "((data_dropping_comment_x.str.contains('Patent source', regex=False) | "
-            "data_dropping_comment_y.str.contains('Patent source', regex=False)) & "
-            "~dropping_comment.str.contains('Data Validity Comment Present', regex=False))"
         )
 
     # we need to compare the documents with dates to the ones without to see if it's an issue

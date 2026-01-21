@@ -247,38 +247,6 @@ def flag_incompatible_units(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def flag_patent_source(df: pd.DataFrame) -> pd.DataFrame:
-    """Mark activities that originate from patent documents.
-
-    Patent-sourced data in ChEMBL often contains annotation errors or inconsistent
-    measurements compared to peer-reviewed publications. This function flags activities
-    from patents to allow users to assess data quality differences between patent and
-    non-patent sources.
-
-    Args:
-        df: DataFrame to be processed.
-
-    Returns:
-        pd.DataFrame: DataFrame with patent-sourced activities flagged in dropping comment.
-    """
-    mask = df["doc_type"] == "PATENT"
-    num_to_flag = mask.sum()
-
-    if num_to_flag > 0:
-        logger.info(f"Flagging {num_to_flag} activities from patent sources.")
-        df = add_comment(
-            df,
-            comment="Patent source",
-            criteria_func=lambda x: x == "PATENT",
-            target_column="doc_type",
-            comment_type="d",
-        )
-    else:
-        logger.debug("No patent-sourced activities found.")
-
-    return df
-
-
 def flag_insufficient_assay_overlap(
     df: pd.DataFrame,
     min_overlap: int = 0,
