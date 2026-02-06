@@ -525,8 +525,10 @@ def aggregate_data(
         )
 
     # For censored measurements (!=), include relation and value in the compound identifier
-    # so they are only aggregated if they have the same value AND relation
-    has_censored = df["standard_relation"].ne("=").any()
+    # so they are only aggregated if they have the same value AND relation.
+    # NaN standard_relation (e.g., AstraZeneca PPB assays) is treated as non-censored.
+    censored_mask = df["standard_relation"].notna() & df["standard_relation"].ne("=")
+    has_censored = censored_mask.any()
     if has_censored:
         logger.info(
             "Detected censored measurements (standard_relation != '='). "
@@ -537,8 +539,6 @@ def aggregate_data(
             rounded_value = df[value_col].round(2).astype(str)
         elif value_col == "standard_value":
             rounded_value = df[value_col].round(4).astype(str)
-        # For censored measurements, append relation + value to the id_array
-        censored_mask = df["standard_relation"] != "="
         df.loc[censored_mask, "id_array"] = (
             df.loc[censored_mask, "id_array"].astype(str)
             + "_"
@@ -546,6 +546,10 @@ def aggregate_data(
             + "_"
             + rounded_value[censored_mask]
         )
+
+    # Treat NaN standard_relation as "=" (exact measurement) for aggregation.
+    # process_repeat_mols groups by standard_relation, and pandas drops NaN groups.
+    df["standard_relation"] = df["standard_relation"].fillna("=")
 
     # Here we have a repeat index for compounds across all fetched data. Processing which repeats
     # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
@@ -578,9 +582,15 @@ def aggregate_data(
         value_col=value_col,
     )
 
-    # Assign connectivity column - reuse precomputed values when available
+    # Assign connectivity column - reuse precomputed values when available.
+    # The mapping may miss molecules whose SMILES changed during canonicalization
+    # (e.g., stereochemistry stripped when chirality=False), so recompute for any misses.
     if precomputed_connectivity is not None:
         final_data = final_data.assign(connectivity=final_data["smiles"].map(smiles_to_connectivity))
+        missing_mask = final_data["connectivity"].isna()
+        if missing_mask.any():
+            recomputed = connectivity_writer(final_data.loc[missing_mask, "smiles"].tolist())
+            final_data.loc[missing_mask, "connectivity"] = recomputed
     else:
         final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
