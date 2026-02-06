@@ -58,7 +58,16 @@ def clean_data(
     # Step 1: Deduplicate
     if deduplicate:
         logger.info("Deduplicating identical values within aggregated rows...")
+        initial_total = df[value_col].apply(
+            lambda x: len(str(x).split("|")) if pd.notna(x) else 0
+        ).sum()
         df = deduplicate_aggregated_values(df, value_column=value_col)
+        final_total = df[value_col].apply(
+            lambda x: len(str(x).split("|")) if pd.notna(x) else 0
+        ).sum()
+        logger.info(f"Deduplication removed {initial_total - final_total} duplicate values")
+
+        logger.info("Recalculating statistics after deduplication...")
         df = recalculate_aggregated_stats(df, value_column=value_col)
 
     # Step 2: Drop flags
