@@ -96,6 +96,79 @@ class TestPandasHelper(unittest.TestCase):
         pd.testing.assert_series_equal(mask, pd.Series(expected_flags, index=df.index))
 
 
+class TestFilterDroppingFlags(unittest.TestCase):
+    def test_removes_flagged_rows(self):
+        df = pd.DataFrame(
+            {
+                "data_dropping_comment": ["", "Unit Annotation Error", "Potential Duplicate", ""],
+                "value": [1, 2, 3, 4],
+            }
+        )
+        result = pandas_helper.filter_dropping_flags(df, ["Unit Annotation Error"])
+        self.assertEqual(len(result), 3)
+        self.assertListEqual(result["value"].tolist(), [1, 3, 4])
+
+    def test_removes_multiple_flags(self):
+        df = pd.DataFrame(
+            {
+                "data_dropping_comment": ["", "Unit Annotation Error", "Potential Duplicate", ""],
+                "value": [1, 2, 3, 4],
+            }
+        )
+        result = pandas_helper.filter_dropping_flags(df, ["Unit Annotation Error", "Potential Duplicate"])
+        self.assertEqual(len(result), 2)
+        self.assertListEqual(result["value"].tolist(), [1, 4])
+
+    def test_handles_compound_flags(self):
+        """Rows can have multiple flags separated by ' & '."""
+        df = pd.DataFrame(
+            {
+                "data_dropping_comment": ["", "Flag A & Flag B", "Flag C", ""],
+                "value": [1, 2, 3, 4],
+            }
+        )
+        result = pandas_helper.filter_dropping_flags(df, ["Flag A"])
+        self.assertEqual(len(result), 3)
+        self.assertListEqual(result["value"].tolist(), [1, 3, 4])
+
+    def test_handles_nan_in_column(self):
+        df = pd.DataFrame(
+            {
+                "data_dropping_comment": [np.nan, "Unit Annotation Error", np.nan, ""],
+                "value": [1, 2, 3, 4],
+            }
+        )
+        result = pandas_helper.filter_dropping_flags(df, ["Unit Annotation Error"])
+        self.assertEqual(len(result), 3)
+        self.assertListEqual(result["value"].tolist(), [1, 3, 4])
+
+    def test_custom_column_name(self):
+        df = pd.DataFrame(
+            {
+                "dropping_comment": ["", "Bad Flag", ""],
+                "value": [1, 2, 3],
+            }
+        )
+        result = pandas_helper.filter_dropping_flags(df, ["Bad Flag"], column="dropping_comment")
+        self.assertEqual(len(result), 2)
+        self.assertListEqual(result["value"].tolist(), [1, 3])
+
+    def test_empty_flags_returns_unchanged(self):
+        df = pd.DataFrame(
+            {
+                "data_dropping_comment": ["", "some flag", ""],
+                "value": [1, 2, 3],
+            }
+        )
+        result = pandas_helper.filter_dropping_flags(df, [])
+        pd.testing.assert_frame_equal(result, df)
+
+    def test_missing_column_returns_unchanged(self):
+        df = pd.DataFrame({"value": [1, 2, 3]})
+        result = pandas_helper.filter_dropping_flags(df, ["some flag"])
+        pd.testing.assert_frame_equal(result, df)
+
+
 class TestSmilesUtils(unittest.TestCase):
     def test_clean_mixtures(self):
         self.assertEqual(smiles_utils.clean_mixtures("CC.Cl"), "CC")

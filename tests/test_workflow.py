@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 
 from Capricho.cli.chembl_data_pipeline import aggregate_data
-from Capricho.cli.prepare import prepare_multitask_data
+from Capricho.cli.prepare import clean_data, prepare_multitask_data
 
 
 class TestFetchFromChEMBL(unittest.TestCase):
@@ -303,7 +303,7 @@ class TestFetchFromChEMBL(unittest.TestCase):
             value_col="pchembl_value_mean",
             compound_col="connectivity",
             smiles_col="smiles",
-            remove_flags=None,
+
         )
 
         # Verify shape: 2 compounds x 2 targets
@@ -326,7 +326,7 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertEqual(conn2_row["smiles"].iloc[0], "CCC")
 
     def test_prepare_multitask_data_with_flags(self):
-        """Test that prepare command correctly filters out flagged data."""
+        """Test that clean_data + prepare_multitask_data correctly filters out flagged data."""
         test_data = pd.DataFrame(
             {
                 "connectivity": ["CONN1", "CONN1", "CONN2", "CONN2"],
@@ -337,13 +337,13 @@ class TestFetchFromChEMBL(unittest.TestCase):
             }
         )
 
+        cleaned = clean_data(test_data, drop_flags=["flag_to_remove", "another_flag"])
         matrix = prepare_multitask_data(
-            df=test_data,
+            df=cleaned,
             task_col="target_chembl_id",
             value_col="pchembl_value_mean",
             compound_col="connectivity",
             smiles_col="smiles",
-            remove_flags=["flag_to_remove", "another_flag"],
         )
 
         # After filtering, we should only have CONN1->TARGET1 and CONN2->TARGET1
@@ -393,7 +393,7 @@ class TestFetchFromChEMBL(unittest.TestCase):
             value_col="pchembl_value_mean",
             compound_col="connectivity",
             smiles_col="smiles",
-            remove_flags=None,
+
         )
 
         # Remove our test handler
@@ -426,7 +426,7 @@ class TestFetchFromChEMBL(unittest.TestCase):
             value_col="pchembl_value_mean",
             compound_col="connectivity",
             smiles_col="smiles",
-            remove_flags=None,
+
             id_columns=["assay_tissue"],
         )
 
@@ -440,6 +440,34 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertAlmostEqual(matrix.loc["CONN1", "TARGET1-Kidney"], 7.0)
         self.assertAlmostEqual(matrix.loc["CONN2", "TARGET1-Liver"], 5.5)
         self.assertAlmostEqual(matrix.loc["CONN2", "TARGET1-Kidney"], 8.0)
+
+    def test_prepare_multitask_data_smiles_as_compound_col(self):
+        """Test that smiles column is not duplicated when compound_col == smiles_col."""
+        test_data = pd.DataFrame(
+            {
+                "smiles": ["CCO", "CCO", "CCC", "CCC"],
+                "target_chembl_id": ["TARGET1", "TARGET2", "TARGET1", "TARGET2"],
+                "pchembl_value_mean": [6.5, 7.0, 5.5, 8.0],
+                "data_dropping_comment": ["", "", "", ""],
+            }
+        )
+
+        matrix = prepare_multitask_data(
+            df=test_data,
+            task_col="target_chembl_id",
+            value_col="pchembl_value_mean",
+            compound_col="smiles",
+            smiles_col="smiles",
+
+        )
+
+        # smiles should appear exactly once (as the index), not duplicated as a column
+        smiles_occurrences = list(matrix.columns).count("smiles")
+        self.assertEqual(smiles_occurrences, 0, "smiles should be the index, not a column when compound_col==smiles_col")
+        self.assertEqual(matrix.index.name, "smiles")
+        self.assertEqual(len(matrix), 2)
+        self.assertIn("TARGET1", matrix.columns)
+        self.assertIn("TARGET2", matrix.columns)
 
     def test_aggregate_data_with_standard_units_filter(self):
         """Test that standard_units is preserved and can be used as an id column."""
@@ -640,6 +668,258 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertIsNotNone(cco_std_units, "standard_units should not be None for CCO")
         self.assertIn("|", str(cco_std_units),
                       "standard_units should contain pipe-separated values for multiple measurements")
+
+
+    def test_nan_standard_relation_not_lost_during_aggregation(self):
+        """Rows with NaN standard_relation must not be lost during aggregation.
+
+        When standard_relation is NaN (e.g., AstraZeneca PPB assays in ChEMBL),
+        those rows should be treated as non-censored and aggregated normally.
+        Previously, NaN != "=" evaluated to True, causing NaN rows to enter the
+        censored code path where string concatenation with NaN corrupted id_array.
+        """
+        test_data = pd.DataFrame(
+            {
+                "activity_id": [1, 2, 3, 4, 5],
+                "molecule_chembl_id": ["CHEMBL1"] * 3 + ["CHEMBL2"] * 2,
+                "target_chembl_id": ["TARGET1"] * 5,
+                "standard_smiles": ["CCO"] * 3 + ["CCC"] * 2,
+                "canonical_smiles": ["CCO"] * 3 + ["CCC"] * 2,
+                "standard_value": [60.0, 65.0, 70.0, 80.0, 85.0],
+                "standard_units": ["%"] * 5,
+                "standard_relation": [np.nan, np.nan, "=", np.nan, np.nan],
+                "mutation": ["WT"] * 5,
+                "assay_chembl_id": ["ASSAY1"] * 5,
+                "standard_type": ["PPB"] * 5,
+                "assay_description": ["Test assay"] * 5,
+                "assay_type": ["A"] * 5,
+                "confidence_score": [9] * 5,
+                "target_organism": ["Homo sapiens"] * 5,
+                "document_chembl_id": ["DOC1"] * 5,
+                "assay_tissue": [""] * 5,
+                "assay_cell_type": [""] * 5,
+                "relationship_type": ["D"] * 5,
+                "max_phase": [1] * 5,
+                "oral": [False] * 5,
+                "prodrug": [False] * 5,
+                "withdrawn_flag": [False] * 5,
+                "doc_type": ["PUBLICATION"] * 5,
+                "doi": ["10.1234/test"] * 5,
+                "journal": ["Test Journal"] * 5,
+                "year": [2020] * 5,
+                "chembl_release": [30] * 5,
+                "data_dropping_comment": [""] * 5,
+                "data_processing_comment": [""] * 5,
+            }
+        )
+
+        aggr_df = aggregate_data(
+            test_data,
+            chirality=False,
+            metadata_cols=[],
+            extra_id_cols=["standard_units"],
+            output_path=None,
+            compound_equality="connectivity",
+            value_col="standard_value",
+        )
+
+        # Both compounds must survive aggregation
+        self.assertEqual(len(aggr_df), 2, f"Expected 2 compounds, got {len(aggr_df)}")
+
+        # All 5 measurements should be accounted for
+        self.assertEqual(
+            aggr_df["standard_value_counts"].sum(), 5,
+            "All 5 measurements (including NaN relation rows) should be aggregated"
+        )
+
+        # CCO has 3 measurements (2 NaN + 1 "="), mean should be (60+65+70)/3
+        cco_rows = aggr_df[aggr_df["smiles"].str.contains("CCO", na=False)]
+        self.assertEqual(len(cco_rows), 1, "Should have one aggregated row for CCO")
+        self.assertAlmostEqual(cco_rows.iloc[0]["standard_value_mean"], 65.0)
+        self.assertEqual(cco_rows.iloc[0]["standard_value_counts"], 3)
+
+        # CCC has 2 measurements (both NaN relation), mean should be (80+85)/2
+        ccc_rows = aggr_df[aggr_df["smiles"].str.contains("CCC", na=False)]
+        self.assertEqual(len(ccc_rows), 1, "Should have one aggregated row for CCC")
+        self.assertAlmostEqual(ccc_rows.iloc[0]["standard_value_mean"], 82.5)
+        self.assertEqual(ccc_rows.iloc[0]["standard_value_counts"], 2)
+
+
+    def test_clean_data_drops_flags(self):
+        """Test that clean_data filters out rows with specified quality flags."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN1", "CONN2", "CONN2"],
+                "smiles": ["CCO", "CCO", "CCC", "CCC"],
+                "target_chembl_id": ["TARGET1", "TARGET2", "TARGET1", "TARGET2"],
+                "pchembl_value_mean": [6.5, 7.0, 5.5, 8.0],
+                "data_dropping_comment": ["", "flag_to_remove", "", "another_flag"],
+            }
+        )
+
+        result = clean_data(
+            test_data,
+            drop_flags=["flag_to_remove", "another_flag"],
+        )
+
+        # After filtering, only rows without flags should remain
+        self.assertEqual(len(result), 2)
+        self.assertTrue((result["data_dropping_comment"] == "").all())
+
+    def test_clean_data_deduplicates(self):
+        """Test that clean_data with deduplicate=True removes duplicate values and recalculates stats."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN2"],
+                "smiles": ["CCO", "CCC"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
+                "pchembl_value": ["8.00|8.00|6.92", "5.50"],
+                "pchembl_value_mean": [7.64, 5.50],
+                "pchembl_value_median": [8.00, 5.50],
+                "pchembl_value_std": [0.62, 0.0],
+                "pchembl_value_counts": [3, 1],
+                "data_dropping_comment": ["", ""],
+            }
+        )
+
+        result = clean_data(
+            test_data,
+            deduplicate=True,
+            value_col="pchembl_value",
+        )
+
+        # CONN1 should have had duplicates removed: "8.00|8.00|6.92" -> "8.00|6.92"
+        conn1 = result[result["connectivity"] == "CONN1"].iloc[0]
+        self.assertEqual(conn1["pchembl_value"], "8.00|6.92")
+        self.assertEqual(conn1["pchembl_value_counts"], 2)
+        self.assertAlmostEqual(conn1["pchembl_value_mean"], (8.00 + 6.92) / 2, places=2)
+
+        # CONN2 should be unchanged (no duplicates)
+        conn2 = result[result["connectivity"] == "CONN2"].iloc[0]
+        self.assertEqual(conn2["pchembl_value"], "5.50")
+        self.assertEqual(conn2["pchembl_value_counts"], 1)
+
+    def test_clean_data_raises_on_conflicting_resolve_and_drop(self):
+        """Test that clean_data raises ValueError when both resolve_annotation_error and drop unit error are set."""
+        from Capricho.analysis import DroppingComment
+
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "pchembl_value": ["6.0"],
+                "pchembl_value_mean": [6.0],
+                "data_dropping_comment": [""],
+            }
+        )
+
+        with self.assertRaises(ValueError, msg="Should raise when both resolve and drop unit error are set"):
+            clean_data(
+                test_data,
+                drop_flags=[DroppingComment.UNIT_ANNOTATION_ERROR.value],
+                resolve_annotation_error="first",
+            )
+
+    def test_clean_data_composable_with_prepare(self):
+        """Test end-to-end: clean_data then prepare_multitask_data."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN1", "CONN2", "CONN2"],
+                "smiles": ["CCO", "CCO", "CCC", "CCC"],
+                "target_chembl_id": ["TARGET1", "TARGET2", "TARGET1", "TARGET2"],
+                "pchembl_value_mean": [6.5, 7.0, 5.5, 8.0],
+                "data_dropping_comment": ["", "flag_to_remove", "", ""],
+            }
+        )
+
+        # Step 1: clean
+        cleaned = clean_data(test_data, drop_flags=["flag_to_remove"])
+
+        # Step 2: pivot
+        matrix = prepare_multitask_data(
+            df=cleaned,
+            task_col="target_chembl_id",
+            value_col="pchembl_value_mean",
+            compound_col="connectivity",
+            smiles_col="smiles",
+        )
+
+        # CONN1-TARGET2 was flagged and removed, so TARGET2 should only have CONN2
+        self.assertEqual(len(matrix), 2)
+        self.assertIn("TARGET1", matrix.columns)
+        self.assertIn("TARGET2", matrix.columns)
+        self.assertTrue(pd.isna(matrix.loc["CONN1", "TARGET2"]))
+        self.assertAlmostEqual(matrix.loc["CONN2", "TARGET2"], 8.0)
+
+    def test_connectivity_assigned_when_chirality_false(self):
+        """Connectivity must be assigned even when chirality=False strips stereochemistry.
+
+        When chirality=False, process_repeat_mols re-canonicalizes SMILES without
+        stereochemistry. The precomputed connectivity mapping (keyed on isomeric
+        standard_smiles) must still produce valid connectivity values.
+        """
+        # Use SMILES with stereochemistry that will be stripped when chirality=False
+        test_data = pd.DataFrame(
+            {
+                "activity_id": [1, 2],
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "target_chembl_id": ["TARGET1"] * 2,
+                "standard_smiles": [
+                    "N[C@@H](C(=O)O)Cc1ccccc1",  # L-phenylalanine (with stereo)
+                    "C[C@H](O)CC",  # (R)-2-butanol (with stereo)
+                ],
+                "canonical_smiles": [
+                    "N[C@@H](C(=O)O)Cc1ccccc1",
+                    "C[C@H](O)CC",
+                ],
+                "standard_value": [50.0, 75.0],
+                "standard_units": ["%", "%"],
+                "standard_relation": ["=", "="],
+                "mutation": ["WT"] * 2,
+                "assay_chembl_id": ["ASSAY1"] * 2,
+                "standard_type": ["PPB"] * 2,
+                "assay_description": ["Test assay"] * 2,
+                "assay_type": ["A"] * 2,
+                "confidence_score": [9] * 2,
+                "target_organism": ["Homo sapiens"] * 2,
+                "document_chembl_id": ["DOC1"] * 2,
+                "assay_tissue": [""] * 2,
+                "assay_cell_type": [""] * 2,
+                "relationship_type": ["D"] * 2,
+                "max_phase": [1] * 2,
+                "oral": [False] * 2,
+                "prodrug": [False] * 2,
+                "withdrawn_flag": [False] * 2,
+                "doc_type": ["PUBLICATION"] * 2,
+                "doi": ["10.1234/test"] * 2,
+                "journal": ["Test Journal"] * 2,
+                "year": [2020] * 2,
+                "chembl_release": [30] * 2,
+                "data_dropping_comment": [""] * 2,
+                "data_processing_comment": [""] * 2,
+            }
+        )
+
+        aggr_df = aggregate_data(
+            test_data,
+            chirality=False,  # This strips stereochemistry from smiles
+            metadata_cols=[],
+            extra_id_cols=["standard_units"],
+            output_path=None,
+            compound_equality="connectivity",
+            value_col="standard_value",
+        )
+
+        # All rows must have valid (non-NaN) connectivity
+        self.assertTrue(
+            aggr_df["connectivity"].notna().all(),
+            f"All rows should have connectivity assigned, but got NaN for: "
+            f"{aggr_df[aggr_df['connectivity'].isna()]['smiles'].tolist()}"
+        )
+
+        # Connectivity values should be 14-char InChI key first layer
+        for conn in aggr_df["connectivity"]:
+            self.assertEqual(len(conn), 14, f"Connectivity should be 14 chars, got: {conn}")
 
 
 if __name__ == "__main__":
