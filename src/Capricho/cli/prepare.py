@@ -15,22 +15,22 @@ def clean_data(
     drop_flags: Optional[List[str]] = None,
     deduplicate: bool = False,
     value_col: str = "pchembl_value",
+    resolve_annotation_error: Optional[str] = None,
 ) -> pd.DataFrame:
-    """Clean aggregated bioactivity data by deduplicating and filtering quality flags.
+    """Clean aggregated bioactivity data by deduplicating, resolving errors, and filtering flags.
 
     Orchestrates cleaning steps in the correct order:
     1. Deduplicate (if requested): removes identical values within aggregated rows
        and recalculates statistics (mean, median, std, counts).
-    2. Drop flags: removes rows matching any of the specified quality flags.
+    2. Resolve annotation errors (if requested): detects measurements differing by
+       exactly 3.0 or 6.0 log units (unit conversion errors), keeps the earliest
+       document's value, then re-aggregates.
+    3. Drop flags: removes rows matching any of the specified quality flags.
 
     Appropriate flags for dropping include unit errors, undefined stereochemistry,
     assay size issues, and mixtures. For potential duplicates, prefer using
     ``deduplicate=True`` instead of dropping — this keeps one measurement while
     removing extras, rather than discarding the entire row.
-
-    Annotation error resolution is a separate step handled by
-    ``resolve_annotation_errors()`` (available via ``capricho prepare
-    --resolve-annotation-error``).
 
     Example::
 
@@ -47,11 +47,37 @@ def clean_data(
             and recalculate statistics.
         value_col: Column containing the activity values (e.g., "pchembl_value"
             or "standard_value"). Used for deduplication and stats recalculation.
+        resolve_annotation_error: Resolution strategy for unit annotation errors.
+            Currently only "first" is supported (keep earliest document).
+            Cannot be used together with dropping "Unit Annotation Error" flags.
 
     Returns:
         Cleaned DataFrame.
+
+    Raises:
+        ValueError: If both ``resolve_annotation_error`` and "Unit Annotation Error"
+            in ``drop_flags`` are set, since these are contradictory operations.
     """
-    from ..analysis import deduplicate_aggregated_values, recalculate_aggregated_stats
+    from ..analysis import (
+        DroppingComment,
+        deaggregate_data,
+        deduplicate_aggregated_values,
+        recalculate_aggregated_stats,
+        resolve_annotation_errors,
+    )
+
+    # Validate: can't both resolve and drop annotation errors
+    if resolve_annotation_error is not None and drop_flags:
+        if DroppingComment.UNIT_ANNOTATION_ERROR.value in drop_flags:
+            raise ValueError(
+                "Cannot both resolve and drop unit annotation errors. "
+                "Use resolve_annotation_error to fix them, or drop_flags to remove them."
+            )
+
+    if resolve_annotation_error is not None and resolve_annotation_error != "first":
+        raise ValueError(
+            f"Unknown resolution strategy: {resolve_annotation_error}. Only 'first' is supported."
+        )
 
     df = df.copy()
 
@@ -70,7 +96,44 @@ def clean_data(
         logger.info("Recalculating statistics after deduplication...")
         df = recalculate_aggregated_stats(df, value_column=value_col)
 
-    # Step 2: Drop flags
+    # Step 2: Resolve annotation errors
+    if resolve_annotation_error is not None:
+        logger.info("Resolving unit annotation errors (3.0 or 6.0 log unit differences)...")
+
+        initial_rows = len(df)
+        exploded = deaggregate_data(df)
+        logger.info(f"Exploded {initial_rows} aggregated rows into {len(exploded)} individual measurements")
+
+        resolved = resolve_annotation_errors(
+            exploded,
+            strategy=resolve_annotation_error,
+            value_col=value_col,
+        )
+        removed_count = len(exploded) - len(resolved)
+        logger.info(f"Removed {removed_count} measurements due to annotation error resolution")
+
+        # Re-aggregate the data
+        from .chembl_data_pipeline import re_aggregate_data
+
+        # Detect extra_id_cols from columns between connectivity and smiles
+        cols = list(df.columns)
+        if "connectivity" in cols and "smiles" in cols:
+            conn_idx = cols.index("connectivity")
+            smiles_idx = cols.index("smiles")
+            detected_id_cols = cols[conn_idx + 1 : smiles_idx]
+            logger.info(f"Detected id_columns for re-aggregation: {detected_id_cols}")
+        else:
+            detected_id_cols = []
+
+        df = re_aggregate_data(
+            resolved,
+            chirality=False,
+            extra_id_cols=detected_id_cols,
+            compound_equality="connectivity",
+        )
+        logger.info(f"Re-aggregated to {len(df)} rows")
+
+    # Step 3: Drop flags
     if drop_flags:
         df = filter_dropping_flags(df, drop_flags)
 

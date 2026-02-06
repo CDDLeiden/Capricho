@@ -974,16 +974,12 @@ def prepare_data(
 
     from ..analysis import (
         DroppingComment,
-        deaggregate_data,
-        deduplicate_aggregated_values,
         explode_assay_comparability,
         get_all_comments,
         plot_multi_panel_comparability,
-        recalculate_aggregated_stats,
-        resolve_annotation_errors,
     )
     from ..core.pandas_helper import save_dataframe
-    from .prepare import prepare_multitask_data
+    from .prepare import clean_data, prepare_multitask_data
 
     logger.info(f"Loading aggregated data from {input_path}")
 
@@ -1022,64 +1018,14 @@ def prepare_data(
     # Derive value column from aggregate_on
     value_col = aggregate_on.value
 
-    # Apply deduplication if requested
-    if deduplicate:
-        logger.info("Deduplicating identical values within aggregated rows...")
-        initial_total = df[value_col].apply(lambda x: len(str(x).split("|")) if pd.notna(x) else 0).sum()
-        df = deduplicate_aggregated_values(df, value_column=value_col)
-        final_total = df[value_col].apply(lambda x: len(str(x).split("|")) if pd.notna(x) else 0).sum()
-        logger.info(f"Deduplication removed {initial_total - final_total} duplicate values")
-
-        # Recalculate statistics
-        logger.info("Recalculating statistics after deduplication...")
-        df = recalculate_aggregated_stats(df, value_column=value_col)
-
-    # Resolve annotation errors if requested
-    if resolve_annotation_error is not None:
-        if resolve_annotation_error != "first":
-            logger.error(
-                f"Unknown resolution strategy: {resolve_annotation_error}. Only 'first' is supported."
-            )
-            raise typer.Exit(code=1)
-
-        logger.info("Resolving unit annotation errors (3.0 or 6.0 log unit differences)...")
-
-        # Need to explode data to find pairs across rows
-        initial_rows = len(df)
-        exploded = deaggregate_data(df)
-        logger.info(f"Exploded {initial_rows} aggregated rows into {len(exploded)} individual measurements")
-
-        # Resolve annotation errors
-        resolved = resolve_annotation_errors(
-            exploded,
-            strategy="first",
-            value_col=value_col,
-        )
-        removed_count = len(exploded) - len(resolved)
-        logger.info(f"Removed {removed_count} measurements due to annotation error resolution")
-
-        # Re-aggregate the data
-        # Detect id_columns from the column order (connectivity, *extra_id_cols, smiles, ...)
-        # The aggregation uses: cols = ["connectivity", *current_extra_id_cols, "smiles", *last_columns]
-        from .chembl_data_pipeline import re_aggregate_data
-
-        # Determine extra_id_cols by looking at columns between connectivity and smiles
-        cols = list(df.columns)
-        if "connectivity" in cols and "smiles" in cols:
-            conn_idx = cols.index("connectivity")
-            smiles_idx = cols.index("smiles")
-            detected_id_cols = cols[conn_idx + 1 : smiles_idx]
-            logger.info(f"Detected id_columns for re-aggregation: {detected_id_cols}")
-        else:
-            detected_id_cols = []
-
-        df = re_aggregate_data(
-            resolved,
-            chirality=False,  # Use connectivity-based matching
-            extra_id_cols=detected_id_cols,
-            compound_equality="connectivity",
-        )
-        logger.info(f"Re-aggregated to {len(df)} rows")
+    # Clean data: deduplicate, resolve annotation errors, filter flags
+    df = clean_data(
+        df,
+        deduplicate=deduplicate,
+        value_col=value_col,
+        resolve_annotation_error=resolve_annotation_error,
+        drop_flags=flags_to_remove if flags_to_remove else None,
+    )
 
     # Use mean column for the activity matrix
     value_col_mean = f"{aggregate_on.value}_mean"
@@ -1090,7 +1036,6 @@ def prepare_data(
         value_col=value_col_mean,
         compound_col=compound_col.value,
         smiles_col=smiles_col,
-        remove_flags=flags_to_remove if flags_to_remove else None,
         id_columns=id_columns,
     )
 
@@ -1130,17 +1075,11 @@ def prepare_data(
 
                 from ..analysis import plot_subset
 
-                # Build regex pattern for flags that were removed
+                from ..core.pandas_helper import filter_dropping_flags
+
                 if flags_to_remove:
-                    # Escape special regex chars and join with |
-                    import re
-
-                    escaped_flags = [re.escape(f) for f in flags_to_remove]
-                    drop_flags_pattern = "|".join(escaped_flags)
-
-                    # Filter to data that doesn't have any of the dropped flags
-                    cleaned_subset = exploded_subset.query(
-                        "~dropping_comment.str.contains(@drop_flags_pattern, regex=True, na=False)"
+                    cleaned_subset = filter_dropping_flags(
+                        exploded_subset, flags_to_remove, column="dropping_comment"
                     )
                 else:
                     cleaned_subset = exploded_subset
