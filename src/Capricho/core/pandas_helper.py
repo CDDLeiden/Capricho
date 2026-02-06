@@ -12,6 +12,43 @@ from ..logger import logger
 from .default_fields import DATA_DROPPING_COMMENT, DATA_PROCESSING_COMMENT
 
 
+def filter_dropping_flags(
+    df: pd.DataFrame,
+    flags: list[str],
+    column: str = DATA_DROPPING_COMMENT,
+) -> pd.DataFrame:
+    """Filter out rows whose comment column contains any of the specified quality flags.
+
+    Args:
+        df: DataFrame to filter.
+        flags: List of flag strings to match against.
+        column: Name of the comment column to check. Defaults to DATA_DROPPING_COMMENT.
+
+    Returns:
+        DataFrame with flagged rows removed.
+    """
+    if not flags:
+        return df
+
+    if column not in df.columns:
+        logger.warning(f"Column '{column}' not found in DataFrame. No filtering applied.")
+        return df
+
+    mask = pd.Series(False, index=df.index)
+    for flag in flags:
+        flag_mask = df[column].fillna("").str.contains(flag, regex=False)
+        mask = mask | flag_mask
+        n_flagged = flag_mask.sum()
+        if n_flagged > 0:
+            logger.info(f"Filtering {n_flagged} rows with flag: '{flag}'")
+
+    n_removed = mask.sum()
+    if n_removed > 0:
+        logger.info(f"Total rows filtered out: {n_removed} ({n_removed / len(df) * 100:.1f}%)")
+
+    return df[~mask].copy()
+
+
 def save_dataframe(
     df: pd.DataFrame,
     path: Union[Path, str],

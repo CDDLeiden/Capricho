@@ -1,13 +1,71 @@
-"""Module for cleaning up specified data quality flags, and transforming the bioactivity data
-into matrices where rows are compounds and columns are affinity values to be used for multitask modeling.
+"""Clean aggregated bioactivity data by removing quality flags and duplicates,
+and pivot into activity matrices for multitask modeling.
 """
 
 from typing import List, Optional
 
 import pandas as pd
 
-from ..core.default_fields import DATA_DROPPING_COMMENT
+from ..core.pandas_helper import filter_dropping_flags
 from ..logger import logger
+
+
+def clean_data(
+    df: pd.DataFrame,
+    drop_flags: Optional[List[str]] = None,
+    deduplicate: bool = False,
+    value_col: str = "pchembl_value",
+) -> pd.DataFrame:
+    """Clean aggregated bioactivity data by deduplicating and filtering quality flags.
+
+    Orchestrates cleaning steps in the correct order:
+    1. Deduplicate (if requested): removes identical values within aggregated rows
+       and recalculates statistics (mean, median, std, counts).
+    2. Drop flags: removes rows matching any of the specified quality flags.
+
+    Appropriate flags for dropping include unit errors, undefined stereochemistry,
+    assay size issues, and mixtures. For potential duplicates, prefer using
+    ``deduplicate=True`` instead of dropping — this keeps one measurement while
+    removing extras, rather than discarding the entire row.
+
+    Annotation error resolution is a separate step handled by
+    ``resolve_annotation_errors()`` (available via ``capricho prepare
+    --resolve-annotation-error``).
+
+    Example::
+
+        from Capricho.cli.prepare import clean_data, prepare_multitask_data
+
+        cleaned = clean_data(df, drop_flags=["Unit Annotation Error"], deduplicate=True)
+        matrix = prepare_multitask_data(cleaned, task_col="target_chembl_id", ...)
+
+    Args:
+        df: Aggregated DataFrame from aggregate_data().
+        drop_flags: List of quality flags to remove. Rows where data_dropping_comment
+            contains any of these flags will be filtered out.
+        deduplicate: If True, remove duplicate values within aggregated rows
+            and recalculate statistics.
+        value_col: Column containing the activity values (e.g., "pchembl_value"
+            or "standard_value"). Used for deduplication and stats recalculation.
+
+    Returns:
+        Cleaned DataFrame.
+    """
+    from ..analysis import deduplicate_aggregated_values, recalculate_aggregated_stats
+
+    df = df.copy()
+
+    # Step 1: Deduplicate
+    if deduplicate:
+        logger.info("Deduplicating identical values within aggregated rows...")
+        df = deduplicate_aggregated_values(df, value_column=value_col)
+        df = recalculate_aggregated_stats(df, value_column=value_col)
+
+    # Step 2: Drop flags
+    if drop_flags:
+        df = filter_dropping_flags(df, drop_flags)
+
+    return df
 
 
 def prepare_multitask_data(
@@ -16,7 +74,6 @@ def prepare_multitask_data(
     value_col: str,
     compound_col: str,
     smiles_col: str,
-    remove_flags: Optional[List[str]] = None,
     id_columns: Optional[List[str]] = None,
 ) -> pd.DataFrame:
     """Transform aggregated data to multitask format (activity matrix).
@@ -26,15 +83,15 @@ def prepare_multitask_data(
     - Columns represent tasks (e.g., different targets)
     - Values are the bioactivity measurements (e.g., pchembl_value_mean)
 
+    Use ``clean_data()`` before calling this function to filter quality flags
+    and deduplicate values.
+
     Args:
-        df: Aggregated DataFrame from aggregate_data() with bioactivity statistics
-        task_col: Column to use as task identifier (e.g., "target_chembl_id")
-        value_col: Column containing values to pivot (e.g., "pchembl_value_mean")
-        compound_col: Column for compound identity (e.g., "connectivity" or "smiles")
-        smiles_col: Column containing SMILES strings
-        remove_flags: List of quality flags to remove. Rows where data_dropping_comment
-            contains any of these flags will be filtered out before pivoting.
-            If None, no filtering is applied.
+        df: Aggregated DataFrame from aggregate_data() with bioactivity statistics.
+        task_col: Column to use as task identifier (e.g., "target_chembl_id").
+        value_col: Column containing values to pivot (e.g., "pchembl_value_mean").
+        compound_col: Column for compound identity (e.g., "connectivity" or "smiles").
+        smiles_col: Column containing SMILES strings.
         id_columns: List of additional columns to combine with task_col for creating
             composite task identifiers. Use this when data was aggregated with
             --id-columns (e.g., ["assay_tissue"]) to prevent losing information.
@@ -44,28 +101,6 @@ def prepare_multitask_data(
         and a smiles column. Missing values are represented as NaN.
     """
     df = df.copy()
-
-    # Filter out flagged data if remove_flags is provided
-    if remove_flags is not None and len(remove_flags) > 0:
-        if DATA_DROPPING_COMMENT not in df.columns:
-            logger.warning(
-                f"Column '{DATA_DROPPING_COMMENT}' not found in DataFrame. " "No filtering will be applied."
-            )
-        else:
-            initial_len = len(df)
-            # Create a mask for rows containing any of the flags
-            mask = pd.Series(False, index=df.index)
-            for flag in remove_flags:
-                flag_mask = df[DATA_DROPPING_COMMENT].fillna("").str.contains(flag, regex=False, na=False)
-                mask = mask | flag_mask
-                n_flagged = flag_mask.sum()
-                if n_flagged > 0:
-                    logger.info(f"Filtering {n_flagged} rows with flag: '{flag}'")
-
-            df = df[~mask].copy()
-            n_removed = initial_len - len(df)
-            if n_removed > 0:
-                logger.info(f"Total rows filtered out: {n_removed} ({n_removed/initial_len*100:.1f}%)")
 
     # Validate required columns exist
     required_cols = [compound_col, task_col, value_col, smiles_col]
@@ -117,8 +152,9 @@ def prepare_multitask_data(
     activity_matrix.columns.name = None
 
     # Add SMILES column back by taking the first SMILES for each compound
-    smiles_map = df.groupby(compound_col)[smiles_col].first()
-    activity_matrix[smiles_col] = smiles_map
+    if smiles_col != compound_col:
+        smiles_map = df.groupby(compound_col)[smiles_col].first()
+        activity_matrix[smiles_col] = smiles_map
 
     logger.info(
         f"Activity matrix shape: {activity_matrix.shape[0]} compounds x {activity_matrix.shape[1]} columns"
