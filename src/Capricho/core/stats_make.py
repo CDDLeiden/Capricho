@@ -223,7 +223,9 @@ def process_repeat_mols(
         ignore_index=True,
     )
     # the `smiles` column will be the final smiles column; to be used for modeling
-    smiles = df["standard_smiles"].apply(lambda smi: smi if "|" not in smi else smi.split("|")[0])
+    smiles = df["standard_smiles"].apply(
+        lambda smi: smi if pd.isna(smi) or "|" not in smi else smi.split("|")[0]
+    )
     logger.info("Canonicalizing smiles...")
     df = df.assign(smiles=smiles_canonizer(smiles))
 
