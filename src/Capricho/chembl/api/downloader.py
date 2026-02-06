@@ -536,8 +536,9 @@ def get_full_activity_data_sql(
         where_conditions_main.append(f"a.chembl_id IN ({placeholders})")
 
     where_conditions_main.append("act.standard_value IS NOT NULL")
-    where_conditions_main.append("act.standard_relation IS NOT NULL")
 
+    # Only filter by standard_relation if explicitly provided
+    # When None, include all data including those with NULL standard_relation (e.g., AstraZeneca PPB assays)
     if standard_relation:
         placeholders = ", ".join([f"'{rel}'" for rel in standard_relation])
         where_conditions_main.append(f"act.standard_relation IN ({placeholders})")
