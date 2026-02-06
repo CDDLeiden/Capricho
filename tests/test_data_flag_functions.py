@@ -631,5 +631,72 @@ class TestFlagInsufficientAssayOverlap(unittest.TestCase):
             self.assertIn("Insufficient assay overlap", comment)
 
 
+class TestFlagZeroValues(unittest.TestCase):
+    """Tests for flag_zero_values function."""
+
+    def test_flag_zero_standard_value(self):
+        """Test that rows with standard_value of 0 are flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "standard_value": [0.0, 5.5, 10.0],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        from Capricho.chembl.data_flag_functions import flag_zero_values
+
+        result = flag_zero_values(df)
+
+        # First row should be flagged
+        self.assertIn("Zero Value", str(result.loc[0, "data_dropping_comment"]))
+        # Other rows should not be flagged
+        self.assertTrue(pd.isna(result.loc[1, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[1, "data_dropping_comment"]))
+        self.assertTrue(pd.isna(result.loc[2, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[2, "data_dropping_comment"]))
+
+    def test_flag_zero_with_small_values(self):
+        """Test that only exact zeros are flagged, not small values."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "standard_value": [0.0, 0.001, 0.01],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        from Capricho.chembl.data_flag_functions import flag_zero_values
+
+        result = flag_zero_values(df)
+
+        # Only first row (exact zero) should be flagged
+        self.assertIn("Zero Value", str(result.loc[0, "data_dropping_comment"]))
+        self.assertTrue(pd.isna(result.loc[1, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[1, "data_dropping_comment"]))
+        self.assertTrue(pd.isna(result.loc[2, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[2, "data_dropping_comment"]))
+
+    def test_flag_zero_handles_nan(self):
+        """Test that NaN values are not flagged as zeros."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "standard_value": [None, 0.0],
+                "data_dropping_comment": [None, None],
+            }
+        )
+
+        from Capricho.chembl.data_flag_functions import flag_zero_values
+
+        result = flag_zero_values(df)
+
+        # First row (NaN) should not be flagged
+        self.assertTrue(pd.isna(result.loc[0, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[0, "data_dropping_comment"]))
+        # Second row (zero) should be flagged
+        self.assertIn("Zero Value", str(result.loc[1, "data_dropping_comment"]))
+
+
 if __name__ == "__main__":
     unittest.main()

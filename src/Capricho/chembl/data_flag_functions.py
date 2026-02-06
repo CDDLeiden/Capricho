@@ -91,6 +91,33 @@ def flag_undefined_stereochemistry(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def flag_zero_values(df: pd.DataFrame, column: str = "standard_value") -> pd.DataFrame:
+    """Mark rows where the measurement value is exactly zero.
+
+    Zero values in bioactivity measurements are typically data quality issues -
+    they may represent values below the limit of detection, data entry errors,
+    or rounding artifacts. This flag helps identify such problematic data points.
+
+    Args:
+        df: DataFrame to process.
+        column: Column name to check for zero values. Defaults to "standard_value".
+
+    Returns:
+        DataFrame with zero-value rows flagged in data_dropping_comment.
+    """
+    if column not in df.columns:
+        logger.debug(f"Column '{column}' not found. Skipping zero value flagging.")
+        return df
+
+    return add_comment(
+        df,
+        comment="Zero Value",
+        criteria_func=lambda x: x == 0,
+        target_column=column,
+        comment_type="d",
+    )
+
+
 def flag_min_assay_size(df: pd.DataFrame, min_assay_size: int = 0) -> pd.DataFrame:
     """Mark assays for removal based on size lower than the specified minimum assay size."""
     assert min_assay_size >= 0, "Minimum assay size must be a non-negative integer."
@@ -111,8 +138,12 @@ def flag_min_assay_size(df: pd.DataFrame, min_assay_size: int = 0) -> pd.DataFra
         )
 
 
-def flag_max_assay_size(df: pd.DataFrame, max_assay_size: int = 1000) -> pd.DataFrame:
+def flag_max_assay_size(df: pd.DataFrame, max_assay_size: Optional[int] = None) -> pd.DataFrame:
     """Mark assays for removal based on size greater than the specified maximum assay size."""
+    if max_assay_size is None:
+        logger.info("Maximum assay size is not set. Skipping filtering based on maximum assay size.")
+        return df
+
     assert max_assay_size > 0, "Maximum assay size must be a positive integer."
 
     if "assay_size" not in df.columns:
