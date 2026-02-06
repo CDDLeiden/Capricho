@@ -497,6 +497,10 @@ def explode_assay_comparability(
                     multival_cols.remove(col)
                     singleval_cols.append(col)
 
+    # Filter to only include columns that exist in the input dataframe
+    singleval_cols = [col for col in singleval_cols if col in subset.columns]
+    multival_cols = [col for col in multival_cols if col in subset.columns]
+
     exploded_subset = subset[
         [
             *singleval_cols,
@@ -551,6 +555,69 @@ def explode_assay_comparability(
     return exploded_subset
 
 
+def format_units_latex(units: str) -> str:
+    """Convert common unit patterns to LaTeX format.
+
+    Handles scientific notation patterns like "10^-6 cm/s" and converts them
+    to proper LaTeX math notation. Units already containing LaTeX ($) are
+    passed through unchanged.
+
+    Args:
+        units: Unit string (e.g., "10^-6 cm/s", "nM", "$10^{-6}$ cm/s").
+
+    Returns:
+        Unit string with LaTeX math notation where applicable.
+    """
+    if not units:
+        return ""
+
+    # Already contains LaTeX - pass through
+    if "$" in units:
+        return units
+
+    # Handle 10^N patterns (e.g., "10^-6 cm/s" → "$10^{-6}$ cm/s")
+    import re
+
+    pattern = r"10\^(-?\d+)"
+    if re.search(pattern, units):
+        return re.sub(pattern, r"$10^{\1}$", units)
+
+    return units
+
+
+def format_axis_label(
+    property_name: str = "value",
+    log_transform: bool = False,
+    units: Optional[str] = None,
+) -> str:
+    """Format axis label with LaTeX math notation for publication-quality figures.
+
+    Args:
+        property_name: Name of the measured property (e.g., "Permeability", "pChEMBL").
+        log_transform: If True, prepend -log10 in LaTeX format.
+        units: Unit string. Supports patterns like "10^-6 cm/s" which are
+            converted to LaTeX. Already-LaTeX units ("$...$") pass through.
+
+    Returns:
+        Formatted label string with LaTeX math notation.
+    """
+    parts = [property_name]
+
+    if log_transform and units:
+        # e.g., "Permeability ($-\log_{10}$ [$10^{-6}$ cm/s])"
+        formatted_units = format_units_latex(units)
+        parts.append(f"($-\\log_{{10}}$ [{formatted_units}])")
+    elif log_transform:
+        # e.g., "Standard Value ($-\log_{10}$)"
+        parts.append(r"($-\log_{10}$)")
+    elif units:
+        # e.g., "Permeability (10^-6 cm/s)"
+        formatted_units = format_units_latex(units)
+        parts.append(f"({formatted_units})")
+
+    return " ".join(parts)
+
+
 def plot_subset(
     subset: pd.DataFrame,
     title: str = "",
@@ -558,9 +625,11 @@ def plot_subset(
     figsize: Tuple[float, float] = (5, 5),
     value_column: str = "pchembl_value",
     log_transform: bool = False,
+    log_scale_factor: float = 1.0,
     axis_label: Optional[str] = None,
     axis_limits: Optional[Tuple[float, float]] = None,
     reference_lines: bool = True,
+    units: Optional[str] = None,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Create scatter plot comparing values across assays with correlation metrics.
 
@@ -573,12 +642,18 @@ def plot_subset(
             Defaults to "pchembl_value".
         log_transform: If True, apply -log10 transformation to values before plotting.
             Use for concentration values (nM, µM, etc.) but NOT for percentages or pChEMBL.
-        axis_label: Custom axis label. If None, defaults to "pChEMBL value" for pchembl_value
-            or the value_column name otherwise. For log-transformed data, prepends "-log10".
+        log_scale_factor: Scale factor for the unit of measurement (e.g., 1e-6 for
+            values in 10^-6 cm/s units). The transformation becomes -log10(value * factor).
+            For example, a value of 5 in 10^-6 cm/s units with factor=1e-6 gives
+            -log10(5e-6) ≈ 5.3, producing pChEMBL-like positive values.
+        axis_label: Custom axis label. If None, uses format_axis_label() to generate
+            a LaTeX-formatted label based on value_column, log_transform, and units.
         axis_limits: Tuple of (min, max) for both axes. If None, defaults to (3, 12) for
             pchembl_value, (0, 100) for percentage data, or auto-detects from data.
         reference_lines: If True, draw identity and ±1/±0.3 reference lines. These are
             most meaningful for pChEMBL-scale data.
+        units: Unit string for axis labels (e.g., "10^-6 cm/s"). Converted to LaTeX
+            format automatically. Only used when axis_label is None.
 
     Returns:
         Tuple of (figure, axes) objects.
@@ -596,9 +671,14 @@ def plot_subset(
     yp = subset[y_col].copy()
 
     if log_transform:
-        # Apply -log10(x + 1) transformation to handle zero values gracefully
-        xp = -np.log10(xp + 1)
-        yp = -np.log10(yp + 1)
+        # Apply -log10(value * scale_factor) transformation
+        # Math: -log10(x * factor) = -log10(x) - log10(factor) = -log10(x) + offset
+        # For factor=1e-6: offset = -log10(1e-6) = 6, giving positive pChEMBL-like values
+        offset = -np.log10(log_scale_factor) if log_scale_factor != 1.0 else 0
+        # Use epsilon of 0.001 to handle near-zero values sensibly
+        # (zeros would otherwise produce extreme outliers)
+        xp = -np.log10(xp + 0.001) + offset
+        yp = -np.log10(yp + 0.001) + offset
 
     ax.scatter(
         xp,
@@ -658,36 +738,23 @@ def plot_subset(
         label_base = axis_label
     elif value_column == "pchembl_value":
         label_base = "pChEMBL value"
-    elif log_transform:
-        label_base = f"-log10({value_column})"
     else:
-        label_base = value_column
+        property_name = value_column.replace("_", " ").title()
+        label_base = format_axis_label(property_name, log_transform=log_transform, units=units)
 
     ax.set_ylabel(f"Assay 2 {label_base}")
     ax.set_xlabel(f"Assay 1 {label_base}")
 
     handles, labels = ax.get_legend_handles_labels()
-    if len(handles) > 1:
-        ax.legend(
-            handles[1:],
-            labels[1:],
-            title="",
-            bbox_to_anchor=(1.05, 0, 1, 0.2),
-            loc="lower left",
-            mode="expand",
-            frameon=False,
-        )
-    elif len(handles) == 1:
-        ax.legend(
-            handles,
-            labels,
-            title="",
-            bbox_to_anchor=(1.05, 0, 1, 0.2),
-            loc="lower left",
-            mode="expand",
-            frameon=False,
-        )
-    fig.tight_layout()
+    ax.legend(
+        handles,
+        labels,
+        title="",
+        loc="upper center",
+        bbox_to_anchor=(0.45, -0.15),
+        ncol=3,
+        frameon=False,
+    )
 
     return fig, ax
 
@@ -778,9 +845,11 @@ def plot_multi_panel_comparability(
     ncols: int = 5,
     value_column: str = "pchembl_value",
     log_transform: bool = False,
+    log_scale_factor: float = 1.0,
     axis_label: Optional[str] = None,
     axis_limits: Optional[Tuple[float, float]] = None,
     reference_lines: bool = True,
+    units: Optional[str] = None,
 ) -> Tuple[plt.Figure, np.ndarray]:
     """Create multi-panel plot showing comparability for different data quality flags.
 
@@ -794,11 +863,15 @@ def plot_multi_panel_comparability(
             Defaults to "pchembl_value".
         log_transform: If True, apply -log10 transformation to values before plotting.
             Use for concentration values (nM, µM, etc.) but NOT for percentages or pChEMBL.
-        axis_label: Custom axis label. If None, defaults to "pChEMBL value" for pchembl_value
-            or the value_column name otherwise.
+        log_scale_factor: Scale factor for the unit of measurement (e.g., 1e-6 for
+            values in 10^-6 cm/s units). The transformation becomes -log10(value * factor).
+        axis_label: Custom axis label. If None, uses format_axis_label() to generate
+            a LaTeX-formatted label based on value_column, log_transform, and units.
         axis_limits: Tuple of (min, max) for both axes. If None, defaults to (3, 12) for
             pchembl_value, or auto-detects from data.
         reference_lines: If True, draw identity and ±1/±0.3 reference lines.
+        units: Unit string for axis labels (e.g., "10^-6 cm/s"). Converted to LaTeX
+            format automatically. Only used when axis_label is None.
 
     Returns:
         Tuple of (figure, axes array).
@@ -840,8 +913,9 @@ def plot_multi_panel_comparability(
         all_x = exploded_subset[x_col].astype(float)
         all_y = exploded_subset[y_col].astype(float)
         if log_transform:
-            all_x = -np.log10(all_x + 1)
-            all_y = -np.log10(all_y + 1)
+            offset = -np.log10(log_scale_factor) if log_scale_factor != 1.0 else 0
+            all_x = -np.log10(all_x + 0.001) + offset
+            all_y = -np.log10(all_y + 0.001) + offset
         all_vals = np.concatenate([all_x, all_y])
         data_min, data_max = np.nanmin(all_vals), np.nanmax(all_vals)
         margin = (data_max - data_min) * 0.1
@@ -853,10 +927,9 @@ def plot_multi_panel_comparability(
         label_base = axis_label
     elif value_column == "pchembl_value":
         label_base = "pChEMBL value"
-    elif log_transform:
-        label_base = f"-log10({value_column})"
     else:
-        label_base = value_column
+        property_name = value_column.replace("_", " ").title()
+        label_base = format_axis_label(property_name, log_transform=log_transform, units=units)
 
     for idx, color, obs, ax in zip(
         range(1, len(comments_with_data) + 1), colors, comments_with_data, axs_flat
@@ -889,8 +962,9 @@ def plot_multi_panel_comparability(
         yp = subset[y_col].copy()
 
         if log_transform:
-            xp = -np.log10(xp + 1)
-            yp = -np.log10(yp + 1)
+            offset = -np.log10(log_scale_factor) if log_scale_factor != 1.0 else 0
+            xp = -np.log10(xp + 0.001) + offset
+            yp = -np.log10(yp + 0.001) + offset
 
         ax.scatter(
             xp,

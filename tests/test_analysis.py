@@ -876,5 +876,86 @@ class TestEnumValues(unittest.TestCase):
         self.assertIsInstance(DroppingComment.POTENTIAL_DUPLICATE, str)
 
 
+class TestLogScaleTransformation(unittest.TestCase):
+    """Tests for log scale transformation with scale factor support."""
+
+    def test_log_transform_with_scale_factor_produces_positive_values(self):
+        """Test that log transformation with scale factor produces correct positive values.
+
+        When data is in units of 10^-6 cm/s (stored as coefficients like 5 meaning
+        5 × 10^-6 cm/s), the transformation -log10(value * 1e-6) should produce
+        positive values around 5-6, not negative values.
+        """
+        import numpy as np
+
+        from Capricho.analysis import plot_subset
+
+        # Typical Caco-2 permeability values in 10^-6 cm/s units
+        df = pd.DataFrame(
+            {
+                "standard_value_x": [5.0, 10.0, 50.0],  # 5, 10, 50 × 10^-6 cm/s
+                "standard_value_y": [4.0, 12.0, 45.0],
+            }
+        )
+
+        # Expected transformation: -log10(5 * 1e-6) = -log10(5e-6) = 5.3
+        # For value=5 with scale_factor=1e-6:
+        # -log10(5) + (-log10(1e-6)) = -0.7 + 6 = 5.3
+        fig, ax = plot_subset(
+            df,
+            value_column="standard_value",
+            log_transform=True,
+            log_scale_factor=1e-6,
+        )
+
+        # Get the plotted data from the scatter collection
+        scatter = ax.collections[0]
+        offsets = scatter.get_offsets()
+
+        # All values should be positive (in the 4-7 range for typical Caco-2 data)
+        self.assertTrue((offsets[:, 0] > 0).all(), "X values should be positive after transformation")
+        self.assertTrue((offsets[:, 1] > 0).all(), "Y values should be positive after transformation")
+
+        # Verify specific values: -log10(5e-6) ≈ 5.30
+        expected_x_first = -np.log10(5.0 * 1e-6)  # ≈ 5.30
+        self.assertAlmostEqual(offsets[0, 0], expected_x_first, places=2)
+
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)
+
+    def test_log_transform_without_scale_factor_unchanged(self):
+        """Test that log transformation without scale factor (default) works as before."""
+        import numpy as np
+
+        from Capricho.analysis import plot_subset
+
+        df = pd.DataFrame(
+            {
+                "standard_value_x": [100.0, 1000.0],
+                "standard_value_y": [200.0, 800.0],
+            }
+        )
+
+        fig, ax = plot_subset(
+            df,
+            value_column="standard_value",
+            log_transform=True,
+            # No log_scale_factor specified - should default to 1.0
+        )
+
+        scatter = ax.collections[0]
+        offsets = scatter.get_offsets()
+
+        # With scale_factor=1.0 and epsilon=1e-9, result is essentially -log10(value)
+        # For value=100: -log10(100 + 1e-9) ≈ -2.0
+        expected_x_first = -np.log10(100.0 + 1e-9)
+        self.assertAlmostEqual(offsets[0, 0], expected_x_first, places=2)
+
+        import matplotlib.pyplot as plt
+
+        plt.close(fig)
+
+
 if __name__ == "__main__":
     unittest.main()
