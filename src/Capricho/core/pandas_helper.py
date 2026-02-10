@@ -44,7 +44,7 @@ def filter_dropping_flags(
 
     n_removed = mask.sum()
     if n_removed > 0:
-        logger.info(f"Total rows filtered out: {n_removed} ({n_removed / len(df) * 100:.1f}%)")
+        logger.info(f"Total rows filtered out: {n_removed}/{len(df)} ({n_removed / len(df) * 100:.1f}%)")
 
     return df[~mask].copy()
 
