@@ -75,6 +75,19 @@ def convert_permeability_units(
         "10^6cm/s": 1.0,
         # 10^-7 cm/s (smaller than target by factor of 10)
         "10'-7 cm/s": 0.1,
+        # 10^-5 cm/s variants (10x larger than target)
+        "10'-5cm/s": 10.0,
+        "10'-5 cm/s": 10.0,
+        "10^-5 cm/s": 10.0,
+        "10^-5cm/s": 10.0,
+        # Scientific notation variants for 10^-6 cm/s
+        "1e-6 cm/s": 1.0,
+        "10-6 cm/s": 1.0,
+        # Meter-based units (1 m = 100 cm)
+        # 10^-8 m/s = 10^-8 * 100 cm/s = 10^-6 cm/s
+        "10'-8m/s": 1.0,
+        # 10^-9 m/s = 10^-9 * 100 cm/s = 10^-7 cm/s = 0.1 * 10^-6 cm/s
+        "10'-9meter/s": 0.1,
         # Time conversion: cm/min to cm/s then to 10^-6 cm/s
         # 10^-5 cm/min = (10^-5 / 60) cm/s * 10^6 = 10/60
         "10^-5 cm/min": 10 / 60,
