@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from ..core.pandas_helper import filter_dropping_flags
+from ..core.pandas_helper import assign_stats
 from ..logger import logger
 
 
@@ -25,7 +25,9 @@ def clean_data(
     2. Resolve annotation errors (if requested): detects measurements differing by
        exactly 3.0 or 6.0 log units (unit conversion errors), keeps the earliest
        document's value, then re-aggregates.
-    3. Drop flags: removes rows matching any of the specified quality flags.
+    3. Drop flags: removes individual flagged measurements from aggregated rows
+       and recalculates statistics; rows where all measurements are flagged are
+       removed entirely. Non-aggregated data is filtered at the row level.
 
     Appropriate flags for dropping include unit errors, undefined stereochemistry,
     assay size issues, and mixtures. For potential duplicates, prefer using
@@ -62,7 +64,7 @@ def clean_data(
         DroppingComment,
         deaggregate_data,
         deduplicate_aggregated_values,
-        recalculate_aggregated_stats,
+        filter_aggregated_dropping_flags,
         resolve_annotation_errors,
     )
 
@@ -94,7 +96,7 @@ def clean_data(
         logger.info(f"Deduplication removed {initial_total - final_total} duplicate values")
 
         logger.info("Recalculating statistics after deduplication...")
-        df = recalculate_aggregated_stats(df, value_column=value_col)
+        df = assign_stats(df, value_col=value_col, use_geometric=(value_col == "pchembl_value"))
 
     # Step 2: Resolve annotation errors
     if resolve_annotation_error is not None:
@@ -133,9 +135,9 @@ def clean_data(
         )
         logger.info(f"Re-aggregated to {len(df)} rows")
 
-    # Step 3: Drop flags
+    # Step 3: Drop flags (measurement-level for aggregated data)
     if drop_flags:
-        df = filter_dropping_flags(df, drop_flags)
+        df = filter_aggregated_dropping_flags(df, drop_flags, value_column=value_col)
 
     return df
 

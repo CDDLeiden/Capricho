@@ -789,10 +789,13 @@ class TestFetchFromChEMBL(unittest.TestCase):
         )
 
         # CONN1 should have had duplicates removed: "8.00|8.00|6.92" -> "8.00|6.92"
+        from scipy.stats import gmean
+
         conn1 = result[result["connectivity"] == "CONN1"].iloc[0]
         self.assertEqual(conn1["pchembl_value"], "8.00|6.92")
         self.assertEqual(conn1["pchembl_value_counts"], 2)
-        self.assertAlmostEqual(conn1["pchembl_value_mean"], (8.00 + 6.92) / 2, places=2)
+        # Stats use geometric mean (correct for pchembl_value, which is -log10 scale)
+        self.assertAlmostEqual(conn1["pchembl_value_mean"], gmean([8.00, 6.92]), places=3)
 
         # CONN2 should be unchanged (no duplicates)
         conn2 = result[result["connectivity"] == "CONN2"].iloc[0]
@@ -920,6 +923,295 @@ class TestFetchFromChEMBL(unittest.TestCase):
         # Connectivity values should be 14-char InChI key first layer
         for conn in aggr_df["connectivity"]:
             self.assertEqual(len(conn), 14, f"Connectivity should be 14 chars, got: {conn}")
+
+
+    def test_measurement_level_flag_filtering_partial(self):
+        """Partial flag: 3 measurements, 1 flagged -> 2 remain, stats recalculated."""
+        from scipy.stats import gmean
+
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["TARGET1"],
+                "standard_relation": ["=|=|="],
+                "pchembl_value": ["6.00|6.50|7.00"],
+                "pchembl_value_mean": [6.5],
+                "pchembl_value_median": [6.5],
+                "pchembl_value_std": [0.5],
+                "pchembl_value_counts": [3],
+                "activity_id": ["ACT1|ACT2|ACT3"],
+                "data_dropping_comment": ["Unit Error||"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Unit Error"])
+
+        # Row survives (only 1 of 3 measurements flagged)
+        self.assertEqual(len(result), 1)
+        # Flagged measurement (position 0) removed
+        self.assertEqual(result.iloc[0]["pchembl_value"], "6.50|7.00")
+        self.assertEqual(result.iloc[0]["activity_id"], "ACT2|ACT3")
+        self.assertEqual(result.iloc[0]["pchembl_value_counts"], 2)
+        # Stats recalculated with geometric mean
+        expected_mean = gmean([6.50, 7.00])
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_mean"], expected_mean, places=3)
+
+    def test_measurement_level_flag_filtering_all_flagged(self):
+        """All measurements flagged -> row removed entirely."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["TARGET1"],
+                "standard_relation": ["=|=|="],
+                "pchembl_value": ["6.00|6.50|7.00"],
+                "pchembl_value_mean": [6.5],
+                "pchembl_value_median": [6.5],
+                "pchembl_value_std": [0.5],
+                "pchembl_value_counts": [3],
+                "activity_id": ["ACT1|ACT2|ACT3"],
+                "data_dropping_comment": ["Unit Error|Unit Error|Unit Error"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Unit Error"])
+        self.assertEqual(len(result), 0)
+
+    def test_measurement_level_flag_filtering_none_flagged(self):
+        """No measurements flagged -> row unchanged."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["TARGET1"],
+                "standard_relation": ["=|=|="],
+                "pchembl_value": ["6.00|6.50|7.00"],
+                "pchembl_value_mean": [6.5],
+                "pchembl_value_median": [6.5],
+                "pchembl_value_std": [0.5],
+                "pchembl_value_counts": [3],
+                "activity_id": ["ACT1|ACT2|ACT3"],
+                "data_dropping_comment": ["||"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Unit Error"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["pchembl_value"], "6.00|6.50|7.00")
+        self.assertEqual(result.iloc[0]["pchembl_value_counts"], 3)
+
+    def test_measurement_level_flag_filtering_single_flagged(self):
+        """Single measurement with flag -> row removed (same as old behavior)."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["TARGET1"],
+                "pchembl_value": ["6.00"],
+                "pchembl_value_mean": [6.0],
+                "pchembl_value_median": [6.0],
+                "pchembl_value_std": [0.0],
+                "pchembl_value_counts": [1],
+                "activity_id": ["ACT1"],
+                "data_dropping_comment": ["Unit Error"],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Unit Error"])
+        self.assertEqual(len(result), 0)
+
+    def test_measurement_level_flag_filtering_single_clean(self):
+        """Single measurement without flag -> row kept."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["TARGET1"],
+                "pchembl_value": ["6.00"],
+                "pchembl_value_mean": [6.0],
+                "pchembl_value_median": [6.0],
+                "pchembl_value_std": [0.0],
+                "pchembl_value_counts": [1],
+                "activity_id": ["ACT1"],
+                "data_dropping_comment": [""],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Unit Error"])
+        self.assertEqual(len(result), 1)
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_mean"], 6.0)
+
+    def test_measurement_level_flag_filtering_selective(self):
+        """Filter only 'Flag A' when 'Flag B' also present at different positions."""
+        from scipy.stats import gmean
+
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["TARGET1"],
+                "standard_relation": ["=|=|="],
+                "pchembl_value": ["6.00|6.50|7.00"],
+                "pchembl_value_mean": [6.5],
+                "pchembl_value_median": [6.5],
+                "pchembl_value_std": [0.5],
+                "pchembl_value_counts": [3],
+                "activity_id": ["ACT1|ACT2|ACT3"],
+                "data_dropping_comment": ["Flag A|Flag B|"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Flag A"])
+
+        # Only position 0 (Flag A) removed; position 1 (Flag B) and 2 (clean) remain
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["pchembl_value"], "6.50|7.00")
+        self.assertEqual(result.iloc[0]["activity_id"], "ACT2|ACT3")
+        # Flag B still present in remaining comment
+        self.assertIn("Flag B", result.iloc[0]["data_dropping_comment"])
+
+    def test_measurement_level_flag_filtering_compound_comment(self):
+        """Comment 'Flag A & Flag B' on one measurement; filtering 'Flag A' removes it."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["TARGET1"],
+                "standard_relation": ["=|=|="],
+                "pchembl_value": ["6.00|6.50|7.00"],
+                "pchembl_value_mean": [6.5],
+                "pchembl_value_median": [6.5],
+                "pchembl_value_std": [0.5],
+                "pchembl_value_counts": [3],
+                "activity_id": ["ACT1|ACT2|ACT3"],
+                "data_dropping_comment": ["Flag A & Flag B||"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Flag A"])
+
+        self.assertEqual(len(result), 1)
+        # Position 0 removed (contains "Flag A" as substring)
+        self.assertEqual(result.iloc[0]["pchembl_value"], "6.50|7.00")
+        self.assertEqual(result.iloc[0]["activity_id"], "ACT2|ACT3")
+
+    def test_measurement_level_flag_filtering_mixed_rows(self):
+        """Mix of aggregated and non-aggregated rows: each handled correctly."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN2", "CONN3"],
+                "smiles": ["CCO", "CCC", "CCCC"],
+                "target_chembl_id": ["T1", "T1", "T1"],
+                "standard_relation": ["=|=|=", "=", "="],
+                "pchembl_value": ["6.00|6.50|7.00", "5.50", "8.00"],
+                "pchembl_value_mean": [6.5, 5.5, 8.0],
+                "pchembl_value_median": [6.5, 5.5, 8.0],
+                "pchembl_value_std": [0.5, 0.0, 0.0],
+                "pchembl_value_counts": [3, 1, 1],
+                "activity_id": ["A1|A2|A3", "A4", "A5"],
+                "data_dropping_comment": ["Unit Error||", "Unit Error", ""],
+                "data_processing_comment": ["||", "", ""],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Unit Error"])
+
+        # CONN1: 1 of 3 flagged -> 2 remain
+        # CONN2: single measurement flagged -> row removed
+        # CONN3: no flag -> kept
+        self.assertEqual(len(result), 2)
+        conn1 = result[result["connectivity"] == "CONN1"].iloc[0]
+        self.assertEqual(conn1["pchembl_value"], "6.50|7.00")
+        self.assertEqual(conn1["pchembl_value_counts"], 2)
+
+        conn3 = result[result["connectivity"] == "CONN3"].iloc[0]
+        self.assertAlmostEqual(conn3["pchembl_value_mean"], 8.0)
+
+    def test_measurement_level_dedup_then_flag_filter(self):
+        """End-to-end: deduplicate then filter flags at measurement level."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["T1"],
+                "standard_relation": ["=|=|="],
+                "pchembl_value": ["6.00|6.00|7.00"],
+                "pchembl_value_mean": [6.33],
+                "pchembl_value_median": [6.0],
+                "pchembl_value_std": [0.58],
+                "pchembl_value_counts": [3],
+                "activity_id": ["A1|A2|A3"],
+                "data_dropping_comment": ["||Unit Error"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = clean_data(test_data, deduplicate=True, drop_flags=["Unit Error"])
+
+        # After dedup: "6.00|6.00|7.00" -> "6.00|7.00", comments "||Unit Error" -> "|Unit Error"
+        # After flag filter: position 1 of "6.00|7.00" has "Unit Error" -> removed -> "6.00"
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["pchembl_value"], "6.00")
+        self.assertEqual(result.iloc[0]["pchembl_value_counts"], 1)
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_mean"], 6.0)
+
+    def test_measurement_level_backward_compat(self):
+        """Non-aggregated DataFrame: same behavior as old filter_dropping_flags."""
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1", "CONN2", "CONN3"],
+                "smiles": ["CCO", "CCC", "CCCC"],
+                "target_chembl_id": ["T1", "T1", "T1"],
+                "pchembl_value_mean": [6.5, 5.5, 8.0],
+                "data_dropping_comment": ["Unit Error", "", "Another Flag"],
+            }
+        )
+
+        result = clean_data(test_data, drop_flags=["Unit Error", "Another Flag"])
+
+        # CONN1 and CONN3 removed, CONN2 kept
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result.iloc[0]["connectivity"], "CONN2")
+
+    def test_dedup_uses_geometric_stats(self):
+        """Deduplication recalculates stats with geometric mean for pchembl_value."""
+        from scipy.stats import gmean
+
+        test_data = pd.DataFrame(
+            {
+                "connectivity": ["CONN1"],
+                "smiles": ["CCO"],
+                "target_chembl_id": ["T1"],
+                "standard_relation": ["=|=|="],
+                "pchembl_value": ["8.00|8.00|6.92"],
+                "pchembl_value_mean": [7.64],
+                "pchembl_value_median": [8.0],
+                "pchembl_value_std": [0.62],
+                "pchembl_value_counts": [3],
+                "activity_id": ["A1|A2|A3"],
+                "data_dropping_comment": ["||"],
+                "data_processing_comment": ["||"],
+            }
+        )
+
+        result = clean_data(test_data, deduplicate=True)
+
+        # After dedup: "8.00|8.00|6.92" -> "8.00|6.92"
+        self.assertEqual(result.iloc[0]["pchembl_value"], "8.00|6.92")
+        self.assertEqual(result.iloc[0]["pchembl_value_counts"], 2)
+
+        # Stats should use geometric mean, not arithmetic mean
+        expected_gmean = gmean([8.00, 6.92])
+        expected_amean = (8.00 + 6.92) / 2
+        self.assertAlmostEqual(result.iloc[0]["pchembl_value_mean"], expected_gmean, places=3)
+        # Sanity check: geometric and arithmetic means differ
+        self.assertNotAlmostEqual(expected_gmean, expected_amean, places=2)
 
 
 if __name__ == "__main__":

@@ -238,6 +238,139 @@ def deduplicate_aggregated_values(
     return data
 
 
+def filter_aggregated_dropping_flags(
+    data: pd.DataFrame,
+    flags: list[str],
+    comment_column: str = "data_dropping_comment",
+    value_column: str = "pchembl_value",
+    sep_str: str = "|",
+) -> pd.DataFrame:
+    """Remove individual flagged measurements from aggregated rows and recalculate statistics.
+
+    For aggregated data (pipe-separated columns), this function checks each measurement
+    position individually. Only measurements whose comment matches a flag are removed.
+    Rows where ALL measurements are flagged are removed entirely. Non-aggregated rows
+    are filtered at the row level (same as filter_dropping_flags).
+
+    Args:
+        data: DataFrame with potentially aggregated (pipe-delimited) columns.
+        flags: List of flag strings to match against (substring match).
+        comment_column: Column containing quality flags. Defaults to "data_dropping_comment".
+        value_column: Column containing activity values for stats recalculation.
+            Defaults to "pchembl_value".
+        sep_str: Separator string used to delimit multiple values in columns.
+
+    Returns:
+        DataFrame with flagged measurements removed and statistics recalculated.
+    """
+    from .core.pandas_helper import assign_stats, filter_dropping_flags
+
+    if not flags:
+        return data
+
+    if comment_column not in data.columns:
+        log.warning(f"Column '{comment_column}' not found in DataFrame. No filtering applied.")
+        return data
+
+    if len(data) == 0:
+        return data.copy()
+
+    # Detect pipe-separated columns
+    cols_with_pipe = data.apply(lambda col: col.astype(str).str.contains(sep_str, regex=False)).any()
+    cols_with_pipe = np.compress(cols_with_pipe.values, cols_with_pipe.index).tolist()
+
+    if not cols_with_pipe or comment_column not in cols_with_pipe:
+        # Non-aggregated data: fall back to row-level filtering
+        return filter_dropping_flags(data, flags, column=comment_column)
+
+    data = data.copy()
+
+    # Per-flag logging (how many rows contain each flag)
+    for flag in flags:
+        flag_mask = data[comment_column].fillna("").astype(str).str.contains(flag, regex=False)
+        n_flagged = flag_mask.sum()
+        if n_flagged > 0:
+            log.info(f"Rows with flag '{flag}': {n_flagged}")
+
+    # Identify aggregated rows (value_column or comment_column has pipes)
+    check_col = value_column if value_column in cols_with_pipe else comment_column
+    is_aggregated = data[check_col].astype(str).str.contains(sep_str, regex=False)
+
+    # Track rows to drop entirely
+    rows_to_drop = []
+    # Track rows that were modified (need stats recalculation)
+    rows_modified = []
+
+    for idx in data.index:
+        if is_aggregated.loc[idx]:
+            # Aggregated row: measurement-level filtering
+            comments = str(data.at[idx, comment_column]).split(sep_str)
+            keep_indices = []
+            for i, comment in enumerate(comments):
+                if not _measurement_has_flag(comment, flags):
+                    keep_indices.append(i)
+
+            if len(keep_indices) == 0:
+                # All measurements flagged -> remove row
+                rows_to_drop.append(idx)
+            elif len(keep_indices) < len(comments):
+                # Partial filtering: keep only clean measurements
+                for col in cols_with_pipe:
+                    col_values = str(data.at[idx, col]).split(sep_str)
+                    if len(col_values) >= len(comments):
+                        new_values = [col_values[i] for i in keep_indices]
+                        data.at[idx, col] = sep_str.join(new_values)
+                rows_modified.append(idx)
+            # else: all clean, no change needed
+        else:
+            # Non-aggregated row: row-level filtering
+            comment = str(data.at[idx, comment_column]) if pd.notna(data.at[idx, comment_column]) else ""
+            if _measurement_has_flag(comment, flags):
+                rows_to_drop.append(idx)
+
+    n_removed = len(rows_to_drop)
+    n_pruned = len(rows_modified)
+    n_total = n_removed + n_pruned
+    if n_removed > 0:
+        log.info(f"Rows fully removed (all measurements flagged): {n_removed}")
+    if n_pruned > 0:
+        log.info(f"Rows with individual measurements pruned: {n_pruned}")
+    if n_total > 0:
+        log.info(f"Total rows affected: {n_total}/{len(data)} ({n_total / len(data) * 100:.1f}%)")
+
+    data = data.drop(index=rows_to_drop)
+
+    if len(data) == 0:
+        return data.reset_index(drop=True)
+
+    # Recalculate stats for modified rows (and all aggregated rows for consistency)
+    if rows_modified:
+        use_geometric = value_column == "pchembl_value"
+        data = assign_stats(data, value_col=value_column, use_geometric=use_geometric)
+
+    return data.reset_index(drop=True)
+
+
+def _measurement_has_flag(comment: str, flags: list[str]) -> bool:
+    """Check if a single measurement's comment matches any of the given flags.
+
+    Uses substring matching, consistent with filter_dropping_flags semantics.
+
+    Args:
+        comment: Comment string for a single measurement.
+        flags: List of flag patterns to check.
+
+    Returns:
+        True if any flag is found in the comment.
+    """
+    if not comment or comment == "nan":
+        return False
+    for flag in flags:
+        if flag in comment:
+            return True
+    return False
+
+
 def resolve_annotation_errors(
     data: pd.DataFrame,
     strategy: str = "first",
@@ -622,6 +755,7 @@ def plot_subset(
     subset: pd.DataFrame,
     title: str = "",
     color: str = "slategray",
+    alpha: float = 0.3,
     figsize: Tuple[float, float] = (5, 5),
     value_column: str = "pchembl_value",
     log_transform: bool = False,
@@ -637,6 +771,7 @@ def plot_subset(
         subset: DataFrame with {value_column}_x and {value_column}_y columns.
         title: Plot title.
         color: Color for scatter points.
+        alpha: Transparency for scatter points.
         figsize: Figure size as (width, height) tuple.
         value_column: Base name of the value column (without _x/_y suffix).
             Defaults to "pchembl_value".
@@ -683,7 +818,7 @@ def plot_subset(
     ax.scatter(
         xp,
         yp,
-        alpha=0.3,
+        alpha=alpha,
         edgecolors="none",
         color=color,
     )
@@ -829,10 +964,9 @@ def build_query_string(comment: str, value_column: str = "pchembl_value") -> str
     if comment == DroppingComment.DATA_VALIDITY_COMMENT.value:
         return f"dropping_comment.str.contains('{comment}', regex=False)"
 
-    # For other dropping comments, exclude processing comments and Data Validity Comment
+    # For other dropping comments, exclude Data Validity Comment
     return (
         f"dropping_comment.str.contains('{comment}', regex=False) & "
-        "processing_comment == '' & "
         "~dropping_comment.str.contains('Data Validity Comment Present', regex=False)"
     )
 
@@ -850,6 +984,7 @@ def plot_multi_panel_comparability(
     axis_limits: Optional[Tuple[float, float]] = None,
     reference_lines: bool = True,
     units: Optional[str] = None,
+    alpha: float = 0.3,
 ) -> Tuple[plt.Figure, np.ndarray]:
     """Create multi-panel plot showing comparability for different data quality flags.
 
@@ -969,7 +1104,7 @@ def plot_multi_panel_comparability(
         ax.scatter(
             xp,
             yp,
-            alpha=0.3,
+            alpha=alpha,
             edgecolors="none",
             label=title_str,
             color=color,
