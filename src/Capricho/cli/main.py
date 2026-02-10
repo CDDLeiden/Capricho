@@ -75,7 +75,7 @@ app = typer.Typer(
     name="CAPRICHO",
     help="A ChEMBL data curator that flags questionable entries instead of silently dropping them.",
     no_args_is_help=True,
-    rich_markup_mode="markdown",
+    rich_markup_mode=None,
     context_settings={"help_option_names": ["--help", "-h"], "max_content_width": 88},
     pretty_exceptions_enable=False,
     pretty_exceptions_show_locals=False,
@@ -132,6 +132,11 @@ class CompoundIdColumn(str, Enum):
 class AggregationColumn(str, Enum):
     pchembl_value = "pchembl_value"
     standard_value = "standard_value"
+
+
+class ExploreFormat(str, Enum):
+    markdown = "markdown"
+    csv = "csv"
 
 
 @app.callback()
@@ -196,6 +201,18 @@ def explore(
         ),
     ] = None,
     query: Annotated[Optional[str], typer.Option("--query", "-q", help="Run a custom SQL query.")] = None,
+    fmt: Annotated[
+        ExploreFormat,
+        typer.Option("--format", "-f", help="Console output format for tables."),
+    ] = ExploreFormat.markdown,
+    output_path: Annotated[
+        Optional[Path],
+        typer.Option("--output", "-o", help="Save primary result DataFrame to file (format from extension)."),
+    ] = None,
+    colorize: Annotated[
+        bool,
+        typer.Option("--colorize/--no-colorize", help="ANSI color cycling on console table rows."),
+    ] = False,
 ):
     """
     Explore the downloaded ChEMBL SQL database.
@@ -211,6 +228,9 @@ def explore(
         table=table,
         search_column=search_column,
         query=query,
+        fmt=fmt.value,
+        output_path=output_path,
+        colorize=colorize,
     )
     raise typer.Exit()
 
@@ -1074,7 +1094,6 @@ def prepare_data(
                 import matplotlib.pyplot as plt
 
                 from ..analysis import plot_subset
-
                 from ..core.pandas_helper import filter_dropping_flags
 
                 if flags_to_remove:

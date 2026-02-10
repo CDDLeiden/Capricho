@@ -1,8 +1,13 @@
 """Explore the ChEMBL database schema without loading the entire database."""
 
+from pathlib import Path
+from typing import Optional
+
 import chembl_downloader
 import pandas as pd
 
+from ...core.pandas_helper import save_dataframe
+from ...core.table_format import format_dataframe
 from .downloader import check_and_download_chembl_db
 
 
@@ -114,38 +119,25 @@ def list_all_tables(conn):
 
 
 def explore_table(conn, table_name):
-    """Explore a specific table in detail."""
-    try:
-        # Get table structure
-        columns = get_table_info(conn, table_name)
+    """Explore a specific table and return structured data.
 
-        # Get row count
-        count = get_table_counts(conn, table_name)
+    Returns:
+        dict with keys: table_name, count, columns (DataFrame),
+        relationships (DataFrame or None), sample (DataFrame).
+    """
+    columns = get_table_info(conn, table_name)
+    count = get_table_counts(conn, table_name)
+    sample = get_sample_data(conn, table_name)
+    relationships_list = find_related_tables(conn, table_name)
+    rel_df = pd.DataFrame(relationships_list) if relationships_list else None
 
-        # Get sample data
-        sample = get_sample_data(conn, table_name)
-
-        # Get relationships
-        relationships = find_related_tables(conn, table_name)
-
-        # Print table information
-        print(f"\n{'='*80}")
-        print(f"TABLE: {table_name} ({count:,} rows)")
-        print(f"{'='*80}")
-
-        print("\nCOLUMNS:")
-        print(columns.to_markdown(index=False))
-
-        if relationships:
-            print("\nRELATIONSHIPS:")
-            rel_df = pd.DataFrame(relationships)
-            print(rel_df.to_markdown(index=False))
-
-        print("\nSAMPLE DATA:")
-        print(sample.to_markdown(index=False))
-
-    except Exception as e:
-        print(f"Error exploring table {table_name}: {str(e)}")
+    return {
+        "table_name": table_name,
+        "count": count,
+        "columns": columns,
+        "relationships": rel_df,
+        "sample": sample,
+    }
 
 
 def explorer_main(
@@ -154,40 +146,70 @@ def explorer_main(
     table: str = None,
     search_column: str = None,
     query: str = None,
+    fmt: str = "markdown",
+    output_path: Optional[Path] = None,
+    colorize: bool = False,
 ):
     """Main function for the ChEMBL schema explorer. This function is called by the CLI script.
     For a visual overview of the lastest ChEMBL database schema, consider checking the official
     ChEMBL schema diagram: https://www.ebi.ac.uk/chembl/db_schema
 
     Args:
+        version: ChEMBL version to use. Defaults to None (latest).
         list_tables: list all tables in the database and exit. Defaults to False.
         table: explore a specific table. Defaults to None.
         search_column: search for columns containing a specific pattern. Defaults to None.
         query: execute a custom SQL query. Defaults to None.
+        fmt: console output format (markdown, csv, plain, grid). Defaults to "markdown".
+        output_path: optional file path to save the primary DataFrame. Defaults to None.
+        colorize: apply ANSI color cycling to console rows. Defaults to False.
     """
+    primary_df = None
     configs = check_and_download_chembl_db(version=version)
     with chembl_downloader.connect(version=configs["version"], prefix=configs["prefix"]) as conn:
         if list_tables:
             tables_df = list_all_tables(conn)
+            primary_df = tables_df
             print("\nTABLES IN CHEMBL DATABASE:")
-            print(tables_df.to_markdown(index=False))
+            print(format_dataframe(tables_df, fmt, colorize))
 
         elif table:
-            explore_table(conn, table)
+            try:
+                info = explore_table(conn, table)
+                primary_df = info["columns"]
+
+                print(f"\n{'='*80}")
+                print(f"TABLE: {info['table_name']} ({info['count']:,} rows)")
+                print(f"{'='*80}")
+
+                print("\nCOLUMNS:")
+                print(format_dataframe(info["columns"], fmt, colorize))
+
+                if info["relationships"] is not None:
+                    print("\nRELATIONSHIPS:")
+                    print(format_dataframe(info["relationships"], fmt, colorize))
+
+                print("\nSAMPLE DATA:")
+                print(format_dataframe(info["sample"], fmt, colorize))
+            except Exception as e:
+                print(f"Error exploring table {table}: {str(e)}")
 
         elif search_column:
             results = search_tables_for_column(conn, search_column)
             if results:
+                results_df = pd.DataFrame(results)
+                primary_df = results_df
                 print(f"\nTables containing columns matching '{search_column}':")
-                print(pd.DataFrame(results).to_markdown(index=False))
+                print(format_dataframe(results_df, fmt, colorize))
             else:
                 print(f"No columns found matching '{search_column}'")
 
         elif query:
             try:
                 result = pd.read_sql(query, conn)
+                primary_df = result
                 print("\nQuery Result:")
-                print(result.to_markdown(index=False))
+                print(format_dataframe(result, fmt, colorize))
             except Exception as e:
                 print(f"Error executing query: {str(e)}")
 
@@ -196,14 +218,13 @@ def explorer_main(
             print("\nChEMBL DATABASE OVERVIEW")
             print("=" * 80)
 
-            # Get tables and their counts
             tables_df = list_all_tables(conn)
+            top_20 = tables_df.head(20)
+            primary_df = top_20
 
-            # Print top 20 tables by row count
             print("\nTop 20 tables by row count:")
-            print(tables_df.head(20).to_markdown(index=False))
+            print(format_dataframe(top_20, fmt, colorize))
 
-            # Suggest some common tables to explore
             print("\nSuggested tables to explore:")
             suggestions = [
                 "molecule_dictionary - Main table for chemical compounds",
@@ -218,8 +239,11 @@ def explorer_main(
                 print(f"  • {suggestion}")
 
             print("\nTo explore a specific table:")
-            print("  getchembl explore --table <table_name>")
+            print("  capricho explore --table <table_name>")
             print("\nTo list all tables:")
-            print("  getchembl explore --list-tables")
+            print("  capricho explore --list-tables")
             print("\nTo search for columns:")
-            print("  getchembl explore --search-column <pattern>")
+            print("  capricho explore --search-column <pattern>")
+
+    if output_path is not None and primary_df is not None:
+        save_dataframe(primary_df, output_path)
