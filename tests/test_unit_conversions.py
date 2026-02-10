@@ -116,6 +116,40 @@ class TestConvertPermeabilityUnits(unittest.TestCase):
         self.assertTrue(pd.isna(result.loc[2, "standard_units"]))
         self.assertTrue(pd.isna(result.loc[2, "conversion_factor"]))
 
+    def test_additional_permeability_unit_variants(self):
+        """Test conversion of permeability units found in MDCK-MDR1 ChEMBL data."""
+        df = pd.DataFrame(
+            {
+                "standard_value": [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 5.0],
+                "standard_units": [
+                    "1E-6 cm/s",       # equivalent to 10^-6 cm/s → factor 1.0
+                    "10'-5cm/s",       # 10^-5 cm/s = 10 × 10^-6 cm/s → factor 10.0
+                    "10'-5 cm/s",      # same with space
+                    "10^-5 cm/s",      # caret notation
+                    "10^-5cm/s",       # caret no space
+                    "10-6 cm/s",       # missing exponent marker, 10^-6 → factor 1.0
+                    "10'-8m/s",        # 10^-8 m/s = 10^-6 cm/s → factor 1.0
+                    "10'-9meter/s",    # 10^-9 m/s = 10^-7 cm/s → factor 0.1
+                ],
+            }
+        )
+
+        result = convert_permeability_units(df)
+
+        # All should be converted to 10^-6 cm/s
+        for i in range(len(result)):
+            self.assertEqual(result.loc[i, "standard_units"], "10^-6 cm/s", f"Row {i} unit not converted")
+
+        # Check correct conversion factors
+        self.assertEqual(result.loc[0, "standard_value"], 5.0)    # 1E-6: factor 1.0
+        self.assertEqual(result.loc[1, "standard_value"], 50.0)   # 10'-5cm/s: factor 10.0
+        self.assertEqual(result.loc[2, "standard_value"], 50.0)   # 10'-5 cm/s: factor 10.0
+        self.assertEqual(result.loc[3, "standard_value"], 50.0)   # 10^-5 cm/s: factor 10.0
+        self.assertEqual(result.loc[4, "standard_value"], 50.0)   # 10^-5cm/s: factor 10.0
+        self.assertEqual(result.loc[5, "standard_value"], 5.0)    # 10-6 cm/s: factor 1.0
+        self.assertEqual(result.loc[6, "standard_value"], 5.0)    # 10'-8m/s: factor 1.0
+        self.assertAlmostEqual(result.loc[7, "standard_value"], 0.5, places=6)  # 10'-9meter/s: factor 0.1
+
     def test_case_insensitive_units(self):
         """Test that unit matching is case-insensitive."""
         df = pd.DataFrame({"standard_value": [1.0, 1.0], "standard_units": ["CM/S", "Cm/s"]})
