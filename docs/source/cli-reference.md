@@ -125,17 +125,16 @@ Control which bioactivity data to include:
 | `-maso`, `--min-assay-overlap` | Minimum overlapping compounds between assays | `0` |
 
 #### Confidence Scores
-ChEMBL assigns confidence scores from 0-9:
-- **9**: Direct single protein target
-- **8**: Direct protein complex/family target  
-- **7**: Direct target with homologues
-- **6**: Molecular target assigned
-- **5**: Non-molecular target assigned
-- **4**: Subcellular target assigned
-- **3**: Cell-line target assigned
-- **2**: Tissue target assigned
-- **1**: Organism target assigned
-- **0**: Unchecked data
+ChEMBL assigns confidence scores from 0-9 based on target assignment certainty:
+- **9**: Direct single protein target assigned
+- **8**: Homologous single protein target assigned
+- **7**: Direct protein complex subunits assigned
+- **6**: Homologous protein complex subunits assigned
+- **5**: Multiple direct protein targets may be assigned (e.g., PROTEIN FAMILY)
+- **4**: Multiple homologous protein targets may be assigned (e.g., PROTEIN FAMILY)
+- **3**: Target assigned is molecular non-protein target
+- **1**: Target assigned is non-molecular
+- **0**: Default value - Target assignment has yet to be curated
 
 #### Bioactivity Types
 Common bioactivity measurements:
