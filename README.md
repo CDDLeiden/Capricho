@@ -22,9 +22,11 @@ The development of CAPRICHO is guided by two core principles:
 ## ✨ Features:
 
 - Data retrieval by any ChEMBL identifier (molecule IDs, target IDs, assay IDs, or document IDs)
-- Automated pChEMBL (pXC50) value calculation for bioactivities if not provided through ChEMBL
-- Customizable filtering options
+- ADMET data curation support with unit conversion and non-pChEMBL aggregation
+- Quality control through data flagging — never silently drops data
+- Customizable filtering options with max curation standards introduced by [Landrum & Riniker (2024)](https://doi.org/10.1021/acs.jcim.4c00049)
 - Configurable data aggregation options
+- Binary classification support with censored data handling
 - Save a fetching and processing recipe for reproducibility
 - Command-line interface for easy use
 
@@ -84,10 +86,12 @@ capricho --install-completion
 For comprehensive documentation including detailed CLI options, advanced usage, tutorials, and API reference, visit our [full documentation](docs/).
 
 **Quick Links:**
-- [Installation Guide](docs/installation.md)
-- [CLI Reference](docs/cli-reference.md) 
-- [Tutorials](docs/tutorials/)
-- [API Reference](docs/api/)
+- [Installation Guide](docs/source/installation.md)
+- [Quick Start](docs/source/quickstart.md)
+- [CLI Reference](docs/source/cli-reference.md)
+- [Key Concepts](docs/source/concepts.md)
+- [ADMET Data Guide](docs/source/guides/admet-data.md)
+- [API Reference](docs/source/api/index.md)
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

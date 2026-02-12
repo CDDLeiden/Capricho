@@ -179,5 +179,5 @@ The main data file contains these important columns:
 ## Next Steps
 
 - Read the [CLI Reference](cli-reference.md) for complete parameter documentation
-- Check out [Tutorials](tutorials/index.md) for specific use cases
 - Learn about [Key Concepts](concepts.md) like compound equality and backends
+- See the [ADMET Data Guide](guides/admet-data.md) for working with ADMET endpoints
