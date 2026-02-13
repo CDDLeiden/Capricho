@@ -82,21 +82,26 @@ def clean_data(
         )
 
     df = df.copy()
+    input_rows = len(df)
+
+    # Track steps for summary
+    dedup_removed = 0
+    annotation_removed = 0
+    rows_after_dedup = input_rows
+    rows_after_annotation = input_rows
 
     # Step 1: Deduplicate
     if deduplicate:
         logger.info("Deduplicating identical values within aggregated rows...")
-        initial_total = df[value_col].apply(
-            lambda x: len(str(x).split("|")) if pd.notna(x) else 0
-        ).sum()
+        initial_total = df[value_col].apply(lambda x: len(str(x).split("|")) if pd.notna(x) else 0).sum()
         df = deduplicate_aggregated_values(df, value_column=value_col)
-        final_total = df[value_col].apply(
-            lambda x: len(str(x).split("|")) if pd.notna(x) else 0
-        ).sum()
-        logger.info(f"Deduplication removed {initial_total - final_total} duplicate values")
+        final_total = df[value_col].apply(lambda x: len(str(x).split("|")) if pd.notna(x) else 0).sum()
+        dedup_removed = initial_total - final_total
+        logger.info(f"Deduplication removed {dedup_removed} duplicate values")
 
         logger.info("Recalculating statistics after deduplication...")
         df = assign_stats(df, value_col=value_col, use_geometric=(value_col == "pchembl_value"))
+        rows_after_dedup = len(df)
 
     # Step 2: Resolve annotation errors
     if resolve_annotation_error is not None:
@@ -111,8 +116,8 @@ def clean_data(
             strategy=resolve_annotation_error,
             value_col=value_col,
         )
-        removed_count = len(exploded) - len(resolved)
-        logger.info(f"Removed {removed_count} measurements due to annotation error resolution")
+        annotation_removed = len(exploded) - len(resolved)
+        logger.info(f"Removed {annotation_removed} measurements due to annotation error resolution")
 
         # Re-aggregate the data
         from .chembl_data_pipeline import re_aggregate_data
@@ -134,10 +139,29 @@ def clean_data(
             compound_equality="connectivity",
         )
         logger.info(f"Re-aggregated to {len(df)} rows")
+        rows_after_annotation = len(df)
 
     # Step 3: Drop flags (measurement-level for aggregated data)
+    rows_before_flags = len(df)
     if drop_flags:
         df = filter_aggregated_dropping_flags(df, drop_flags, value_column=value_col)
+
+    # Log consolidated summary
+    lines = ["", "PREPARATION SUMMARY"]
+    lines.append(f"  Input rows:                {input_rows:>8,}")
+    if deduplicate:
+        lines.append(
+            f"  After deduplication:       {rows_after_dedup:>8,}  (removed {dedup_removed} duplicate values)"
+        )
+    if resolve_annotation_error is not None:
+        lines.append(
+            f"  After annotation resolution:{rows_after_annotation:>7,}  (removed {annotation_removed} measurements)"
+        )
+    if drop_flags:
+        rows_removed_by_flags = rows_before_flags - len(df)
+        lines.append(f"  After flag filtering:      {len(df):>8,}  (removed {rows_removed_by_flags} rows)")
+    lines.append(f"  Final rows:                {len(df):>8,}")
+    logger.info("\n".join(lines))
 
     return df
 
@@ -230,8 +254,18 @@ def prepare_multitask_data(
         smiles_map = df.groupby(compound_col)[smiles_col].first()
         activity_matrix[smiles_col] = smiles_map
 
+    # Compute sparsity (fraction of NaN cells, excluding smiles column)
+    task_cols = [c for c in activity_matrix.columns if c != smiles_col]
+    if task_cols:
+        n_cells = activity_matrix[task_cols].size
+        n_missing = activity_matrix[task_cols].isna().sum().sum()
+        sparsity = n_missing / n_cells * 100 if n_cells > 0 else 0.0
+    else:
+        sparsity = 0.0
+
     logger.info(
-        f"Activity matrix shape: {activity_matrix.shape[0]} compounds x {activity_matrix.shape[1]} columns"
+        f"Activity matrix: {activity_matrix.shape[0]} compounds x {len(task_cols)} tasks "
+        f"(sparsity: {sparsity:.1f}%)"
     )
 
     return activity_matrix

@@ -46,6 +46,92 @@ from ..logger import logger
 
 # when aggregated, some `activity_id` values will be strings and sorting won't work properly
 AGGREGATE_SAVE_SORTED_BY = ["target_chembl_id", "assay_chembl_id"]
+
+
+def _count_flags(df: pd.DataFrame, column: str) -> dict[str, int]:
+    """Count individual flags in an & -separated flag column.
+
+    Splits each cell by " & " and normalizes dynamic patterns (e.g., "Assay size < 20"
+    becomes "Assay size <") before counting.
+
+    Args:
+        df: DataFrame containing the flag column.
+        column: Name of the column to count flags from.
+
+    Returns:
+        Dict mapping normalized flag patterns to their counts.
+    """
+    from ..analysis import normalize_comment_pattern
+
+    counts: dict[str, int] = {}
+    for cell in df[column].fillna("").astype(str):
+        if not cell or cell == "nan":
+            continue
+        for flag in cell.split(" & "):
+            flag = flag.strip()
+            if not flag:
+                continue
+            normalized = normalize_comment_pattern(flag)
+            counts[normalized] = counts.get(normalized, 0) + 1
+    return counts
+
+
+def _log_pipeline_summary(
+    df: pd.DataFrame,
+    pre_aggregation_count: int,
+    post_aggregation_count: int,
+) -> None:
+    """Log a structured summary of the pipeline run.
+
+    Args:
+        df: The pre-aggregation DataFrame (one row per measurement).
+        pre_aggregation_count: Total rows fetched before any processing.
+        post_aggregation_count: Rows after aggregation.
+    """
+    lines = ["", "PIPELINE SUMMARY"]
+
+    lines.append(f"  Rows fetched:              {pre_aggregation_count:>8,}")
+    lines.append(f"  Rows after aggregation:    {post_aggregation_count:>8,}")
+
+    if len(df) > 0:
+        # Pre-aggregation df uses molecule_chembl_id; post-aggregation uses connectivity
+        cpd_col = "connectivity" if "connectivity" in df.columns else MOLECULE_ID
+        n_compounds = df[cpd_col].nunique() if cpd_col in df.columns else 0
+        n_targets = df[TARGET_ID].nunique() if TARGET_ID in df.columns else 0
+        n_assays = df[ASSAY_ID].nunique() if ASSAY_ID in df.columns else 0
+        lines.append(f"  Unique compounds:          {n_compounds:>8,}")
+        lines.append(f"  Unique targets:            {n_targets:>8,}")
+        lines.append(f"  Unique assays:             {n_assays:>8,}")
+
+    total = len(df)
+
+    # Quality flags (data_dropping_comment)
+    if DATA_DROPPING_COMMENT in df.columns and total > 0:
+        drop_counts = _count_flags(df, DATA_DROPPING_COMMENT)
+        lines.append("")
+        lines.append("  QUALITY FLAGS (data_dropping_comment)")
+        if drop_counts:
+            for flag, count in sorted(drop_counts.items(), key=lambda x: -x[1]):
+                pct = count / total * 100
+                lines.append(f"    {flag + ':':<45s} {count:>6,}  ({pct:5.1f}%)")
+        else:
+            lines.append("    (none)")
+
+    # Processing flags (data_processing_comment)
+    if DATA_PROCESSING_COMMENT in df.columns and total > 0:
+        proc_counts = _count_flags(df, DATA_PROCESSING_COMMENT)
+        lines.append("")
+        lines.append("  PROCESSING FLAGS (data_processing_comment)")
+        if proc_counts:
+            for flag, count in sorted(proc_counts.items(), key=lambda x: -x[1]):
+                pct = count / total * 100
+                lines.append(f"    {flag + ':':<45s} {count:>6,}  ({pct:5.1f}%)")
+        else:
+            lines.append("    (none)")
+
+    logger.info("\n".join(lines))
+
+
 # after the workflow, `activity_id` is an integer, so we can sort by it to ensure consistent
 # ordering on the aggregated datapoints -> assay1|assay2|...|assayN,activity_id1|...|activity_idN
 WORKFLOW_SAVE_SORTED_BY = [*AGGREGATE_SAVE_SORTED_BY, "activity_id"]

@@ -751,6 +751,50 @@ def format_axis_label(
     return " ".join(parts)
 
 
+def _log_comparability_metrics(
+    xp: np.ndarray,
+    yp: np.ndarray,
+    label: str = "",
+    is_log_scale: bool = True,
+) -> None:
+    """Log quantitative comparability metrics for pairwise assay comparisons.
+
+    For log-scale data (pChEMBL or -log10 transformed), reports the fraction of
+    pairs within ±0.3 and ±1.0 log units. For all data, reports Spearman rho
+    and R².
+
+    Args:
+        xp: Array of x-values (possibly log-transformed).
+        yp: Array of y-values (possibly log-transformed).
+        label: Description of the data subset (e.g., flag name).
+        is_log_scale: If True, compute ±0.3/±1.0 statistics.
+    """
+    n = len(xp)
+    if n == 0:
+        return
+
+    abs_diff = np.abs(np.asarray(xp) - np.asarray(yp))
+
+    try:
+        rho, _ = stats.spearmanr(xp, yp)
+        r2 = r2_score(xp, yp)
+    except ValueError:
+        return
+
+    lines = [f"COMPARABILITY: {label} — {n:,} pairwise comparisons"]
+
+    if is_log_scale:
+        within_03 = int(np.sum(abs_diff <= 0.3))
+        within_10 = int(np.sum(abs_diff <= 1.0))
+        outside_10 = n - within_10
+        lines.append(f"  Within ±0.3 log units: {within_03:>8,} ({within_03 / n * 100:5.1f}%)")
+        lines.append(f"  Within ±1.0 log units: {within_10:>8,} ({within_10 / n * 100:5.1f}%)")
+        lines.append(f"  Outside ±1.0 log units:{outside_10:>8,} ({outside_10 / n * 100:5.1f}%)")
+
+    lines.append(f"  Spearman rho: {rho:.3f}  |  R²: {r2:.3f}")
+    log.info("\n".join(lines))
+
+
 def plot_subset(
     subset: pd.DataFrame,
     title: str = "",
@@ -867,6 +911,10 @@ def plot_subset(
         verticalalignment="top",
         horizontalalignment="right",
     )
+
+    # Log quantitative comparability metrics
+    is_log = value_column == "pchembl_value" or log_transform
+    _log_comparability_metrics(xp.values, yp.values, label=title or "Overall", is_log_scale=is_log)
 
     # Determine axis labels
     if axis_label is not None:
@@ -1141,6 +1189,10 @@ def plot_multi_panel_comparability(
             verticalalignment="top",
             horizontalalignment="right",
         )
+
+        # Log per-panel comparability metrics
+        is_log = value_column == "pchembl_value" or log_transform
+        _log_comparability_metrics(xp.values, yp.values, label=title_str, is_log_scale=is_log)
 
         if idx in [1, ncols + 1]:
             ax.set_ylabel(f"Assay 2 {label_base}")

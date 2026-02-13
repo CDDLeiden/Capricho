@@ -545,7 +545,11 @@ def get_data(
     import numpy as np
     from chembl_downloader import latest
 
-    from .chembl_data_pipeline import aggregate_data, get_standardize_and_clean_workflow
+    from .chembl_data_pipeline import (
+        _log_pipeline_summary,
+        aggregate_data,
+        get_standardize_and_clean_workflow,
+    )
 
     if not output_path.parent.exists():
         output_path.mkdir()
@@ -571,7 +575,7 @@ def get_data(
             "Some%20duplicates%20were,for%20kinetic%20solubility."
         )
 
-    df = get_standardize_and_clean_workflow(
+    pre_agg_df = get_standardize_and_clean_workflow(
         molecule_ids=molecule_ids or [],
         target_ids=target_ids or [],
         assay_ids=assay_ids or [],
@@ -598,9 +602,10 @@ def get_data(
         value_col=aggregate_on.value,
         enable_unit_conversion=convert_units,
     )
+    pre_agg_count = len(pre_agg_df)
 
     df = aggregate_data(
-        df=df,
+        df=pre_agg_df,
         chirality=chirality,
         extra_multival_cols=metadata_columns,
         extra_id_cols=id_columns,
@@ -609,6 +614,8 @@ def get_data(
         compound_equality=compound_equality.value,
         value_col=aggregate_on.value,
     )
+
+    _log_pipeline_summary(pre_agg_df, pre_aggregation_count=pre_agg_count, post_aggregation_count=len(df))
 
     if not skip_recipe:
         output_name = output_path.stem.split(".")[0]
