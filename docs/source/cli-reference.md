@@ -415,6 +415,8 @@ capricho binarize [OPTIONS]
 | `-rel`, `--relation-col` | Column name for standard_relation values | `standard_relation` |
 | `-bcol`, `--binary-col` | Name for the output binary column | `activity_binary` |
 | `-cmp-mut`, `--compare-across-mutants` | Compare measurements across mutants for conflicts | `False` |
+| `-rp`, `--conflict-report-path` | Path to save detailed conflict report as JSON | `None` |
+| `-cr`, `--conflict-resolution` | Strategy for resolving conflicts: `drop`, `relation`, `confidence`, `majority` | `None` |
 
 ### Understanding pChEMBL Thresholds
 
@@ -434,13 +436,41 @@ The binarization process handles different measurement types:
 - **`<`, `<<`** (censored active): Compound is _more_ active than reported value
 - **`>`, `>>`** (censored inactive): Compound is _less_ active than reported value
 
-### Conflict Detection
+### Conflict Detection and Resolution
 
 The command flags measurements that disagree for the same compound-target pair:
 
 - **Mixed discrete/censored conflicts**: When discrete measurements (`=`, `~`) disagree with censored measurements (`<`, `>`)
 - **Binary label conflicts**: When measurements result in different activity classifications (active vs inactive)
 - **Mutation handling**: Use `--compare-across-mutants` to control whether different mutants are compared
+
+#### Conflict Resolution Strategies
+
+By default, conflicts are only flagged in `data_dropping_comment`. Use `--conflict-resolution` to automatically resolve them:
+
+| Strategy | Behavior | Fallback |
+|----------|----------|----------|
+| `drop` | Remove all rows for conflicting pairs | -- |
+| `relation` | Keep exact (`=`) rows, drop censored | Drop all if no `=` exists |
+| `confidence` | Keep row with highest `confidence_score` | Drop all on tie |
+| `majority` | Classify each individual measurement against the threshold; majority label wins | Drop all on tie |
+
+The `majority` strategy splits the pipe-separated raw values (e.g., `pchembl_value = "6.0|6.5|7.0"`) and classifies each individual measurement against the threshold. Each measurement gets one vote. This means a row whose mean is above the threshold but contains individual values below it will contribute some inactive votes. When the raw value column is not present, falls back to count-weighted or row-based voting.
+
+```bash
+# Resolve conflicts by keeping exact measurements
+capricho binarize -i data.csv -o binary.csv -t 7.0 -cr relation
+
+# Resolve by measurement-weighted majority vote, save report
+capricho binarize -i data.csv -o binary.csv -t 7.0 -cr majority -rp conflicts.json
+```
+
+#### Conflict Report
+
+Use `-rp` / `--conflict-report-path` to save a JSON report with:
+
+- **Summary**: Total conflicts, conflict patterns (exact vs censored), active/inactive counts, MCC, resolution summary
+- **Per-conflict details**: Measurements, vote summary, severity (low/medium/high based on measurement spread), recommendation, resolution outcome
 
 #### Compound Identifiers for Conflict Detection
 
@@ -491,6 +521,25 @@ capricho binarize \
   --compare-across-mutants
 ```
 
+#### Resolve Conflicts and Generate Report
+```bash
+# Keep exact measurements, drop censored when they conflict
+capricho binarize \
+  -i egfr_data.csv \
+  -o egfr_binary.csv \
+  -t 7.0 \
+  -cr relation \
+  -rp conflict_report.json
+
+# Measurement-weighted majority vote
+capricho binarize \
+  -i egfr_data.csv \
+  -o egfr_binary.csv \
+  -t 7.0 \
+  -cr majority \
+  -rp conflict_report.json
+```
+
 ### Understanding pchembl_relation
 
 The output file includes a `pchembl_relation` column that adjusts the standard_relation signs for the -log scale used in pChEMBL values. This makes it easier to interpret activity thresholds:
@@ -517,3 +566,14 @@ The output file contains all original columns plus:
 - **Conflict flags**: Rows with disagreeing measurements are flagged in the `data_dropping_comment` column
 
 Conflicting measurements are logged with detailed information about the disagreement.
+
+#### Post-Resolution Deduplication
+
+When a conflict resolution strategy is active (`-cr`), compound-target pairs are deduplicated to **one row per pair**. During deduplication:
+
+- Individual measurements that disagree with the resolved binary label are filtered out from all pipe-separated columns
+- Rows for the same compound-target pair are merged, concatenating their source values
+- The `standard_relation` column becomes pipe-separated to match per-measurement relations (e.g., `"=|=|<"`)
+- Statistics (`*_mean`, `*_std`, `*_median`, `*_counts`) are recalculated from the kept measurements only
+
+The resulting `pchembl_value` and `standard_relation` columns serve as a register of source values that compose the binarized label.

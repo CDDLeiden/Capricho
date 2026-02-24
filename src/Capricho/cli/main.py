@@ -134,6 +134,13 @@ class AggregationColumn(str, Enum):
     standard_value = "standard_value"
 
 
+class ConflictResolution(str, Enum):
+    drop = "drop"
+    relation = "relation"
+    confidence = "confidence"
+    majority = "majority"
+
+
 class ExploreFormat(str, Enum):
     markdown = "markdown"
     csv = "csv"
@@ -750,10 +757,22 @@ def binarize_data(
     conflict_report_path: Annotated[
         Path | None,
         typer.Option(
-            "-cr",
+            "-rp",
             "--conflict-report-path",
             help="Optional path to save detailed conflict report as JSON for interactive analysis.",
             metavar="path",
+        ),
+    ] = None,
+    conflict_resolution: Annotated[
+        ConflictResolution | None,
+        typer.Option(
+            "-cr",
+            "--conflict-resolution",
+            help="Strategy for resolving binarization conflicts: "
+            "'drop' removes all conflicting rows, "
+            "'relation' keeps exact (=) and drops censored, "
+            "'confidence' keeps highest confidence_score, "
+            "'majority' keeps majority binary label vote.",
         ),
     ] = None,
 ):
@@ -803,6 +822,7 @@ def binarize_data(
         output_binary_col=output_binary_col,
         compare_across_mutants=compare_across_mutants,
         conflict_report_path=conflict_report_path,
+        conflict_resolution=conflict_resolution.value if conflict_resolution else None,
     )
 
     # Ensure out/dir exists, add proper suffix for saving and Save the binarized data.
