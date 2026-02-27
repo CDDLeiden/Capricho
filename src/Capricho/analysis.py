@@ -756,18 +756,24 @@ def _log_comparability_metrics(
     yp: np.ndarray,
     label: str = "",
     is_log_scale: bool = True,
+    rho: Optional[float] = None,
+    r2: Optional[float] = None,
+    tau: Optional[float] = None,
 ) -> None:
     """Log quantitative comparability metrics for pairwise assay comparisons.
 
     For log-scale data (pChEMBL or -log10 transformed), reports the fraction of
-    pairs within ±0.3 and ±1.0 log units. For all data, reports Spearman rho
-    and R².
+    pairs within ±0.3 and ±1.0 log units. For all data, reports Spearman rho,
+    Kendall tau, and R².
 
     Args:
         xp: Array of x-values (possibly log-transformed).
         yp: Array of y-values (possibly log-transformed).
         label: Description of the data subset (e.g., flag name).
         is_log_scale: If True, compute ±0.3/±1.0 statistics.
+        rho: Pre-computed Spearman rho. Computed from data if None.
+        r2: Pre-computed R² score. Computed from data if None.
+        tau: Pre-computed Kendall tau. Computed from data if None.
     """
     n = len(xp)
     if n == 0:
@@ -776,8 +782,12 @@ def _log_comparability_metrics(
     abs_diff = np.abs(np.asarray(xp) - np.asarray(yp))
 
     try:
-        rho, _ = stats.spearmanr(xp, yp)
-        r2 = r2_score(xp, yp)
+        if rho is None:
+            rho, _ = stats.spearmanr(xp, yp)
+        if r2 is None:
+            r2 = r2_score(xp, yp)
+        if tau is None:
+            tau, _ = stats.kendalltau(xp, yp)
     except ValueError:
         return
 
@@ -791,7 +801,7 @@ def _log_comparability_metrics(
         lines.append(f"  Within ±1.0 log units: {within_10:>8,} ({within_10 / n * 100:5.1f}%)")
         lines.append(f"  Outside ±1.0 log units:{outside_10:>8,} ({outside_10 / n * 100:5.1f}%)")
 
-    lines.append(f"  Spearman rho: {rho:.3f}  |  R²: {r2:.3f}")
+    lines.append(f"  Spearman rho: {rho:.3f}  |  Kendall tau: {tau:.3f}  |  R²: {r2:.3f}")
     log.info("\n".join(lines))
 
 
@@ -914,7 +924,7 @@ def plot_subset(
 
     # Log quantitative comparability metrics
     is_log = value_column == "pchembl_value" or log_transform
-    _log_comparability_metrics(xp.values, yp.values, label=title or "Overall", is_log_scale=is_log)
+    _log_comparability_metrics(xp.values, yp.values, label=title or "Overall", is_log_scale=is_log, rho=r, r2=r2, tau=tau)
 
     # Determine axis labels
     if axis_label is not None:
@@ -1192,7 +1202,7 @@ def plot_multi_panel_comparability(
 
         # Log per-panel comparability metrics
         is_log = value_column == "pchembl_value" or log_transform
-        _log_comparability_metrics(xp.values, yp.values, label=title_str, is_log_scale=is_log)
+        _log_comparability_metrics(xp.values, yp.values, label=title_str, is_log_scale=is_log, rho=r, r2=r2, tau=tau)
 
         if idx in [1, ncols + 1]:
             ax.set_ylabel(f"Assay 2 {label_base}")
