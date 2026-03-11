@@ -21,7 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-  "chem-filters @ git+https://github.com/David-Araripe/chemFilters.git",
+  "chem-filters >= 1.0.0",
   "chembl_webresource_client",
   "chembl_downloader",
   "tabulate",
