@@ -91,6 +91,33 @@ def flag_undefined_stereochemistry(df: pd.DataFrame) -> pd.DataFrame:
     )
 
 
+def flag_zero_values(df: pd.DataFrame, column: str = "standard_value") -> pd.DataFrame:
+    """Mark rows where the measurement value is exactly zero.
+
+    Zero values in bioactivity measurements are typically data quality issues -
+    they may represent values below the limit of detection, data entry errors,
+    or rounding artifacts. This flag helps identify such problematic data points.
+
+    Args:
+        df: DataFrame to process.
+        column: Column name to check for zero values. Defaults to "standard_value".
+
+    Returns:
+        DataFrame with zero-value rows flagged in data_dropping_comment.
+    """
+    if column not in df.columns:
+        logger.debug(f"Column '{column}' not found. Skipping zero value flagging.")
+        return df
+
+    return add_comment(
+        df,
+        comment="Zero Value",
+        criteria_func=lambda x: x == 0,
+        target_column=column,
+        comment_type="d",
+    )
+
+
 def flag_min_assay_size(df: pd.DataFrame, min_assay_size: int = 0) -> pd.DataFrame:
     """Mark assays for removal based on size lower than the specified minimum assay size."""
     assert min_assay_size >= 0, "Minimum assay size must be a non-negative integer."
@@ -111,8 +138,12 @@ def flag_min_assay_size(df: pd.DataFrame, min_assay_size: int = 0) -> pd.DataFra
         )
 
 
-def flag_max_assay_size(df: pd.DataFrame, max_assay_size: int = 1000) -> pd.DataFrame:
+def flag_max_assay_size(df: pd.DataFrame, max_assay_size: Optional[int] = None) -> pd.DataFrame:
     """Mark assays for removal based on size greater than the specified maximum assay size."""
+    if max_assay_size is None:
+        logger.info("Maximum assay size is not set. Skipping filtering based on maximum assay size.")
+        return df
+
     assert max_assay_size > 0, "Maximum assay size must be a positive integer."
 
     if "assay_size" not in df.columns:
@@ -247,38 +278,6 @@ def flag_incompatible_units(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def flag_patent_source(df: pd.DataFrame) -> pd.DataFrame:
-    """Mark activities that originate from patent documents.
-
-    Patent-sourced data in ChEMBL often contains annotation errors or inconsistent
-    measurements compared to peer-reviewed publications. This function flags activities
-    from patents to allow users to assess data quality differences between patent and
-    non-patent sources.
-
-    Args:
-        df: DataFrame to be processed.
-
-    Returns:
-        pd.DataFrame: DataFrame with patent-sourced activities flagged in dropping comment.
-    """
-    mask = df["doc_type"] == "PATENT"
-    num_to_flag = mask.sum()
-
-    if num_to_flag > 0:
-        logger.info(f"Flagging {num_to_flag} activities from patent sources.")
-        df = add_comment(
-            df,
-            comment="Patent source",
-            criteria_func=lambda x: x == "PATENT",
-            target_column="doc_type",
-            comment_type="d",
-        )
-    else:
-        logger.debug("No patent-sourced activities found.")
-
-    return df
-
-
 def flag_insufficient_assay_overlap(
     df: pd.DataFrame,
     min_overlap: int = 0,
@@ -292,6 +291,12 @@ def flag_insufficient_assay_overlap(
     reported in ChEMBL. Depending on the target, this filter can remove a significant
     amount of activities from the dataset, but it is useful to assess the comparability of
     the assays reported in the database.
+
+    This function calculates overlap across ALL assays regardless of size flags, following
+    CAPRICHO's principle of transparency. Overlap is only counted when:
+    1. Compounds have DIFFERENT pChEMBL values across assays (same values indicate annotation errors)
+    2. The difference is not exactly 3.0 or 6.0 log units (likely censored/inactive measurements)
+    3. Assays are from DIFFERENT documents (same-document overlaps are excluded)
 
     Args:
         df: DataFrame to be processed.
@@ -311,10 +316,12 @@ def flag_insufficient_assay_overlap(
         logger.info("min_overlap set to 0. Skipping insufficient assay overlap filtering.")
         return df
 
-    if not all(col in df.columns for col in [molecule_col, assay_col, target_col]):
+    # Check for required columns
+    required_cols = [molecule_col, assay_col, target_col, "pchembl_value", "document_chembl_id"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
         logger.warning(
-            f"One or more required columns ({molecule_col}, {assay_col}, {target_col}) "
-            "not found in DataFrame. Skipping insufficient assay overlap filtering."
+            f"Required columns missing: {missing_cols}. " "Skipping insufficient assay overlap filtering."
         )
         return df
 
@@ -325,54 +332,107 @@ def flag_insufficient_assay_overlap(
     if comment_col not in df.columns:  # Ensure comment_col exists
         df[comment_col] = pd.Series(dtype="object")
 
-    assays_to_flag_globally = set()  # Keep track of assays that are part of any failing pair
+    # Log the overlap calculation strategy
+    logger.info(
+        "Calculating assay overlap with the following criteria:\n"
+        "  - Only counting compounds with DIFFERENT pChEMBL values across assays\n"
+        "  - Excluding differences of exactly 3.0 or 6.0 log units (likely annotation errors)\n"
+        "  - Excluding overlaps within the same document"
+    )
+
+    import numpy as np
+
+    assays_to_flag_globally = set()  # Keep track of assays that don't have a compatible partner
+
+    # Filter out assays already flagged for size issues (goldilocks approach in the Landrum & Riniker paper)
+    # These assays should be skipped in overlap checking
+    size_flagged_mask = df[comment_col].notna() & df[comment_col].astype(str).str.contains(
+        r"Assay size [<>]", regex=True, na=False
+    )
+    size_flagged_assays = set(df[size_flagged_mask][assay_col].unique())
+
+    if size_flagged_assays:
+        logger.debug(
+            f"Skipping {len(size_flagged_assays)} assays already flagged for size issues in overlap checking."
+        )
 
     for target_id, group_df in df.groupby(target_col):
-        unique_assays_in_target = group_df[assay_col].unique()
-        if len(unique_assays_in_target) < 2:
-            continue  # Not enough assays for this target to form a pair
+        unique_assays = group_df[assay_col].unique()
 
-        # Create a mapping of assay_id to set of molecule_ids for this target
-        assay_to_molecules = {}
-        for assay_id in unique_assays_in_target:
-            assay_to_molecules[assay_id] = set(
-                group_df[group_df[assay_col] == assay_id][molecule_col].unique()
+        # Filter out size-flagged assays from overlap checking
+        unique_assays_to_check = [a for a in unique_assays if a not in size_flagged_assays]
+
+        if len(unique_assays_to_check) < 2:
+            continue  # Not enough non-size-flagged assays for this target to form a pair
+
+        # Only include non-size-flagged assays in the analysis
+        group_df = group_df[~group_df[assay_col].isin(size_flagged_assays)]
+
+        # Prepare data with necessary columns for vectorized operations
+        target_data = group_df[[assay_col, molecule_col, "pchembl_value", "document_chembl_id"]].copy()
+
+        # Self-join to create all pairs of (assay1, assay2) for the same molecule
+        # This finds all overlapping molecules between assays
+        pairs = target_data.merge(target_data, on=molecule_col, suffixes=("_1", "_2"))
+
+        # Filter to only keep assay1 < assay2 to avoid duplicates and self-comparisons
+        pairs = pairs[pairs[f"{assay_col}_1"] < pairs[f"{assay_col}_2"]]
+
+        # Apply filters
+        # 1. Different documents
+        pairs = pairs[pairs["document_chembl_id_1"] != pairs["document_chembl_id_2"]]
+
+        # 2. Different pChEMBL values (excluding 3.0 and 6.0 log unit differences)
+        pchembl_diff = np.abs(pairs["pchembl_value_1"] - pairs["pchembl_value_2"])
+        pairs = pairs[
+            (pairs["pchembl_value_1"] != pairs["pchembl_value_2"])
+            & (pchembl_diff != 3.0)
+            & (pchembl_diff != 6.0)
+        ]
+
+        # Count overlapping compounds per assay pair
+        overlap_counts = pairs.groupby([f"{assay_col}_1", f"{assay_col}_2"]).size()
+
+        # Find assay pairs with sufficient overlap
+        sufficient_pairs = overlap_counts[overlap_counts >= min_overlap]
+
+        # Collect all assays that have at least one compatible partner
+        assays_with_sufficient_overlap = set()
+        for (assay1, assay2), count in sufficient_pairs.items():
+            assays_with_sufficient_overlap.add(assay1)
+            assays_with_sufficient_overlap.add(assay2)
+            logger.trace(
+                f"Target {target_id}: Assays {assay1} and {assay2} have {count} compounds "
+                f"with conflicting pChEMBL values (>= {min_overlap})."
             )
 
-        # Iterate through unique pairs of assays for the current target
-        from itertools import combinations
-
-        for assay1_id, assay2_id in combinations(unique_assays_in_target, 2):
-            molecules1 = assay_to_molecules.get(assay1_id, set())
-            molecules2 = assay_to_molecules.get(assay2_id, set())
-
-            overlap_count = len(molecules1.intersection(molecules2))
-
-            if overlap_count < min_overlap:
-                assays_to_flag_globally.add(assay1_id)
-                assays_to_flag_globally.add(assay2_id)
+        # Flag assays that don't have any compatible partner (only non-size-flagged assays)
+        for assay_id in unique_assays_to_check:
+            if assay_id not in assays_with_sufficient_overlap:
+                assays_to_flag_globally.add(assay_id)
                 logger.debug(
-                    f"Target {target_id}: Assays {assay1_id} and {assay2_id} have overlap {overlap_count} "
-                    f"(less than {min_overlap}). They will be flagged."
+                    f"Target {target_id}: Assay {assay_id} has no compatible partner with >= {min_overlap} "
+                    f"overlapping compounds with conflicting pChEMBL values. Will be flagged for removal."
                 )
 
     if assays_to_flag_globally:
-        filter_mask = df[assay_col].isin(list(assays_to_flag_globally))
-        num_activities_flagged = filter_mask.sum()
         num_assays_flagged = len(assays_to_flag_globally)
-
+        comment_text = f"Insufficient assay overlap (min_overlap={min_overlap})"
         logger.info(
-            f"Flagging {num_activities_flagged} activities from {num_assays_flagged} unique assays "
-            f"that were part of pairs not meeting the minimum overlap of {min_overlap} compounds."
+            f"Flagging activities from {num_assays_flagged} unique assays "
+            f"that lack a partner with >= {min_overlap} overlapping compounds."
         )
 
-        comment_text = f"Insufficient assay overlap (min_overlap={min_overlap})"
-
-        existing_comments = df.loc[filter_mask, comment_col].fillna("")
-        new_comments = existing_comments.apply(lambda x: f"{x}; {comment_text}" if x else comment_text)
-        df.loc[filter_mask, comment_col] = new_comments
+        # Use add_comment helper for consistency
+        df = add_comment(
+            df,
+            comment=comment_text,
+            criteria_func=lambda x: x.isin(list(assays_to_flag_globally)),
+            target_column=assay_col,
+            comment_type="d",
+        )
     else:
-        logger.info(f"No assay pairs found below the minimum overlap of {min_overlap} compounds.")
+        logger.info(f"All assays have at least one partner with >= {min_overlap} overlapping compounds.")
 
     return df
 
@@ -435,7 +495,7 @@ def flag_censored_activity_comment(df: pd.DataFrame) -> pd.DataFrame:
 
         df = add_comment(
             df,
-            comment="Corrected standard_relation from '=' to '<' (censored activity_comment)",
+            comment="Corrected standard_relation from = to < (censored activity_comment)",
             criteria_func=lambda x, idxs=df[mask].index: x.index.isin(idxs),
             target_column="activity_comment",
             comment_type="p",
@@ -550,3 +610,72 @@ def flag_inter_document_duplication(
     else:
         logger.debug("No inter-document duplicates found among discrete measurements.")
         return df
+
+
+def flag_unit_conversion(df: pd.DataFrame) -> pd.DataFrame:
+    """Mark rows where unit conversion was applied to standardize measurements.
+
+    This function flags activities that had their standard_value and standard_units
+    converted to a common unit by unit conversion functions (e.g., convert_permeability_units,
+    convert_molar_concentration_units, etc.). The conversion_factor column (added during
+    conversion) is used to identify which rows were converted.
+
+    If an 'original_unit' column exists (added by newer conversion functions), it will be
+    used to create a more informative comment showing the original -> target unit transformation.
+    Both conversion_factor and original_unit columns are removed after flagging.
+
+    This is a processing flag (comment_type='p') to document data transformations
+    for transparency.
+
+    Args:
+        df: DataFrame to be processed. Must contain 'conversion_factor' column
+            if unit conversion was applied. May optionally contain 'original_unit'
+            for more detailed flagging.
+
+    Returns:
+        pd.DataFrame: DataFrame with converted rows flagged in data_processing_comment.
+            The conversion_factor and original_unit columns are removed after flagging.
+    """
+    if "conversion_factor" not in df.columns:
+        logger.debug("Column 'conversion_factor' not found. Skipping unit conversion flagging.")
+        return df
+
+    mask = df["conversion_factor"].notna()
+    num_converted = mask.sum()
+
+    if num_converted > 0:
+        logger.info(f"Flagging {num_converted} activities with converted units.")
+
+        # Check if we have original_unit and standard_units for detailed comment
+        has_original_unit = "original_unit" in df.columns
+        has_standard_units = "standard_units" in df.columns
+
+        if not has_original_unit or not has_standard_units:
+            logger.warning(
+                "Unit conversion flagging requires 'original_unit' and 'standard_units' columns. "
+                "Skipping flagging. This may indicate a bug in the conversion function."
+            )
+        else:
+            # Create row-specific comments showing original -> target unit
+            for idx in df[mask].index:
+                original = df.loc[idx, "original_unit"]
+                target = df.loc[idx, "standard_units"]
+                comment = f"Unit converted to {target} from {original}"
+                df = add_comment(
+                    df,
+                    comment=comment,
+                    criteria_func=lambda x, i=idx: x.index == i,
+                    target_column="conversion_factor",
+                    comment_type="p",
+                )
+    else:
+        logger.debug("No activities with converted units found.")
+
+    # Clean up conversion_factor column
+    df = df.drop(columns=["conversion_factor"])
+
+    # Clean up original_unit column if it exists
+    if "original_unit" in df.columns:
+        df = df.drop(columns=["original_unit"])
+
+    return df

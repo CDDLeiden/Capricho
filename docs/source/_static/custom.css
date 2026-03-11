@@ -1,4 +1,27 @@
-/* Force logo to use dark color (light mode appearance) on white background */
-.document {
-    color-scheme: light;
+/* Hide dark logo by default (light mode) */
+img.logo-dark {
+    display: none !important;
+}
+
+/* Dark mode: swap logos */
+body[data-theme="dark"] img.logo-light {
+    display: none !important;
+}
+body[data-theme="dark"] img.logo-dark {
+    display: inline-block !important;
+}
+
+/* Auto mode following OS preference */
+@media (prefers-color-scheme: dark) {
+    body:not([data-theme="light"]) img.logo-light {
+        display: none !important;
+    }
+    body:not([data-theme="light"]) img.logo-dark {
+        display: inline-block !important;
+    }
+}
+
+/* Hide the H1 on the index page — the sidebar logo already identifies the project */
+#capricho > h1 {
+    display: none;
 }

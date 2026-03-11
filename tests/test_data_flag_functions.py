@@ -7,9 +7,9 @@ import pandas as pd
 from Capricho.chembl.data_flag_functions import (
     flag_censored_activity_comment,
     flag_incompatible_units,
+    flag_insufficient_assay_overlap,
     flag_inter_document_duplication,
     flag_missing_document_date,
-    flag_patent_source,
 )
 
 
@@ -495,116 +495,207 @@ class TestFlagIncompatibleUnits(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
 
-class TestFlagPatentSource(unittest.TestCase):
-    """Tests for flag_patent_source function."""
+class TestFlagInsufficientAssayOverlap(unittest.TestCase):
+    """Tests for flag_insufficient_assay_overlap function with and without metadata matching."""
 
-    def test_flag_patent_sources(self):
-        """Test that activities from patent sources are flagged."""
+    def test_basic_overlap_filtering(self):
+        """Test that assays without sufficient overlap are flagged."""
         df = pd.DataFrame(
             {
-                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3", "CHEMBL4"],
-                "doc_type": ["PATENT", "PATENT", "PUBLICATION", "PUBLICATION"],
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL3", "MOL4", "MOL5"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "document_chembl_id": ["DOC1", "DOC1", "DOC1", "DOC1", "DOC1"],
+                "pchembl_value": [6.0, 6.5, 7.0, 7.5, 8.0],
+                "data_dropping_comment": [None, None, None, None, None],
+            }
+        )
+
+        # ASSAY1 has MOL1, MOL2 (2 compounds)
+        # ASSAY2 has MOL3, MOL4, MOL5 (3 compounds)
+        # Overlap between them: 0 compounds
+        # With min_overlap=2, both assays should be flagged
+
+        result = flag_insufficient_assay_overlap(df, min_overlap=2)
+
+        # All activities should be flagged since no assay pair meets min_overlap
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertTrue(flagged_mask.all(), "All activities should be flagged when overlap is insufficient")
+
+    def test_sufficient_overlap_not_flagged(self):
+        """Test that assays with sufficient overlap are not flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2", "MOL3"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "pchembl_value": [6.0, 6.5, 6.1, 6.6, 7.0],
+                "data_dropping_comment": [None, None, None, None, None],
+            }
+        )
+
+        # ASSAY1 has MOL1, MOL2
+        # ASSAY2 has MOL1, MOL2, MOL3
+        # Overlap: 2 compounds (MOL1, MOL2)
+        # With min_overlap=2, both assays should NOT be flagged
+
+        result = flag_insufficient_assay_overlap(df, min_overlap=2)
+
+        # No activities should be flagged
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertFalse(flagged_mask.any(), "No activities should be flagged when overlap is sufficient")
+
+    def test_multiple_targets_handled_independently(self):
+        """Test that overlap checking is done independently for each target."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL1", "MOL2"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET2", "TARGET2"],  # Different targets
                 "pchembl_value": [6.0, 6.5, 7.0, 7.5],
                 "data_dropping_comment": [None, None, None, None],
             }
         )
 
-        result = flag_patent_source(df)
+        # TARGET1: ASSAY1 has MOL1, MOL2 (only one assay, can't form pair)
+        # TARGET2: ASSAY2 has MOL1, MOL2 (only one assay, can't form pair)
+        # With min_overlap=2, nothing should be flagged (single assays per target)
 
-        # Check that rows with doc_type="PATENT" are flagged
-        self.assertTrue(
-            "Patent source" in str(result.loc[0, "data_dropping_comment"]),
-            "Row 0 should be flagged (doc_type=PATENT)",
-        )
-        self.assertTrue(
-            "Patent source" in str(result.loc[1, "data_dropping_comment"]),
-            "Row 1 should be flagged (doc_type=PATENT)",
-        )
+        result = flag_insufficient_assay_overlap(df, min_overlap=2)
 
-        # Check that rows with doc_type="PUBLICATION" are not flagged
+        # No activities should be flagged (no pairs to compare)
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
         self.assertFalse(
-            result.loc[2, "data_dropping_comment"]
-            and "Patent source" in str(result.loc[2, "data_dropping_comment"]),
-            "Row 2 should NOT be flagged (doc_type=PUBLICATION)",
-        )
-        self.assertFalse(
-            result.loc[3, "data_dropping_comment"]
-            and "Patent source" in str(result.loc[3, "data_dropping_comment"]),
-            "Row 3 should NOT be flagged (doc_type=PUBLICATION)",
+            flagged_mask.any(), "No activities should be flagged when each target has only one assay"
         )
 
-    def test_all_from_patents(self):
-        """Test that when all activities are from patents, all are flagged."""
+    def test_min_overlap_zero_skips_filtering(self):
+        """Test that min_overlap=0 skips the filtering entirely."""
         df = pd.DataFrame(
             {
-                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
-                "doc_type": ["PATENT", "PATENT", "PATENT"],
-                "pchembl_value": [6.0, 6.5, 7.0],
-                "data_dropping_comment": [None, None, None],
-            }
-        )
-
-        result = flag_patent_source(df)
-
-        # All rows should be flagged
-        for idx in range(len(result)):
-            self.assertTrue(
-                "Patent source" in str(result.loc[idx, "data_dropping_comment"]),
-                f"Row {idx} should be flagged (doc_type=PATENT)",
-            )
-
-    def test_no_patent_sources(self):
-        """Test that when no activities are from patents, nothing is flagged."""
-        df = pd.DataFrame(
-            {
-                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
-                "doc_type": ["PUBLICATION", "PUBLICATION", "PUBLICATION"],
-                "pchembl_value": [6.0, 6.5, 7.0],
-                "data_dropping_comment": [None, None, None],
-            }
-        )
-
-        result = flag_patent_source(df)
-
-        # No rows should be flagged
-        for idx in range(len(result)):
-            comment = result.loc[idx, "data_dropping_comment"]
-            self.assertFalse(
-                comment and "Patent source" in str(comment),
-                f"Row {idx} should NOT be flagged (doc_type=PUBLICATION)",
-            )
-
-    def test_missing_doc_type_column(self):
-        """Test that function handles missing doc_type column gracefully."""
-        df = pd.DataFrame(
-            {
-                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "molecule_chembl_id": ["MOL1", "MOL2"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY2"],
+                "target_chembl_id": ["TARGET1", "TARGET1"],
                 "pchembl_value": [6.0, 6.5],
                 "data_dropping_comment": [None, None],
             }
         )
 
-        # Should raise KeyError when doc_type column is missing
-        with self.assertRaises(KeyError):
-            flag_patent_source(df)
+        result = flag_insufficient_assay_overlap(df, min_overlap=0)
 
-    def test_preserves_existing_comments(self):
-        """Test that existing dropping comments are preserved when flagging."""
+        # No activities should be flagged
+        flagged_mask = result["data_dropping_comment"].str.contains("Insufficient assay overlap", na=False)
+        self.assertFalse(flagged_mask.any(), "min_overlap=0 should skip all filtering")
+
+    def test_skips_size_flagged_assays_goldilocks(self):
+        """Test that assays already flagged for size issues are skipped in overlap checking (goldilocks approach)."""
         df = pd.DataFrame(
             {
-                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
-                "doc_type": ["PATENT", "PATENT"],
-                "pchembl_value": [6.0, 6.5],
-                "data_dropping_comment": ["Existing comment", None],
+                "molecule_chembl_id": ["MOL1", "MOL2", "MOL3", "MOL4", "MOL5", "MOL6"],
+                "assay_chembl_id": ["ASSAY1", "ASSAY1", "ASSAY2", "ASSAY2", "ASSAY3", "ASSAY3"],
+                "target_chembl_id": ["TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1", "TARGET1"],
+                "document_chembl_id": ["DOC1", "DOC1", "DOC2", "DOC2", "DOC3", "DOC3"],
+                "pchembl_value": [6.0, 6.5, 6.0, 7.0, 6.0, 8.0],
+                "data_dropping_comment": [
+                    "Assay size < 20",
+                    "Assay size < 20",
+                    None,
+                    None,
+                    None,
+                    None,
+                ],
             }
         )
 
-        result = flag_patent_source(df)
+        # ASSAY1 is already flagged for size (has MOL1, MOL2)
+        # ASSAY2 has MOL3, MOL4
+        # ASSAY3 has MOL5, MOL6
+        # ASSAY1 shares MOL1 with no one, but it's already size-flagged so should be skipped
+        # ASSAY2 and ASSAY3 have no overlap, so both should be flagged for insufficient overlap
 
-        # Check that existing comment is preserved and new flag is added
-        self.assertIn("Existing comment", result.loc[0, "data_dropping_comment"])
-        self.assertIn("Patent source", result.loc[0, "data_dropping_comment"])
-        self.assertIn("Patent source", result.loc[1, "data_dropping_comment"])
+        result = flag_insufficient_assay_overlap(df, min_overlap=1)
+
+        # ASSAY1 should still only have size flag, not overlap flag
+        assay1_comments = result[result["assay_chembl_id"] == "ASSAY1"]["data_dropping_comment"]
+        for comment in assay1_comments:
+            self.assertIn("Assay size < 20", comment)
+            self.assertNotIn("Insufficient assay overlap", comment)
+
+        # ASSAY2 and ASSAY3 should have overlap flag (they don't overlap with each other or ASSAY1)
+        assay2_comments = result[result["assay_chembl_id"] == "ASSAY2"]["data_dropping_comment"]
+        for comment in assay2_comments:
+            self.assertIn("Insufficient assay overlap", comment)
+
+        assay3_comments = result[result["assay_chembl_id"] == "ASSAY3"]["data_dropping_comment"]
+        for comment in assay3_comments:
+            self.assertIn("Insufficient assay overlap", comment)
+
+
+class TestFlagZeroValues(unittest.TestCase):
+    """Tests for flag_zero_values function."""
+
+    def test_flag_zero_standard_value(self):
+        """Test that rows with standard_value of 0 are flagged."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "standard_value": [0.0, 5.5, 10.0],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        from Capricho.chembl.data_flag_functions import flag_zero_values
+
+        result = flag_zero_values(df)
+
+        # First row should be flagged
+        self.assertIn("Zero Value", str(result.loc[0, "data_dropping_comment"]))
+        # Other rows should not be flagged
+        self.assertTrue(pd.isna(result.loc[1, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[1, "data_dropping_comment"]))
+        self.assertTrue(pd.isna(result.loc[2, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[2, "data_dropping_comment"]))
+
+    def test_flag_zero_with_small_values(self):
+        """Test that only exact zeros are flagged, not small values."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2", "CHEMBL3"],
+                "standard_value": [0.0, 0.001, 0.01],
+                "data_dropping_comment": [None, None, None],
+            }
+        )
+
+        from Capricho.chembl.data_flag_functions import flag_zero_values
+
+        result = flag_zero_values(df)
+
+        # Only first row (exact zero) should be flagged
+        self.assertIn("Zero Value", str(result.loc[0, "data_dropping_comment"]))
+        self.assertTrue(pd.isna(result.loc[1, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[1, "data_dropping_comment"]))
+        self.assertTrue(pd.isna(result.loc[2, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[2, "data_dropping_comment"]))
+
+    def test_flag_zero_handles_nan(self):
+        """Test that NaN values are not flagged as zeros."""
+        df = pd.DataFrame(
+            {
+                "molecule_chembl_id": ["CHEMBL1", "CHEMBL2"],
+                "standard_value": [None, 0.0],
+                "data_dropping_comment": [None, None],
+            }
+        )
+
+        from Capricho.chembl.data_flag_functions import flag_zero_values
+
+        result = flag_zero_values(df)
+
+        # First row (NaN) should not be flagged
+        self.assertTrue(pd.isna(result.loc[0, "data_dropping_comment"]) or
+                       "Zero Value" not in str(result.loc[0, "data_dropping_comment"]))
+        # Second row (zero) should be flagged
+        self.assertIn("Zero Value", str(result.loc[1, "data_dropping_comment"]))
 
 
 if __name__ == "__main__":

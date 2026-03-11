@@ -7,7 +7,7 @@ This directory contains the Sphinx documentation for CAPRICHO.
 Install CAPRICHO with documentation dependencies:
 
 ```bash
-pip install -e ".[docs]"
+pip install -e ".[dev]"
 ```
 
 Build the HTML documentation:

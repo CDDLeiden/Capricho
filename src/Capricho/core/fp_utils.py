@@ -4,6 +4,7 @@ from functools import partial
 
 import numpy as np
 from job_tqdflex import ParallelApplier
+from loguru import logger
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
 
@@ -11,7 +12,7 @@ from rdkit.Chem import rdFingerprintGenerator
 def smi_to_morganFP(smi, radius: int = 2, nBits=2048, useChirality=False, **kwargs) -> np.ndarray:
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
-        print(f"Invalid SMILES detected: {smi}")
+        logger.warning(f"Invalid SMILES detected: {smi}")
         return None
     morgan_gen = rdFingerprintGenerator.GetMorganGenerator(
         radius=radius, fpSize=nBits, includeChirality=useChirality, **kwargs
@@ -22,7 +23,7 @@ def smi_to_morganFP(smi, radius: int = 2, nBits=2048, useChirality=False, **kwar
 def smi_to_RDKitFP(smi, minPath=1, maxPath=7, nBits=2048, **kwargs) -> np.ndarray:
     mol = Chem.MolFromSmiles(smi)
     if mol is None:
-        print(f"Invalid SMILES detected: {smi}")
+        logger.warning(f"Invalid SMILES detected: {smi}")
         return None
     rdkit_gen = rdFingerprintGenerator.GetRDKitFPGenerator(
         minPath=minPath, maxPath=maxPath, fpSize=nBits, **kwargs

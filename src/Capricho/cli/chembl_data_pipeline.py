@@ -15,19 +15,25 @@ from ..chembl.data_flag_functions import (
     flag_missing_canonical_smiles,
     flag_missing_document_date,
     flag_missing_standard_smiles,
-    flag_patent_source,
     flag_salt_or_solvent_removal,
     flag_strict_mutant_assays,
     flag_to_remove_mixture_compounds,
     flag_undefined_stereochemistry,
+    flag_unit_conversion,
 )
 from ..chembl.exceptions import BioactivitiesNotFoundError
 from ..chembl.processing import get_bioactivities_workflow
+from ..chembl.unit_conversions import (
+    convert_dose_units,
+    convert_mass_concentration_units,
+    convert_molar_concentration_units,
+    convert_permeability_units,
+    convert_time_units,
+)
 from ..core.default_fields import (
     ASSAY_ID,
     DATA_DROPPING_COMMENT,
     DATA_PROCESSING_COMMENT,
-    DEFAULT_ASSAY_MATCH_FIELDS,
     MOLECULE_ID,
     TARGET_ID,
 )
@@ -40,6 +46,92 @@ from ..logger import logger
 
 # when aggregated, some `activity_id` values will be strings and sorting won't work properly
 AGGREGATE_SAVE_SORTED_BY = ["target_chembl_id", "assay_chembl_id"]
+
+
+def _count_flags(df: pd.DataFrame, column: str) -> dict[str, int]:
+    """Count individual flags in an & -separated flag column.
+
+    Splits each cell by " & " and normalizes dynamic patterns (e.g., "Assay size < 20"
+    becomes "Assay size <") before counting.
+
+    Args:
+        df: DataFrame containing the flag column.
+        column: Name of the column to count flags from.
+
+    Returns:
+        Dict mapping normalized flag patterns to their counts.
+    """
+    from ..analysis import normalize_comment_pattern
+
+    counts: dict[str, int] = {}
+    for cell in df[column].fillna("").astype(str):
+        if not cell or cell == "nan":
+            continue
+        for flag in cell.split(" & "):
+            flag = flag.strip()
+            if not flag:
+                continue
+            normalized = normalize_comment_pattern(flag)
+            counts[normalized] = counts.get(normalized, 0) + 1
+    return counts
+
+
+def _log_pipeline_summary(
+    df: pd.DataFrame,
+    pre_aggregation_count: int,
+    post_aggregation_count: int,
+) -> None:
+    """Log a structured summary of the pipeline run.
+
+    Args:
+        df: The pre-aggregation DataFrame (one row per measurement).
+        pre_aggregation_count: Total rows fetched before any processing.
+        post_aggregation_count: Rows after aggregation.
+    """
+    lines = ["", "PIPELINE SUMMARY"]
+
+    lines.append(f"  Rows fetched:              {pre_aggregation_count:>8,}")
+    lines.append(f"  Rows after aggregation:    {post_aggregation_count:>8,}")
+
+    if len(df) > 0:
+        # Pre-aggregation df uses molecule_chembl_id; post-aggregation uses connectivity
+        cpd_col = "connectivity" if "connectivity" in df.columns else MOLECULE_ID
+        n_compounds = df[cpd_col].nunique() if cpd_col in df.columns else 0
+        n_targets = df[TARGET_ID].nunique() if TARGET_ID in df.columns else 0
+        n_assays = df[ASSAY_ID].nunique() if ASSAY_ID in df.columns else 0
+        lines.append(f"  Unique compounds:          {n_compounds:>8,}")
+        lines.append(f"  Unique targets:            {n_targets:>8,}")
+        lines.append(f"  Unique assays:             {n_assays:>8,}")
+
+    total = len(df)
+
+    # Quality flags (data_dropping_comment)
+    if DATA_DROPPING_COMMENT in df.columns and total > 0:
+        drop_counts = _count_flags(df, DATA_DROPPING_COMMENT)
+        lines.append("")
+        lines.append("  QUALITY FLAGS (data_dropping_comment)")
+        if drop_counts:
+            for flag, count in sorted(drop_counts.items(), key=lambda x: -x[1]):
+                pct = count / total * 100
+                lines.append(f"    {flag + ':':<45s} {count:>6,}  ({pct:5.1f}%)")
+        else:
+            lines.append("    (none)")
+
+    # Processing flags (data_processing_comment)
+    if DATA_PROCESSING_COMMENT in df.columns and total > 0:
+        proc_counts = _count_flags(df, DATA_PROCESSING_COMMENT)
+        lines.append("")
+        lines.append("  PROCESSING FLAGS (data_processing_comment)")
+        if proc_counts:
+            for flag, count in sorted(proc_counts.items(), key=lambda x: -x[1]):
+                pct = count / total * 100
+                lines.append(f"    {flag + ':':<45s} {count:>6,}  ({pct:5.1f}%)")
+        else:
+            lines.append("    (none)")
+
+    logger.info("\n".join(lines))
+
+
 # after the workflow, `activity_id` is an integer, so we can sort by it to ensure consistent
 # ordering on the aggregated datapoints -> assay1|assay2|...|assayN,activity_id1|...|activity_idN
 WORKFLOW_SAVE_SORTED_BY = [*AGGREGATE_SAVE_SORTED_BY, "activity_id"]
@@ -49,6 +141,7 @@ def _warn_info_post_aggregation_repeats(
     df: pd.DataFrame,
     extra_id_cols: list[str],
     aggregate_mutants: bool = False,
+    value_col: str = "pchembl_value",
     _limit: int = 15,  # limit in the string length for the warning/info logging
 ) -> None:
     def _truncate_dataframe(df: pd.DataFrame, limit: int) -> pd.DataFrame:
@@ -63,11 +156,12 @@ def _warn_info_post_aggregation_repeats(
     else:
         col_subset_dupli_warning = ["connectivity", "mutation", "target_chembl_id", *extra_id_cols]
 
+    value_mean_col = f"{value_col}_mean"
     logging_subset = [  # subset of columns to be displayed on the warning/info logging
         *col_subset_dupli_warning,
         "molecule_chembl_id",
         "assay_chembl_id",
-        "pchembl_value_mean",
+        value_mean_col,
     ]
 
     # Based on the ID columns, we shouldn't have any duplicates. This warning is a safeguard
@@ -77,7 +171,7 @@ def _warn_info_post_aggregation_repeats(
             df[duplics_for_warning]
             .loc[:, logging_subset]
             .sort_values(
-                by=["target_chembl_id", "connectivity", "pchembl_value_mean"],
+                by=["target_chembl_id", "connectivity", value_mean_col],
                 ascending=[True, True, False],
             )
         )
@@ -96,7 +190,7 @@ def _warn_info_post_aggregation_repeats(
         dupli_subset = (
             df[duplics_for_info]
             .loc[:, logging_subset]
-            .sort_values(by=target_cpd_col_subset + ["pchembl_value_mean"], ascending=[True, True, False])
+            .sort_values(by=target_cpd_col_subset + [value_mean_col], ascending=[True, True, False])
         )
         truncated_df = _truncate_dataframe(dupli_subset, _limit)
         logger.info(
@@ -119,8 +213,9 @@ def get_standardize_and_clean_workflow(
     calculate_pchembl: bool = False,
     output_path: Optional[Union[str, Path]] = None,
     confidence_scores: list[str] = [7, 8, 9],
-    bioactivity_type: list[str] = ["IC50", "EC50", "AC50", "Ki", "Kd"],
-    standard_relation: list[str] = ["="],  # TODO: later support data with  >, <, >=, <=...
+    bioactivity_type: Optional[list[str]] = None,
+    standard_relation: list[str] = ["="],
+    standard_units: Optional[list[str]] = None,
     assay_types: list[str] = ["B", "F"],
     chembl_release: Optional[int] = None,
     save_not_aggregated: bool = True,
@@ -133,6 +228,8 @@ def get_standardize_and_clean_workflow(
     max_assay_size: Optional[int] = None,
     min_assay_overlap: int = 0,
     strict_mutant_removal: bool = False,
+    value_col: str = "pchembl_value",
+    enable_unit_conversion: bool = False,
 ) -> pd.DataFrame:  # Changed return type annotation to pd.DataFrame
     """Fetched the filtered data from ChEMBL based on the provided IDs, assay confidence,
     and bioactivity types. The fetched smiles are then standardized and chemical mixtures
@@ -168,9 +265,9 @@ def get_standardize_and_clean_workflow(
         max_assay_size: Maximum number of compounds in an assay. Assays exceeding this size will
             have their activities flagged for removal. Defaults to None (no filtering).
         min_assay_overlap: Minimum number of overlapping compounds between two assays for the same target
-                for their activities to be considered. Defaults to None (no filtering).
-            strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
-                description will be flagged for removal. Defaults to False.
+            for their activities to be considered. Defaults to 0 (no filtering).
+        strict_mutant_removal: If True, assays with 'mutant', 'mutation', or 'variant' in their
+            description will be flagged for removal. Defaults to False.
 
     Returns:
         pd.DataFrame: the filtered, standardized, and cleaned data
@@ -182,9 +279,10 @@ def get_standardize_and_clean_workflow(
     # -log | log transformed values reported as Log XC50, -Log XC50, etc, might not
     # have a pchembl value, but *could* still be used.  If standard_type contains `Log`,
     # the standard_value will be transferred to pchembl_value.
-    # TODO: I noticed some negative values reported in standard_value, maybe it's because
-    # the standard_type was Log? If so, we could try rescuing those values to pchembl_value
-    if calculate_pchembl:
+    if bioactivity_type is None:
+        # No filter on standard_type - fetch all
+        biotypes = None
+    elif calculate_pchembl:
         biotypes = []
         for act in bioactivity_type:
             biotypes.extend([f"Log {act}", f"-Log {act}", act])
@@ -208,12 +306,14 @@ def get_standardize_and_clean_workflow(
         assay_types=assay_types,
         standard_relation=standard_relation,
         standard_type=biotypes,
+        standard_units=standard_units,
         calculate_pchembl=calculate_pchembl,
         curate_annotation_errors=curate_annotation_errors,
         require_document_date=require_doc_date,
         chembl_release=chembl_release,
         version=version,
         backend=backend,
+        value_col=value_col,
     )
 
     # Flag activities without document dates for transparency
@@ -223,8 +323,44 @@ def get_standardize_and_clean_workflow(
     # Correct censored activity comments (inactive/inconclusive) with incorrect standard_relation='='
     full_df = flag_censored_activity_comment(full_df)
 
-    # Flag activities from patent sources for transparency
-    full_df = flag_patent_source(full_df)
+    # Convert units if requested
+    if enable_unit_conversion:
+        logger.info("Converting units to standard formats")
+
+        full_df = convert_permeability_units(  # Convert to 10^-6 cm/s
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        full_df = convert_molar_concentration_units(  # Convert to nM
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        full_df = convert_mass_concentration_units(  # Convert to ug/mL
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        full_df = convert_dose_units(  # Convert to mg/kg
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
+
+        full_df = convert_time_units(  # Conver to hr
+            full_df,
+            value_col=value_col,
+            unit_col="standard_units",
+        )
+        full_df = flag_unit_conversion(full_df)
 
     # Filter out activities with standard_relation not in the user-selected values
     # This is important because flag_censored_activity_comment may change '=' to '<'
@@ -268,12 +404,13 @@ def get_standardize_and_clean_workflow(
             comment_col=DATA_DROPPING_COMMENT,
         )
 
+    # Columns to remove after standardization
+    # Note: standard_value and standard_units are always preserved as multivalue columns
     cols_to_remove_post_standardization = [
         "type",
         "relation",
         "units",
         "value",
-        "standard_value",  # we'll use pchembl instead
         "type",
         # "description",
     ]
@@ -291,8 +428,15 @@ def get_standardize_and_clean_workflow(
     stdzer = ChemStandardizer(
         from_smi=True, n_jobs=8, verbose=False, isomeric=chirality, progress=True, chunk_size=1000
     )
+
+    # Filter by bioactivity_type only if it's not None
+    if bioactivity_type is not None:
+        df = full_df.query("standard_type.isin(@bioactivity_type)")
+    else:
+        df = full_df.copy()
+
     df = (
-        full_df.query("standard_type.isin(@bioactivity_type)")
+        df
         # standardize the smiles & clean possible solvents & salts from the string
         .pipe(flag_missing_canonical_smiles)
         .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
@@ -305,7 +449,6 @@ def get_standardize_and_clean_workflow(
         .reset_index(drop=True)
         .copy()
     )
-    # TODO: The curate bioactivity errors steps need to be performed here, after the standardization
 
     # make sure we don't have Nan, can result from merging pChEMBL-lacking calculated values
     df[DATA_PROCESSING_COMMENT] = df[DATA_PROCESSING_COMMENT].fillna("")
@@ -370,14 +513,21 @@ def get_standardize_and_clean_workflow(
 
     # This part needs to be removed prior to data aggregation. Here, we have either
     # inorganic compounds (SMILES removed from the salt removal step), mixtures (SMILES with "."), or
-    # compounds with missing pchembl values, which are needed for the statistics
+    # compounds with missing activity values, which are needed for the statistics
     missing_smiles_patt = r"Missing Standard SMILES|Missing SMILES|Mixture in SMILES"
     only_salt_entry_patt = r"^\.+$"  # if only salts are present, SMILES will be just "."
-    removed_subset = df.query(  # Need SMILES & pchembl_value for aggregation; remove rows with missing them
-        "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True) | "
-        "pchembl_value.isna() | "
-        r"standard_smiles.str.contains(@only_salt_entry_patt, regex=True)"
-    ).copy()
+
+    # Build the query dynamically based on which columns exist and which value_col is used
+    query_parts = [
+        "data_dropping_comment.str.contains(@missing_smiles_patt, na=False, regex=True)",
+        r"standard_smiles.str.contains(@only_salt_entry_patt, regex=True)",
+    ]
+
+    # Only filter by value_col if it exists in the dataframe
+    if value_col in df.columns:
+        query_parts.append(f"{value_col}.isna()")
+
+    removed_subset = df.query(" | ".join(query_parts)).copy()
     if output_path is not None:
         suffixes = "".join(output_path.suffixes)
         new_name = output_path.stem.split(".")[0] + "_removed_subset" + suffixes
@@ -398,9 +548,9 @@ def aggregate_data(
     extra_id_cols: list[str] = [],
     extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
-    max_assay_match: bool = False,  # This will be driven by perform_assay_match
     output_path: Optional[Union[str, Path]] = None,
-    compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
+    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
+    value_col: str = "pchembl_value",
 ):
     """Aggregate the data obtained from ChEMBL by:
     1) Calculate fingerprints and use those to identify same-structure compounds;
@@ -422,40 +572,25 @@ def aggregate_data(
             separated by `;` in the final dataframe. Defaults to [].
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
-        max_assay_match: If True, includes assay metadata fields used by Landrum & Riniker, 2024
-            for the max assay match. Defaults to False.
         output_path: path to save the aggregated data
         compound_equality: How to identify same compounds in the dataset. If "mixed_fp", uses
             mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
-            uses the first part of the InChI key (connectivity) to identify same compounds. Defaults to "connectivity".
+            uses the first part of the InChI key (connectivity) to identify same compounds.
+            If "smiles", uses standardized SMILES strings directly. Defaults to "connectivity".
+        value_col: Column name containing the values to aggregate statistics on.
+            Defaults to "pchembl_value". Use "standard_value" for non-pChEMBL data (e.g., % inhibition).
 
     Returns:
         pd.DataFrame: the aggregated data
     """
     current_extra_id_cols = list(extra_id_cols)  # mutable copy
 
-    if max_assay_match:
-        logger.info(
-            f"Assay metadata matching for aggregation is enabled. Adding fields to ID columns: {DEFAULT_ASSAY_MATCH_FIELDS}"
-        )
-        # Ensure these columns exist in the DataFrame
-        missing_metadata_cols = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col not in df.columns]
-        if missing_metadata_cols:
-            logger.warning(
-                f"Assay metadata matching enabled for aggregation, but the following "
-                f"DEFAULT_ASSAY_MATCH_FIELDS are missing from the DataFrame and will be ignored: {missing_metadata_cols}"
-            )
-            fields_to_add = [col for col in DEFAULT_ASSAY_MATCH_FIELDS if col in df.columns]
-        else:  # Use only the fields that are actually present
-            fields_to_add = DEFAULT_ASSAY_MATCH_FIELDS
-
-        current_extra_id_cols.extend(fields_to_add)
-        current_extra_id_cols = sorted(list(set(current_extra_id_cols)))
-        logger.info(f"ID columns for aggregation: {current_extra_id_cols}")
-
     connectivity_writer = InchiHandling(
         convert_to="connectivity", n_jobs=4, progress=True, from_smi=True, chunk_size=None
     )
+
+    # Track whether we pre-computed connectivity to avoid recalculating after aggregation
+    precomputed_connectivity = None
 
     if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
@@ -463,36 +598,53 @@ def aggregate_data(
         )
         df = df.assign(id_array=fps)
     elif compound_equality == "connectivity":
-        df = df.assign(id_array=lambda x: connectivity_writer(x["standard_smiles"].tolist()))
-    # TODO: if other sensible cpd equality choices come along in the future, we can add here...
+        connectivities = connectivity_writer(df["standard_smiles"].tolist())
+        df = df.assign(id_array=connectivities)
+        # Store connectivity before censored modification so we can reuse it after aggregation
+        precomputed_connectivity = pd.Series(connectivities, index=df.index)
+    elif compound_equality == "smiles":
+        df = df.assign(id_array=df["standard_smiles"].values)
     else:
         raise ValueError(
-            f"Invalid compound_pairing value: {compound_equality}. " "Expected 'mixed_fp' or 'connectivity'."
+            f"Invalid compound_equality value: {compound_equality}. "
+            "Expected 'mixed_fp', 'connectivity', or 'smiles'."
         )
 
-    # For censored measurements (!=), include relation and pchembl_value in the compound identifier
-    # so they are only aggregated if they have the same value AND relation
-    has_censored = df["standard_relation"].ne("=").any()
+    # For censored measurements (!=), include relation and value in the compound identifier
+    # so they are only aggregated if they have the same value AND relation.
+    # NaN standard_relation (e.g., AstraZeneca PPB assays) is treated as non-censored.
+    censored_mask = df["standard_relation"].notna() & df["standard_relation"].ne("=")
+    has_censored = censored_mask.any()
     if has_censored:
         logger.info(
             "Detected censored measurements (standard_relation != '='). "
-            "These will only be aggregated if they have identical relation AND pchembl_value."
+            f"These will only be aggregated if they have identical relation AND {value_col}."
         )
-        # Round pchembl_value to 2 decimal places to avoid floating point precision issues
-        rounded_pchembl = df["pchembl_value"].round(2).astype(str)
-        # For censored measurements, append relation + value to the id_array
-        censored_mask = df["standard_relation"] != "="
+        # Round value to some decimal places to avoid floating point precision issues
+        if value_col == "pchembl_value":
+            rounded_value = df[value_col].round(2).astype(str)
+        elif value_col == "standard_value":
+            rounded_value = df[value_col].round(4).astype(str)
         df.loc[censored_mask, "id_array"] = (
             df.loc[censored_mask, "id_array"].astype(str)
             + "_"
             + df.loc[censored_mask, "standard_relation"]
             + "_"
-            + rounded_pchembl[censored_mask]
+            + rounded_value[censored_mask]
         )
+
+    # Treat NaN standard_relation as "=" (exact measurement) for aggregation.
+    # process_repeat_mols groups by standard_relation, and pandas drops NaN groups.
+    df["standard_relation"] = df["standard_relation"].fillna("=")
 
     # Here we have a repeat index for compounds across all fetched data. Processing which repeats
     # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
     repeats_idxs = repeated_indices_from_array_series(df["id_array"])
+
+    # Build mapping from standard_smiles to connectivity before aggregation
+    # (used to avoid recalculating connectivity after aggregation)
+    if precomputed_connectivity is not None:
+        smiles_to_connectivity = dict(zip(df["standard_smiles"], precomputed_connectivity))
 
     include_metadata = [
         "doc_type",
@@ -509,16 +661,24 @@ def aggregate_data(
         df,
         repeats_idxs,
         solve_strat="keep",
-        extra_id_cols=current_extra_id_cols,  # Use the potentially extended list
+        extra_id_cols=current_extra_id_cols,
         chirality=chirality,
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
+        value_col=value_col,
     )
 
-    # TODO: we calculate connectivities twice if compound_equality == 'connectivity', which
-    # is not ideal. I tried creating a SMILES mapping, but we also canonicalize them inside
-    # `process_repeat_mols`, so it doesn't work. Would be nice to fix this in the future
-    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
+    # Assign connectivity column - reuse precomputed values when available.
+    # The mapping may miss molecules whose SMILES changed during canonicalization
+    # (e.g., stereochemistry stripped when chirality=False), so recompute for any misses.
+    if precomputed_connectivity is not None:
+        final_data = final_data.assign(connectivity=final_data["smiles"].map(smiles_to_connectivity))
+        missing_mask = final_data["connectivity"].isna()
+        if missing_mask.any():
+            recomputed = connectivity_writer(final_data.loc[missing_mask, "smiles"].tolist())
+            final_data.loc[missing_mask, "connectivity"] = recomputed
+    else:
+        final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
 
     # reorder the columns so that connectivity comes first and processing & dropping comes last
     xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
@@ -529,7 +689,7 @@ def aggregate_data(
     final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
 
     _warn_info_post_aggregation_repeats(
-        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
+        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants, value_col=value_col
     )
 
     if output_path is not None:
@@ -545,7 +705,7 @@ def re_aggregate_data(
     extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
     output_path: Optional[Union[str, Path]] = None,
-    compound_equality: Literal["mixed_fp", "connectivity"] = "connectivity",
+    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
 ) -> pd.DataFrame:
     """Re-aggregate the data obtained from the `aggregate_data` method after dataset
     explosion. Useful for exploring the effect of different `extra_id_cols` and other
@@ -566,7 +726,7 @@ def re_aggregate_data(
         compound_equality: How to identify same compounds in the dataset. If "mixed_fp",
             uses mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
             uses the first part of the InChI key (connectivity) to identify same compounds.
-            Defaults to "connectivity".
+            If "smiles", uses standardized SMILES strings directly. Defaults to "connectivity".
 
     Returns:
         pd.DataFrame: the re-aggregated data
@@ -589,6 +749,13 @@ def re_aggregate_data(
         id_array = pd.Series(fps, index=df.index)
     elif compound_equality == "connectivity":
         id_array = df["connectivity"]
+    elif compound_equality == "smiles":
+        id_array = df["standard_smiles"]
+    else:
+        raise ValueError(
+            f"Invalid compound_equality value: {compound_equality}. "
+            "Expected 'mixed_fp', 'connectivity', or 'smiles'."
+        )
 
     # For censored measurements (!=), include relation and pchembl_value in the compound identifier
     # so they are only aggregated if they have the same value AND relation

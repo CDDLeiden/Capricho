@@ -1,6 +1,6 @@
 # CLI Reference
 
-CAPRICHO provides four main commands: `download`, `explore`, `get`, and `binarize`. This section provides comprehensive documentation for all command-line options.
+CAPRICHO provides five main commands: `download`, `explore`, `get`, `prepare`, and `binarize`. This section provides comprehensive documentation for all command-line options.
 
 ## capricho download
 
@@ -27,7 +27,7 @@ capricho download
 capricho download --version 33
 
 # Use custom storage location (this will install version 25 it on ~/.data/old-chembl)
-capricho download --version 25 --prefix data/old-chembl/
+capricho download --version 25 --prefix old-chembl/
 ```
 
 ## capricho explore
@@ -47,6 +47,9 @@ capricho explore [OPTIONS]
 | `--table`, `-t` | Explore a specific table |
 | `--search-column`, `-search` | Search for tables containing a column name pattern |
 | `--query`, `-q` | Run a custom SQL query |
+| `--format`, `-f` | Console output format for tables (`markdown` or `csv`) |
+| `--output`, `-o` | Save primary result DataFrame to file (format inferred from extension) |
+| `--colorize` / `--no-colorize` | ANSI color cycling on console table rows |
 
 ### Examples
 
@@ -116,6 +119,7 @@ Control which bioactivity data to include:
 | `-c`, `--confidence-scores` | Confidence scores to filter, comma-separated | `[7, 8, 9]` |
 | `-biotype`, `--bioactivity-type` | Bioactivity types to filter, comma-separated | `['Potency', 'Kd', 'Ki', 'IC50', 'AC50', 'EC50']` |
 | `-rel`, `--standard-relation` | Filter by standard relation (`=`, `<`, `>`, `~`), comma-separated. **Note:** Including `<` or `>` requires `--calculate-pchembl`. See [Standard Relations](concepts.md). | `['=']` |
+| `-units`, `--standard-units` | Filter by standard units, comma-separated. Useful for ADMET data with specific units like `%` (percent inhibition). | `None` |
 | `-at`, `--assay-types` | Assay types (B, F, A, T, P), comma-separated | `['B', 'F']` |
 | `-cr`, `--chembl-release` | Only fetch data reported **up to** a certain ChEMBL release | `None` |
 | `-reqdoc`, `--require-doc-date` | Filter out bioactivities without a document date | `False` |
@@ -124,17 +128,16 @@ Control which bioactivity data to include:
 | `-maso`, `--min-assay-overlap` | Minimum overlapping compounds between assays | `0` |
 
 #### Confidence Scores
-ChEMBL assigns confidence scores from 0-9:
-- **9**: Direct single protein target
-- **8**: Direct protein complex/family target  
-- **7**: Direct target with homologues
-- **6**: Molecular target assigned
-- **5**: Non-molecular target assigned
-- **4**: Subcellular target assigned
-- **3**: Cell-line target assigned
-- **2**: Tissue target assigned
-- **1**: Organism target assigned
-- **0**: Unchecked data
+ChEMBL assigns confidence scores from 0-9 based on target assignment certainty:
+- **9**: Direct single protein target assigned
+- **8**: Homologous single protein target assigned
+- **7**: Direct protein complex subunits assigned
+- **6**: Homologous protein complex subunits assigned
+- **5**: Multiple direct protein targets may be assigned (e.g., PROTEIN FAMILY)
+- **4**: Multiple homologous protein targets may be assigned (e.g., PROTEIN FAMILY)
+- **3**: Target assigned is molecular non-protein target
+- **1**: Target assigned is non-molecular
+- **0**: Default value - Target assignment has yet to be curated
 
 #### Bioactivity Types
 Common bioactivity measurements:
@@ -162,19 +165,25 @@ Control how data is processed and aggregated:
 | Option | Description | Default |
 |---|---|---|
 | `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported. **Required when using censored data** (`--standard-relation` includes `<` or `>`). See [Standard Relations](concepts.md). | `False` |
+| `-agg-on`, `--aggregate-on` | Column to aggregate statistics on. Use `standard_value` for non-pChEMBL data (e.g., ADMET assays with % inhibition). See [Non-pChEMBL Aggregation](non-pchembl-aggregation). | `pchembl_value` |
+| `-conu`, `--convert-units` | Convert units to standard formats before aggregation. See [Unit Conversion](unit-conversion). | `False` |
 | `-chiral`, `--chirality` | Consider chirality during fingerprint calculation | `False` |
 | `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers | `False` |
 | `-cure`, `--curate-annotation-errors` | Apply curation for pChEMBL annotation errors | `False` |
 | `-mutagg`, `--aggregate-mutants` | Aggregate data on targets regardless of mutation | `False` |
-| `-maxm`, `--max-assay-match` | Perform strict assay metadata matching | `False` |
 | `-smr`, `--strict-mutant-removal` | Flag assays with mutant-related keywords for removal | `False` |
 | `-cpd-eq`, `--compound-equality` | Method for compound equality determination | `connectivity` |
 | `-mcols`, `--metadata-columns` | Extra metadata columns to keep, comma-separated | `[]` |
 | `-idcols`, `--id-columns` | Extra ID columns for aggregation, comma-separated | `[]` |
 
+#### Aggregation Column Options
+- **pchembl_value**: (Default) Aggregate on pChEMBL values (-log10 molar potency). Uses geometric mean.
+- **standard_value**: Aggregate on raw standard_value column. Uses arithmetic mean. Useful for ADMET data with non-molar units (%, permeability, etc.).
+
 #### Compound Equality Methods
-- **connectivity**: (Default) Based on molecular connectivity, ignoring stereochemistry
+- **connectivity**: (Default) Based on molecular connectivity (InChI key first block), ignoring stereochemistry
 - **mixed_fp**: Uses ECFP4 and RDKit fingerprints (each with 2048 bits) for similarity determination
+- **smiles**: Uses standardized SMILES strings directly for exact string matching
 
 #### Useful Metadata Columns
 - `organism`: Source organism
@@ -218,27 +227,169 @@ capricho get \
   --output-path high_quality_dataset.csv
 ```
 
-### Comprehensive Kinase Dataset
+### ADMET Data with Unit Conversion
+
+Retrieve Caco-2 permeability data with unit conversion and aggregation on `standard_value`:
+
 ```bash
 capricho get \
-  --target-ids CHEMBL203,CHEMBL204,CHEMBL279,CHEMBL1844 \
-  --confidence-scores 7,8,9 \
-  --bioactivity-type IC50,Ki,Kd \
-  --calculate-pchembl \
-  --aggregate-mutants \
-  --max-assay-match \
-  --compound-equality mixed_fp \
-  --metadata-columns organism,tissue,cell_type,assay_description \
-  --output-path kinase_comprehensive.csv
+  --assay-ids CHEMBL1112933,CHEMBL3529279,CHEMBL3529278 \
+  --assay-types A \
+  --confidence-scores 0,1,2,3,4,5,6,7,8,9 \
+  --aggregate-on standard_value \
+  --convert-units \
+  --id-columns standard_units,assay_cell_type \
+  --drop-unassigned-chiral \
+  --output-path caco2_permeability.csv
 ```
 
-### Small Molecule Dataset via Web API
+This command:
+- Fetches data from specific Caco-2 permeability assays
+- Uses ADMET assay type (`-at A`)
+- Aggregates on `standard_value` instead of pChEMBL (permeability isn't a potency measurement)
+- Converts permeability units to a common format (`10^-6 cm/s`)
+- Groups by `standard_units` and `assay_cell_type` during aggregation
+
+## capricho prepare
+
+Clean aggregated bioactivity data by filtering entries based on quality and processing flags introduced during `capricho get`. Optionally, transform the cleaned data into a multitask activity matrix where rows are compounds and columns are tasks (e.g., targets).
+
 ```bash
-capricho get \
-  --molecule-ids CHEMBL25,CHEMBL941,CHEMBL1023 \
-  --chembl-backend webresource \
-  --confidence-scores 8,9 \
-  --output-path small_molecules.csv
+capricho prepare [OPTIONS]
+```
+
+### Required Options
+
+| Option | Description |
+|---|---|
+| `-i`, `--input-path` | Path to aggregated data file (CSV, TSV, or Parquet) |
+| `-o`, `--output-path` | Path to save the output file |
+
+### Quality Flag Filtering Options
+
+These flags remove entries with specific quality concerns. Each flag corresponds to a comment added during `capricho get`:
+
+| Option | Description | Default |
+|---|---|---|
+| `--drop-undefined-stereo` | Drop entries with undefined stereochemistry | `False` |
+| `--drop-potential-duplicate` | Drop entries flagged as potential duplicates across documents | `False` |
+| `--drop-data-validity` | Drop entries with data validity comments from ChEMBL | `False` |
+| `--drop-unit-error` | Drop entries with unit annotation errors (3.0 or 6.0 log unit differences) | `False` |
+| `--drop-mixture` | Drop entries containing mixtures in SMILES | `False` |
+| `--drop-assay-size` | Drop entries outside assay size bounds (both too small and too large) | `False` |
+| `--drop-insufficient-overlap` | Drop entries from assays with insufficient compound overlap | `False` |
+| `--remove-flags` | Custom quality flags to remove, comma-separated. Rows with these flags in `data_dropping_comment` will be filtered out. | `None` |
+
+### Data Cleaning Options
+
+| Option | Description | Default |
+|---|---|---|
+| `--deduplicate` | Remove duplicate pChEMBL values within aggregated rows and recalculate statistics | `False` |
+| `--resolve-annotation-error` | Resolve unit annotation errors by keeping measurement from earliest document. Use `first` to enable. | `None` |
+
+### Activity Matrix Options
+
+These options control the optional multitask activity matrix output:
+
+| Option | Description | Default |
+|---|---|---|
+| `--task-col` | Column to use as task identifier | `target_chembl_id` |
+| `--compound-col` | Column for compound identity (`connectivity` or `smiles`) | `connectivity` |
+| `--smiles-col` | Column containing SMILES strings | `smiles` |
+| `-agg-on`, `--aggregate-on` | Column that was aggregated on during `capricho get`. Derives the value column as `{aggregate_on}_mean`. | `pchembl_value` |
+| `--id-columns` | Extra columns to combine with `task_col` for composite task identifiers. Use the same columns passed to `capricho get --id-columns` during aggregation. | `None` |
+
+### Output Options
+
+| Option | Description | Default |
+|---|---|---|
+| `--plot` | Path to save comparability plots (e.g., `comparability.png`). If not provided, no plot is generated. | `None` |
+
+### Understanding Quality Flags
+
+Quality flags are added to the `data_dropping_comment` column during `capricho get`. Common flags include:
+
+- **Undefined stereochemistry**: Compounds with unassigned chiral centers
+- **Potential duplicate**: Quality flag introduced by the ChEMBL team, indicting that compound-target pair reported in multiple documents with identical values
+- **Data validity comment**: ChEMBL's own data quality annotations
+- **Unit annotation error**: Measurements differing by exactly 3.0 or 6.0 log units (suggesting unit conversion errors)
+- **Mixture in SMILES**: SMILES containing multiple components (`.` separator)
+- **Assay size too small/large**: Assays outside the specified size bounds
+- **Insufficient assay overlap**: Assays without enough shared compounds for reliable comparison
+
+### Output Files
+
+The prepare command generates two files:
+
+- **Prepared data** (`*_prepared.csv`): The cleaned data after filtering quality flags
+- **Activity matrix** (specified by `-o`): Rows are compounds (indexed by `compound_col`), columns are tasks, plus a `smiles` column. Suitable for multitask ML models.
+
+### Examples
+
+#### Basic Preparation
+```bash
+# Clean data and output activity matrix
+capricho prepare -i egfr_data.csv -o egfr_matrix.csv
+```
+
+#### Filtering Quality Flags
+```bash
+# Remove potential duplicates and data validity issues
+capricho prepare -i egfr_data.csv -o egfr_clean.csv \
+    --drop-potential-duplicate \
+    --drop-data-validity
+```
+
+#### Strict Quality Filtering
+```bash
+# Apply multiple quality filters for high-confidence data
+capricho prepare -i kinase_data.csv -o kinase_clean.csv \
+    --drop-potential-duplicate \
+    --drop-data-validity \
+    --drop-unit-error \
+    --drop-undefined-stereo
+```
+
+#### With Deduplication
+```bash
+# Remove duplicate values and recalculate statistics
+capricho prepare -i data.csv -o clean_data.csv \
+    --deduplicate \
+    --drop-potential-duplicate
+```
+
+#### Resolve Annotation Errors
+```bash
+# Keep earliest measurement when annotation errors are detected
+capricho prepare -i data.csv -o clean_data.csv \
+    --resolve-annotation-error first \
+    --drop-unit-error
+```
+
+#### Generate Comparability Plots
+```bash
+# Output plots showing data comparability across assays
+capricho prepare -i data.csv -o clean_data.csv \
+    --drop-potential-duplicate \
+    --plot comparability.png
+```
+
+This generates two plots:
+- `comparability_cleaned.png`: Comparability of data after filtering
+- `comparability_flags.png`: Multi-panel view showing remaining flags
+
+#### Composite Task Identifiers
+```bash
+# Use id-columns if data was aggregated with --id-columns
+capricho prepare -i data.csv -o matrix.csv \
+    --id-columns assay_cell_type,standard_units
+```
+
+#### Custom Flag Removal
+```bash
+# Remove entries with custom flags
+capricho prepare -i data.csv -o clean_data.csv \
+    --remove-flags "Censored activity comment,Mutant assay"
 ```
 
 ## capricho binarize
@@ -267,6 +418,8 @@ capricho binarize [OPTIONS]
 | `-rel`, `--relation-col` | Column name for standard_relation values | `standard_relation` |
 | `-bcol`, `--binary-col` | Name for the output binary column | `activity_binary` |
 | `-cmp-mut`, `--compare-across-mutants` | Compare measurements across mutants for conflicts | `False` |
+| `-rp`, `--conflict-report-path` | Path to save detailed conflict report as JSON | `None` |
+| `-cr`, `--conflict-resolution` | Strategy for resolving conflicts: `drop`, `relation`, `confidence`, `majority` | `None` |
 
 ### Understanding pChEMBL Thresholds
 
@@ -286,13 +439,41 @@ The binarization process handles different measurement types:
 - **`<`, `<<`** (censored active): Compound is _more_ active than reported value
 - **`>`, `>>`** (censored inactive): Compound is _less_ active than reported value
 
-### Conflict Detection
+### Conflict Detection and Resolution
 
 The command flags measurements that disagree for the same compound-target pair:
 
 - **Mixed discrete/censored conflicts**: When discrete measurements (`=`, `~`) disagree with censored measurements (`<`, `>`)
 - **Binary label conflicts**: When measurements result in different activity classifications (active vs inactive)
 - **Mutation handling**: Use `--compare-across-mutants` to control whether different mutants are compared
+
+#### Conflict Resolution Strategies
+
+By default, conflicts are only flagged in `data_dropping_comment`. Use `--conflict-resolution` to automatically resolve them:
+
+| Strategy | Behavior | Fallback |
+|----------|----------|----------|
+| `drop` | Remove all rows for conflicting pairs | -- |
+| `relation` | Keep exact (`=`) rows, drop censored | Drop all if no `=` exists |
+| `confidence` | Keep row with highest `confidence_score` | Drop all on tie |
+| `majority` | Classify each individual measurement against the threshold; majority label wins | Drop all on tie |
+
+The `majority` strategy splits the pipe-separated raw values (e.g., `pchembl_value = "6.0|6.5|7.0"`) and classifies each individual measurement against the threshold. Each measurement gets one vote. This means a row whose mean is above the threshold but contains individual values below it will contribute some inactive votes. When the raw value column is not present, falls back to count-weighted or row-based voting.
+
+```bash
+# Resolve conflicts by keeping exact measurements
+capricho binarize -i data.csv -o binary.csv -t 7.0 -cr relation
+
+# Resolve by measurement-weighted majority vote, save report
+capricho binarize -i data.csv -o binary.csv -t 7.0 -cr majority -rp conflicts.json
+```
+
+#### Conflict Report
+
+Use `-rp` / `--conflict-report-path` to save a JSON report with:
+
+- **Summary**: Total conflicts, conflict patterns (exact vs censored), active/inactive counts, MCC, resolution summary
+- **Per-conflict details**: Measurements, vote summary, severity (low/medium/high based on measurement spread), recommendation, resolution outcome
 
 #### Compound Identifiers for Conflict Detection
 
@@ -343,6 +524,25 @@ capricho binarize \
   --compare-across-mutants
 ```
 
+#### Resolve Conflicts and Generate Report
+```bash
+# Keep exact measurements, drop censored when they conflict
+capricho binarize \
+  -i egfr_data.csv \
+  -o egfr_binary.csv \
+  -t 7.0 \
+  -cr relation \
+  -rp conflict_report.json
+
+# Measurement-weighted majority vote
+capricho binarize \
+  -i egfr_data.csv \
+  -o egfr_binary.csv \
+  -t 7.0 \
+  -cr majority \
+  -rp conflict_report.json
+```
+
 ### Understanding pchembl_relation
 
 The output file includes a `pchembl_relation` column that adjusts the standard_relation signs for the -log scale used in pChEMBL values. This makes it easier to interpret activity thresholds:
@@ -369,3 +569,14 @@ The output file contains all original columns plus:
 - **Conflict flags**: Rows with disagreeing measurements are flagged in the `data_dropping_comment` column
 
 Conflicting measurements are logged with detailed information about the disagreement.
+
+#### Post-Resolution Deduplication
+
+When a conflict resolution strategy is active (`-cr`), compound-target pairs are deduplicated to **one row per pair**. During deduplication:
+
+- Individual measurements that disagree with the resolved binary label are filtered out from all pipe-separated columns
+- Rows for the same compound-target pair are merged, concatenating their source values
+- The `standard_relation` column becomes pipe-separated to match per-measurement relations (e.g., `"=|=|<"`)
+- Statistics (`*_mean`, `*_std`, `*_median`, `*_counts`) are recalculated from the kept measurements only
+
+The resulting `pchembl_value` and `standard_relation` columns serve as a register of source values that compose the binarized label.

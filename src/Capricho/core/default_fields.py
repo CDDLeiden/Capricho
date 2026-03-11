@@ -4,6 +4,8 @@ multiple_value_cols = (
     "standard_smiles",
     "canonical_smiles",
     "pchembl_value",
+    "standard_value",
+    "standard_units",
     "assay_chembl_id",
     "assay_description",
     "activity_id",
@@ -22,18 +24,6 @@ multiple_value_cols = (
     "prodrug",
     "withdrawn_flag",
 )
-
-DEFAULT_ASSAY_MATCH_FIELDS = [
-    "assay_type",
-    "assay_organism",
-    "assay_category",
-    "assay_tax_id",
-    "assay_strain",
-    "assay_tissue",
-    "assay_cell_type",
-    "assay_subcellular_fraction",
-    "bao_format",
-]
 
 ACTIVITY_ID = "activity_id"
 MOLECULE_ID = "molecule_chembl_id"

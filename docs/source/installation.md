@@ -1,5 +1,7 @@
 # Installation
 
+CAPRICHO requires Python 3.10 or later.
+
 ## From PyPI (Recommended)
 
 Install the latest stable version from PyPI using pip:
@@ -49,3 +51,13 @@ capricho --help
 ```
 
 You should see the main help message with available commands.
+
+## Tab Completion (Optional)
+
+Enable tab completion for command line interface:
+
+```bash
+capricho --install-completion
+```
+
+This makes it easier to discover available commands and options as you type.

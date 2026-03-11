@@ -85,6 +85,7 @@ def process_repeat_mols(
     extra_multival_cols: List[str] = [],
     chirality: bool = False,
     aggregate_mutants: bool = False,
+    value_col: str = "pchembl_value",
 ) -> pd.DataFrame:
     """Process the dataframe according to repeated elements identified
     with the function `find_repeated_arr_from_series`. The standard criteria here
@@ -120,12 +121,12 @@ def process_repeat_mols(
             repeat_mapping[i] = idx
     df = df.assign(repeat_mapping=lambda x: x.index.map(repeat_mapping))
     repeat_subset = df.query("~repeat_mapping.isna()").assign(
-        pchembl_value=lambda df: df.pchembl_value.apply(lambda val: format_value(val))
+        **{value_col: lambda df, vc=value_col: df[vc].apply(lambda val: format_value(val))}
     )
     if not repeat_subset.empty:
         numeric_activity = (
             # concatenate grouped values and convert to numeric arrays
-            repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
+            repeat_subset.groupby(["repeat_mapping"])[value_col]
             .apply(lambda x: "|".join(x))
             .str.split("|")
             .apply(lambda x: np.array(x).astype(float))
@@ -136,37 +137,49 @@ def process_repeat_mols(
             "columns (counts, mean, median) will be calculated solely for the sake of consistency."
         )
         numeric_activity = (
-            repeat_subset.groupby(["repeat_mapping"])["pchembl_value"]
+            repeat_subset.groupby(["repeat_mapping"])[value_col]
             .apply(lambda x: "|".join(x))
             .apply(lambda x: np.array(x).astype(float))
         )
 
     max_series = numeric_activity.apply(lambda x: np.max(x))
     min_series = numeric_activity.apply(lambda x: np.min(x))
-    distance_series = max_series - min_series
+    activity_divergence_series = max_series - min_series
 
     # Will drop the repeats with more than 1 log unit difference
-    high_diff_repeats = np.where(distance_series >= 1)[0]
+    high_diff_repeats = np.where(activity_divergence_series >= 1)[0]
     points_dropped = len(repeat_subset["repeat_mapping"].isin(high_diff_repeats))
     logger.info(f"Found {len(high_diff_repeats)} repeats with more than 1 log unit difference.")
-    logger.info(f"Maximum difference between min & max values: {np.max(distance_series)}")
+    logger.info(f"Maximum difference between min & max values: {np.max(activity_divergence_series)}")
     if solve_strat == "drop":
         logger.info(f"{points_dropped} points will be removed from the dataset")
 
-    id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id"]
+    id_cols = [*extra_id_cols, "repeat_mapping", "target_chembl_id", "standard_relation"]
 
-    # Add standard_relation to ID columns to prevent mixing different relation types
-    if "standard_relation" in df.columns:
-        id_cols.append("standard_relation")
+    if value_col == "standard_type":
+        id_cols.append("standard_units")
 
-    multiple_value_cols = [col for col in multiple_value_cols if col not in id_cols]
-    multival_cols = [*multiple_value_cols, *extra_multival_cols]
+    # Build multivalue columns: include value_col and all multivalue columns except
+    # pchembl_value when it's not the value_col (avoid aggregating unnecessary NaN values)
+    effective_multival_cols = []
+    for col in multiple_value_cols:
+        if col == "pchembl_value" and value_col != "pchembl_value":
+            # Skip pchembl_value when aggregating on other columns (e.g., standard_value)
+            pass
+        elif col == value_col:
+            # Always include the value_col for aggregation
+            effective_multival_cols.append(col)
+        elif col not in id_cols and col in df.columns:
+            # Include other multivalue columns
+            effective_multival_cols.append(col)
+    multival_cols = [*effective_multival_cols, *extra_multival_cols]
 
     if aggregate_mutants:
         multival_cols = [*multival_cols, "mutation"]
     else:
         id_cols = [*id_cols, "mutation"]
     repeat_subset.loc[:, multival_cols].replace({None: "None"}, inplace=True)
+
     if pd.__version__ >= "1.5.0":
         grouped = repeat_subset.groupby(id_cols, group_keys=True)
     else:
@@ -181,7 +194,9 @@ def process_repeat_mols(
         )
         raise e
 
-    updated_df = assign_stats(updated_vals, value_col="pchembl_value").merge(df, on=id_cols, how="left")
+    updated_df = assign_stats(
+        updated_vals, value_col=value_col, use_geometric=(value_col == "pchembl_value")
+    ).merge(df, on=id_cols, how="left")
     rename_cols = {c: c.rstrip("_x") for c in updated_df.columns if c.endswith("_x")}
     todrop_cols = [c for c in updated_df.columns if c.endswith("_y")]
     updated_df = updated_df.drop(columns=todrop_cols).rename(columns=rename_cols)
@@ -192,12 +207,12 @@ def process_repeat_mols(
     if solve_strat == "drop":
         updated_df = updated_df.drop(index=todrop_processed)
 
-    # Convert multival_cols (except pchembl_value) to strings for non-aggregated rows
+    # Convert multival_cols (except value_col) to strings for non-aggregated rows
     non_aggregated_df = df.drop(index=repeat_subset.index).assign(
         might_rancemic=lambda x: [False] * len(x),
     )
     for col in multival_cols:
-        if col in non_aggregated_df.columns and col != "pchembl_value":
+        if col in non_aggregated_df.columns and col != value_col:
             non_aggregated_df[col] = non_aggregated_df[col].apply(format_value)
 
     df = pd.concat(
@@ -208,11 +223,13 @@ def process_repeat_mols(
         ignore_index=True,
     )
     # the `smiles` column will be the final smiles column; to be used for modeling
-    smiles = df["standard_smiles"].apply(lambda smi: smi if "|" not in smi else smi.split("|")[0])
+    smiles = df["standard_smiles"].apply(
+        lambda smi: smi if pd.isna(smi) or "|" not in smi else smi.split("|")[0]
+    )
     logger.info("Canonicalizing smiles...")
     df = df.assign(smiles=smiles_canonizer(smiles))
 
-    stats_cols = [f"pchembl_value{suffix}" for suffix in ["_mean", "_std", "_median", "_counts"]]
+    stats_cols = [f"{value_col}{suffix}" for suffix in ["_mean", "_std", "_median", "_counts"]]
     final_cols = [*id_cols, "smiles", *multival_cols, "might_rancemic", *stats_cols]
     final_cols.pop(final_cols.index("repeat_mapping"))  # remove repeat_mapping from final_cols
     df = (
@@ -224,12 +241,8 @@ def process_repeat_mols(
     logger.info(f"Final number of points: {len(df)}")
     # Also add the single-read points to the mean / median / counts values
     with pd.option_context("future.no_silent_downcasting", True):
-        df["pchembl_value_median"] = (
-            df["pchembl_value_median"].fillna(df["pchembl_value"]).infer_objects(copy=False)
-        )
-        df["pchembl_value_mean"] = (
-            df["pchembl_value_mean"].fillna(df["pchembl_value"]).infer_objects(copy=False)
-        )
-        df["pchembl_value_counts"] = df["pchembl_value_counts"].fillna(1).infer_objects(copy=False)
-    df["pchembl_value"] = df["pchembl_value"].apply(format_value)  # convert to str for consistency
+        df[f"{value_col}_median"] = df[f"{value_col}_median"].fillna(df[value_col]).infer_objects(copy=False)
+        df[f"{value_col}_mean"] = df[f"{value_col}_mean"].fillna(df[value_col]).infer_objects(copy=False)
+        df[f"{value_col}_counts"] = df[f"{value_col}_counts"].fillna(1).infer_objects(copy=False)
+    df[value_col] = df[value_col].apply(format_value)  # convert to str for consistency
     return df

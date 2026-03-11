@@ -44,8 +44,8 @@ def check_and_download_chembl_db(
     ChEMBL version is used across different query functions.
 
     Args:
-        prefix: Optional prefix for an alternative data directory. If passed, will create
-            a new configuration file under `~/.data/chembl_downloader_config_{version}.json`
+        prefix: Optional prefix for an alternative data directory with path components passed as a list of strings.
+            If passed, will create a new configuration file under `~/.data/chembl_downloader_config_{version}.json`
             pointing to the new data directory. Defaults to None.
         version: Optional ChEMBL version to download. If not provided, will download the latest
             available version. Defaults to None.
@@ -410,6 +410,15 @@ def get_activity_table_sql(
             a.chembl_id AS assay_chembl_id,
             a.description AS assay_description,
             a.assay_type,
+            a.assay_organism,
+            a.assay_category,
+            a.assay_tax_id,
+            a.assay_strain,
+            a.assay_tissue,
+            a.assay_cell_type,
+            a.assay_subcellular_fraction,
+            a.bao_format,
+            a.variant_id,
             md.chembl_id AS molecule_chembl_id,
             act.standard_flag,
             act.standard_relation,
@@ -467,6 +476,7 @@ def get_full_activity_data_sql(
     document_chembl_ids: Optional[Union[list, str]] = None,
     standard_relation: Optional[List[str]] = None,
     standard_type: Optional[List[str]] = None,
+    standard_units: Optional[List[str]] = None,
     confidence_scores: Union[list, Tuple] = (9, 8),
     assay_types: Union[list, Tuple] = ("B", "F"),
     chembl_release: Optional[int] = None,
@@ -526,8 +536,9 @@ def get_full_activity_data_sql(
         where_conditions_main.append(f"a.chembl_id IN ({placeholders})")
 
     where_conditions_main.append("act.standard_value IS NOT NULL")
-    where_conditions_main.append("act.standard_relation IS NOT NULL")
 
+    # Only filter by standard_relation if explicitly provided
+    # When None, include all data including those with NULL standard_relation (e.g., AstraZeneca PPB assays)
     if standard_relation:
         placeholders = ", ".join([f"'{rel}'" for rel in standard_relation])
         where_conditions_main.append(f"act.standard_relation IN ({placeholders})")
@@ -535,6 +546,10 @@ def get_full_activity_data_sql(
     if standard_type:
         placeholders = ", ".join([f"'{stype}'" for stype in standard_type])
         where_conditions_main.append(f"act.standard_type IN ({placeholders})")
+
+    if standard_units:
+        placeholders = ", ".join([f"'{unit}'" for unit in standard_units])
+        where_conditions_main.append(f"act.standard_units IN ({placeholders})")
 
     if confidence_scores:
         placeholders = ", ".join([f"{score}" for score in confidence_scores])
@@ -592,6 +607,7 @@ def get_full_activity_data_sql(
         "d.volume",
         "d.year",
         "d.title",
+        "a.variant_id",
         "vs.mutation",
         "d.chembl_release_id AS chembl_release",
     ]
@@ -633,6 +649,55 @@ def get_full_activity_data_sql(
         version=downloader_configs["version"],
         prefix=downloader_configs["prefix"],
     ).assign(mutation=lambda x: x["mutation"].fillna("WT"))
+
+
+def get_target_names_sql(
+    target_chembl_ids: List[str],
+    prefix: Optional[Sequence[str]] = None,
+    version: Optional[Union[int, str]] = None,
+) -> dict:
+    """Get target names for a list of ChEMBL target IDs using SQL backend.
+
+    Args:
+        target_chembl_ids: list of ChEMBL target IDs.
+        prefix: Optional prefix for an alternative data directory.
+        version: Optional ChEMBL version to use.
+
+    Returns:
+        dict: a dictionary mapping chembl_id to pref_name.
+    """
+    downloader_configs = check_and_download_chembl_db(prefix=prefix, version=version)
+
+    if not target_chembl_ids:
+        raise ValueError("No target IDs provided")
+
+    placeholders = ", ".join([f"'{id}'" for id in target_chembl_ids])
+    where_clause = f"chembl_id IN ({placeholders})"
+
+    query_str = dedent(
+        f"""\
+        SELECT
+            chembl_id,
+            pref_name
+        FROM target_dictionary
+        WHERE
+            {where_clause}
+        """
+    )
+
+    logger.debug(f"Generated SQL query for target names:\n{query_str}")
+
+    result = query(
+        query_str,
+        version=downloader_configs["version"],
+        prefix=downloader_configs["prefix"],
+    )
+
+    if result.empty:
+        logger.warning(f"No targets found for IDs: {target_chembl_ids}")
+        return {}
+
+    return dict(zip(result["chembl_id"], result["pref_name"]))
 
 
 def get_assay_size_sql(
