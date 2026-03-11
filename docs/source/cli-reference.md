@@ -47,6 +47,9 @@ capricho explore [OPTIONS]
 | `--table`, `-t` | Explore a specific table |
 | `--search-column`, `-search` | Search for tables containing a column name pattern |
 | `--query`, `-q` | Run a custom SQL query |
+| `--format`, `-f` | Console output format for tables (`markdown` or `csv`) |
+| `--output`, `-o` | Save primary result DataFrame to file (format inferred from extension) |
+| `--colorize` / `--no-colorize` | ANSI color cycling on console table rows |
 
 ### Examples
 
@@ -162,8 +165,8 @@ Control how data is processed and aggregated:
 | Option | Description | Default |
 |---|---|---|
 | `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported. **Required when using censored data** (`--standard-relation` includes `<` or `>`). See [Standard Relations](concepts.md). | `False` |
-| `-agg-on`, `--aggregate-on` | Column to aggregate statistics on. Use `standard_value` for non-pChEMBL data (e.g., ADMET assays with % inhibition). See [Non-pChEMBL Aggregation](concepts.md#non-pchembl-aggregation). | `pchembl_value` |
-| `-cu`, `--convert-units` | Convert units to standard formats before aggregation. See [Unit Conversion](concepts.md#unit-conversion). | `False` |
+| `-agg-on`, `--aggregate-on` | Column to aggregate statistics on. Use `standard_value` for non-pChEMBL data (e.g., ADMET assays with % inhibition). See [Non-pChEMBL Aggregation](non-pchembl-aggregation). | `pchembl_value` |
+| `-conu`, `--convert-units` | Convert units to standard formats before aggregation. See [Unit Conversion](unit-conversion). | `False` |
 | `-chiral`, `--chirality` | Consider chirality during fingerprint calculation | `False` |
 | `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers | `False` |
 | `-cure`, `--curate-annotation-errors` | Apply curation for pChEMBL annotation errors | `False` |

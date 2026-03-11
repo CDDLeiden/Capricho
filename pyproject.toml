@@ -39,6 +39,12 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["ruff", "isort", "black", "pytest"]
+docs = [
+  "sphinx>=7.0",
+  "furo",
+  "sphinx-click>=6.0",
+  "myst-parser>=3.0",
+]
 
 [project.urls]
 homepage = "https://github.com/David-Araripe/Capricho"

@@ -21,32 +21,26 @@ extensions = [
     "myst_parser",
 ]
 
+# MyST settings
+myst_enable_extensions = [
+    "colon_fence",
+    "fieldlist",
+]
+
 # Templates path
 templates_path = ["_templates"]
 
 # List of patterns to ignore when looking for source files
 exclude_patterns = []
 
-# HTML theme options
-html_theme = "sphinx_rtd_theme"
+# Theme
+html_theme = "furo"
+html_title = " "
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-# html_logo = '_static/logo-without-name.svg'
-
-# HTML theme options
 html_theme_options = {
-    "canonical_url": "",
-    "analytics_id": "",
-    "logo_only": False,
-    "display_version": True,
-    "prev_next_buttons_location": "bottom",
-    "style_external_links": False,
-    "vcs_pageview_mode": "",
-    "collapse_navigation": True,
-    "sticky_navigation": True,
-    "navigation_depth": 4,
-    "includehidden": True,
-    "titles_only": False,
+    "light_logo": "logo-light.svg",
+    "dark_logo": "logo-dark.svg",
 }
 
 # Intersphinx mapping
@@ -62,5 +56,8 @@ napoleon_numpy_docstring = True
 napoleon_include_init_with_doc = False
 napoleon_include_private_with_doc = False
 
-# MyST settings
-source_suffix = [".rst", ".md"]
+# Source settings
+source_suffix = {
+    ".rst": "restructuredtext",
+    ".md": "markdown",
+}

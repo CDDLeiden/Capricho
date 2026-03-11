@@ -176,6 +176,7 @@ capricho get --target-ids CHEMBL203 --metadata-columns organism,tissue,cell_type
 
 These columns are preserved during aggregation and can help you understand data heterogeneity.
 
+(non-pchembl-aggregation)=
 ## Non-pChEMBL Aggregation
 
 By default, CAPRICHO aggregates bioactivity data using the `pchembl_value` column, which represents -log10(molar) potency values. However, many ChEMBL assays (especially ADMET assays) report measurements that aren't suitable for pChEMBL conversion, such as:
@@ -218,6 +219,7 @@ capricho get \
 
 This creates separate aggregations for measurements with different `standard_units` values.
 
+(unit-conversion)=
 ## Unit Conversion
 
 ChEMBL contains bioactivity data reported in many different units, even for the same measurement type. For example, permeability might be reported as `cm/s`, `nm/s`, or `10^-6 cm/s`. This heterogeneity makes cross-study aggregation challenging.
