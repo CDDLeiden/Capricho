@@ -17,7 +17,7 @@ extensions = [
     "sphinx.ext.viewcode",
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
-    "sphinx_click",
+    "sphinx_autodoc_typehints",
     "myst_parser",
 ]
 
