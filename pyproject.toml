@@ -9,9 +9,9 @@ description = "Transparent, flexible and reproducible ChEMBL data curation, aggr
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-keywords = ["ChEMBL", "drug discovery", "machine learning", "chemoinformatics", "computational chemistry"]
-authors = [{ name = "David Araripe", email = "david.araripe17@gmail.com" }]
-maintainers = [{ name = "David Araripe", email = "david.araripe17@gmail.com" }]
+keywords = ["ChEMBL", "drug discovery", "QSAR", "cheminformatics", "activity curation"]
+authors = [{ name = "David Araripe", email = "david@araripe.nl" }]
+maintainers = [{ name = "David Araripe", email = "david@araripe.nl" }]
 classifiers = [
   # "TODO",
   "Programming Language :: Python :: 3",
@@ -42,8 +42,8 @@ dev = ["ruff", "isort", "black", "pytest"]
 docs = [
   "sphinx>=7.0",
   "furo",
-  "sphinx-click>=6.0",
   "myst-parser>=3.0",
+  "sphinx-autodoc-typehints",
 ]
 
 [project.urls]
