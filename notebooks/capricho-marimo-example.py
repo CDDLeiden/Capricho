@@ -17,7 +17,6 @@ def _():
     from rdkit.Chem import AllChem
     from rdkit.Chem.Draw import rdMolDraw2D
     from scipy import stats
-    from sklearn.metrics import r2_score
 
     from Capricho.analysis import (
         DroppingComment,
@@ -26,6 +25,7 @@ def _():
         explode_assay_comparability,
         get_all_comments,
         plot_multi_panel_comparability,
+        r2_score,
     )
     from Capricho.cli.prepare import clean_data
     from Capricho.core.binarization import (
