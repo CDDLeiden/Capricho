@@ -156,9 +156,8 @@ def deaggregate_data(data: pd.DataFrame, sep_str: str = "|") -> pd.DataFrame:
         return data.copy()
 
     aggregated_rows = aggregated_rows.copy()
-    aggregated_rows.loc[:, cols_with_pipe] = aggregated_rows.loc[:, cols_with_pipe].apply(
-        lambda col: col.fillna("").astype(str).str.split(sep_str)
-    )
+    for col in cols_with_pipe:
+        aggregated_rows[col] = aggregated_rows[col].fillna("").astype(str).str.split(sep_str)
 
     exploded = aggregated_rows.explode(column=cols_with_pipe)
     deaggregated = pd.concat([data.drop(index=aggregated_rows.index), exploded])
