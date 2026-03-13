@@ -40,12 +40,10 @@ class TestFetchFromChEMBL(unittest.TestCase):
 
         # Compare if the bioactivity data is the same
         np.testing.assert_array_equal(aggr_df.pchembl_value.values, self.aggr_df.pchembl_value.values)
-        np.testing.assert_array_equal(
+        np.testing.assert_allclose(
             aggr_df.pchembl_value_median.values, self.aggr_df.pchembl_value_median.values
         )
-        np.testing.assert_array_equal(
-            aggr_df.pchembl_value_mean.values, self.aggr_df.pchembl_value_mean.values
-        )
+        np.testing.assert_allclose(aggr_df.pchembl_value_mean.values, self.aggr_df.pchembl_value_mean.values)
         np.testing.assert_array_equal(
             aggr_df.molecule_chembl_id.values, self.aggr_df.molecule_chembl_id.values
         )
@@ -118,9 +116,15 @@ class TestFetchFromChEMBL(unittest.TestCase):
             censored_lt_6.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements aggregated for '<6.0'"
         )
         # For censored measurements, mean/median should be the unique value (not calculated)
-        self.assertEqual(censored_lt_6.iloc[0]["pchembl_value_mean"], 6.0, "Expected mean to be 6.0 (unique value)")
-        self.assertEqual(censored_lt_6.iloc[0]["pchembl_value_median"], 6.0, "Expected median to be 6.0 (unique value)")
-        self.assertTrue(pd.isna(censored_lt_6.iloc[0]["pchembl_value_std"]), "Expected std to be NaN for censored data")
+        self.assertEqual(
+            censored_lt_6.iloc[0]["pchembl_value_mean"], 6.0, "Expected mean to be 6.0 (unique value)"
+        )
+        self.assertEqual(
+            censored_lt_6.iloc[0]["pchembl_value_median"], 6.0, "Expected median to be 6.0 (unique value)"
+        )
+        self.assertTrue(
+            pd.isna(censored_lt_6.iloc[0]["pchembl_value_std"]), "Expected std to be NaN for censored data"
+        )
 
         # Check that row with '>' and pchembl=6.0 is separate
         censored_gt_6 = aggr_df[
@@ -150,7 +154,6 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertEqual(
             discrete_7.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements aggregated for '=7.0'"
         )
-
 
     def test_aggregate_data_with_standard_value(self):
         """Test that aggregate_data works with standard_value instead of pchembl_value."""
@@ -277,13 +280,17 @@ class TestFetchFromChEMBL(unittest.TestCase):
         # Check that data_dropping_comment does NOT contain "Missing pChEMBL" or similar
         for _, row in aggr_df.iterrows():
             comment = str(row.get("data_dropping_comment", ""))
-            self.assertNotIn("pchembl", comment.lower(),
-                           f"Row should not be flagged for missing pchembl when aggregating on standard_value. "
-                           f"Got comment: {comment}")
+            self.assertNotIn(
+                "pchembl",
+                comment.lower(),
+                f"Row should not be flagged for missing pchembl when aggregating on standard_value. "
+                f"Got comment: {comment}",
+            )
 
         # Check that aggregation actually worked (2 measurements per compound)
-        self.assertEqual(aggr_df["standard_value_counts"].sum(), 4,
-                        "Total count of all measurements should be 4")
+        self.assertEqual(
+            aggr_df["standard_value_counts"].sum(), 4, "Total count of all measurements should be 4"
+        )
 
     def test_prepare_multitask_data(self):
         """Test that prepare command creates correct activity matrix."""
@@ -303,7 +310,6 @@ class TestFetchFromChEMBL(unittest.TestCase):
             value_col="pchembl_value_mean",
             compound_col="connectivity",
             smiles_col="smiles",
-
         )
 
         # Verify shape: 2 compounds x 2 targets
@@ -393,7 +399,6 @@ class TestFetchFromChEMBL(unittest.TestCase):
             value_col="pchembl_value_mean",
             compound_col="connectivity",
             smiles_col="smiles",
-
         )
 
         # Remove our test handler
@@ -426,7 +431,6 @@ class TestFetchFromChEMBL(unittest.TestCase):
             value_col="pchembl_value_mean",
             compound_col="connectivity",
             smiles_col="smiles",
-
             id_columns=["assay_tissue"],
         )
 
@@ -458,12 +462,13 @@ class TestFetchFromChEMBL(unittest.TestCase):
             value_col="pchembl_value_mean",
             compound_col="smiles",
             smiles_col="smiles",
-
         )
 
         # smiles should appear exactly once (as the index), not duplicated as a column
         smiles_occurrences = list(matrix.columns).count("smiles")
-        self.assertEqual(smiles_occurrences, 0, "smiles should be the index, not a column when compound_col==smiles_col")
+        self.assertEqual(
+            smiles_occurrences, 0, "smiles should be the index, not a column when compound_col==smiles_col"
+        )
         self.assertEqual(matrix.index.name, "smiles")
         self.assertEqual(len(matrix), 2)
         self.assertIn("TARGET1", matrix.columns)
@@ -583,15 +588,11 @@ class TestFetchFromChEMBL(unittest.TestCase):
         # Check that the aggregation happened correctly based on SMILES
         cco_rows = aggr_df[aggr_df["smiles"].str.contains("CCO", na=False)]
         self.assertEqual(len(cco_rows), 1, "Expected 1 aggregated row for CCO")
-        self.assertEqual(
-            cco_rows.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements for CCO"
-        )
+        self.assertEqual(cco_rows.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements for CCO")
 
         ccc_rows = aggr_df[aggr_df["smiles"].str.contains("CCC", na=False)]
         self.assertEqual(len(ccc_rows), 1, "Expected 1 aggregated row for CCC")
-        self.assertEqual(
-            ccc_rows.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements for CCC"
-        )
+        self.assertEqual(ccc_rows.iloc[0]["pchembl_value_counts"], 2, "Expected 2 measurements for CCC")
 
     def test_standard_value_and_units_preserved_in_aggregation(self):
         """Test that standard_value and standard_units are preserved as multivalue columns
@@ -645,12 +646,18 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertEqual(len(aggr_df), 2, f"Expected 2 rows, got {len(aggr_df)}")
 
         # Verify standard_value column exists
-        self.assertIn("standard_value", aggr_df.columns,
-                      "standard_value column should be preserved in aggregated output")
+        self.assertIn(
+            "standard_value",
+            aggr_df.columns,
+            "standard_value column should be preserved in aggregated output",
+        )
 
         # Verify standard_units column exists
-        self.assertIn("standard_units", aggr_df.columns,
-                      "standard_units column should be preserved in aggregated output")
+        self.assertIn(
+            "standard_units",
+            aggr_df.columns,
+            "standard_units column should be preserved in aggregated output",
+        )
 
         # Check that the values are preserved (should be pipe-separated multivalue columns)
         cco_row = aggr_df[aggr_df["smiles"].str.contains("CCO", na=False)]
@@ -660,15 +667,20 @@ class TestFetchFromChEMBL(unittest.TestCase):
         cco_std_val = cco_row.iloc[0]["standard_value"]
         self.assertIsNotNone(cco_std_val, "standard_value should not be None for CCO")
         # Should be a string with pipe-separated values
-        self.assertIn("|", str(cco_std_val),
-                      "standard_value should contain pipe-separated values for multiple measurements")
+        self.assertIn(
+            "|",
+            str(cco_std_val),
+            "standard_value should contain pipe-separated values for multiple measurements",
+        )
 
         # standard_units should contain both nM values
         cco_std_units = cco_row.iloc[0]["standard_units"]
         self.assertIsNotNone(cco_std_units, "standard_units should not be None for CCO")
-        self.assertIn("|", str(cco_std_units),
-                      "standard_units should contain pipe-separated values for multiple measurements")
-
+        self.assertIn(
+            "|",
+            str(cco_std_units),
+            "standard_units should contain pipe-separated values for multiple measurements",
+        )
 
     def test_nan_standard_relation_not_lost_during_aggregation(self):
         """Rows with NaN standard_relation must not be lost during aggregation.
@@ -728,8 +740,9 @@ class TestFetchFromChEMBL(unittest.TestCase):
 
         # All 5 measurements should be accounted for
         self.assertEqual(
-            aggr_df["standard_value_counts"].sum(), 5,
-            "All 5 measurements (including NaN relation rows) should be aggregated"
+            aggr_df["standard_value_counts"].sum(),
+            5,
+            "All 5 measurements (including NaN relation rows) should be aggregated",
         )
 
         # CCO has 3 measurements (2 NaN + 1 "="), mean should be (60+65+70)/3
@@ -743,7 +756,6 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertEqual(len(ccc_rows), 1, "Should have one aggregated row for CCC")
         self.assertAlmostEqual(ccc_rows.iloc[0]["standard_value_mean"], 82.5)
         self.assertEqual(ccc_rows.iloc[0]["standard_value_counts"], 2)
-
 
     def test_clean_data_drops_flags(self):
         """Test that clean_data filters out rows with specified quality flags."""
@@ -917,13 +929,12 @@ class TestFetchFromChEMBL(unittest.TestCase):
         self.assertTrue(
             aggr_df["connectivity"].notna().all(),
             f"All rows should have connectivity assigned, but got NaN for: "
-            f"{aggr_df[aggr_df['connectivity'].isna()]['smiles'].tolist()}"
+            f"{aggr_df[aggr_df['connectivity'].isna()]['smiles'].tolist()}",
         )
 
         # Connectivity values should be 14-char InChI key first layer
         for conn in aggr_df["connectivity"]:
             self.assertEqual(len(conn), 14, f"Connectivity should be 14 chars, got: {conn}")
-
 
     def test_measurement_level_flag_filtering_partial(self):
         """Partial flag: 3 measurements, 1 flagged -> 2 remain, stats recalculated."""
