@@ -39,12 +39,12 @@ class TestPandasHelper(unittest.TestCase):
         self.assertIn("value_counts", result.columns)
 
         self.assertEqual(result["value_mean"].iloc[0], 2.0)
-        self.assertAlmostEquals(result["value_std"].iloc[0], 0.816497, 6)
+        self.assertAlmostEqual(result["value_std"].iloc[0], 0.816497, 6)
         self.assertEqual(result["value_median"].iloc[0], 2.0)
         self.assertEqual(result["value_counts"].iloc[0], 3)
 
         self.assertEqual(result["value_mean"].iloc[1], 5.0)
-        self.assertAlmostEquals(result["value_std"].iloc[1], 0.816497, 6)
+        self.assertAlmostEqual(result["value_std"].iloc[1], 0.816497, 6)
         self.assertEqual(result["value_median"].iloc[1], 5.0)
         self.assertEqual(result["value_counts"].iloc[1], 3)
 
@@ -246,6 +246,7 @@ class TestStatsMake(unittest.TestCase):
         equal_row = equal_rows.iloc[0]
         self.assertEqual(equal_row["pchembl_value_counts"], 2)
         from scipy.stats.mstats import gmean
+
         expected_mean = gmean([6.5, 8.0])
         self.assertAlmostEqual(equal_row["pchembl_value_mean"], expected_mean)
 
