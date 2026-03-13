@@ -10,7 +10,11 @@ import pandas as pd
 from loguru import logger as log
 from matplotlib import colormaps
 from scipy import stats
-from sklearn.metrics import r2_score
+
+def r2_score(y_true, y_pred):
+    ss_res = np.sum((np.asarray(y_true) - np.asarray(y_pred)) ** 2)
+    ss_tot = np.sum((np.asarray(y_true) - np.mean(y_true)) ** 2)
+    return 1 - ss_res / ss_tot
 
 
 class ProcessingComment(str, Enum):
