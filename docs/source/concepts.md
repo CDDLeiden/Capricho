@@ -8,39 +8,48 @@ One of the most important decisions in bioactivity data analysis is determining 
 
 ### Connectivity-Based (Default)
 
-The `connectivity` method considers compounds the same if they have identical molecular connectivity, ignoring stereochemistry:
+The `connectivity` method identifies compounds by their molecular graph. It's based on the first 14 characters of the InChIKey, which encode atom connectivity but ignore stereochemistry and tautomerism:
 
 ```bash
 capricho get --target-ids CHEMBL203 --compound-equality connectivity
 ```
 
+Because the connectivity layer does not encode stereochemistry, stereoisomers (e.g., R/S enantiomers) are merged during aggregation. To reflect this, CAPRICHO strips stereochemistry from the output SMILES when using connectivity mode, preventing the output from misleadingly retaining an arbitrary enantiomer's representation.
+
 **Advantages:**
-- Aggregates stereoisomers together
-- Useful when stereochemistry data is inconsistent
-- Larger datasets with more statistical power
+- Robust to tautomers: InChI normalizes mobile-hydrogen tautomers (e.g., amide/imidic acid shifts between N, O, S atoms), so tautomeric forms are correctly identified as the same compound
+- Deterministic and computationally lightweight
+
+**Limitations:**
+- Merges stereoisomers that may have different biological activity
+- Does not normalize all tautomers
 
 **Use When:**
-- Stereochemistry information is unreliable
-- You want to combine data from different stereoisomers
-- Building large-scale datasets
+- Stereochemistry information is unreliable or inconsistent across sources
+- You want to combine data from different stereoisomers and tautomers into a single entry
 
 ### Fingerprint-Based
 
-The `mixed_fp` method uses molecular fingerprints (ECFP4 + RDKit) to determine similarity:
+The `mixed_fp` method uses a concatenation of ECFP4 (Morgan, radius 2) and RDKit path-based fingerprints to determine compound identity:
 
 ```bash
 capricho get --target-ids CHEMBL203 --compound-equality mixed_fp
 ```
 
+Using two fingerprint types covers some failure modes of each individual method — ECFP4 captures circular substructure environments while RDKit fingerprints capture path-based features. From those, only ECFP4 enables stereochemical distinctions and is used depending on the presence of the `--chirality` flag.
+
 **Advantages:**
-- More chemically precise
-- Maintains stereochemical distinctions
-- Better for SAR analysis
+- Maintains stereochemical distinctions (with `--chirality`)
+
+**Limitations:**
+- Sensitive to tautomers: different tautomeric forms produce different fingerprint bit vectors, potentially treating the same compound as two different entries
+- Susceptible to bit collisions in molecules with repetitive structural patterns (e.g., peptides, long lipid chains), where distinct substructures may hash to the same bits
+- Computationally heavier than connectivity
 
 **Use When:**
 - Stereochemistry is important for your analysis
 - Building focused datasets for SAR studies
-- Working with well-curated data
+- Working with data where tautomer variation is minimal
 
 ### SMILES-Based
 
@@ -53,9 +62,10 @@ capricho get --target-ids CHEMBL203 --compound-equality smiles
 **Advantages:**
 - Simple and transparent matching logic
 - No additional computation (InChI or fingerprints)
-- Useful when you trust the standardized SMILES
 
-**Note:** This method relies on the standardization performed by the ChEMBL structure pipeline. Beware that different tautomers may not match even if they represent the same compound. Connectivities can be more robust, but may merge stereoisomers.
+**Limitations:**
+- Sensitive to tautomers: different tautomeric forms produce different SMILES strings
+- Relies entirely on the standardization performed by the ChEMBL structure pipeline
 
 ## ChEMBL Backends
 
