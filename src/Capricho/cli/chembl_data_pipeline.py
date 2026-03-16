@@ -5,6 +5,7 @@ from typing import Literal, Optional, Union
 import pandas as pd
 from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
 from job_tqdflex import ParallelApplier
+from rdkit import Chem
 
 from ..chembl.data_flag_functions import (
     flag_censored_activity_comment,
@@ -598,6 +599,21 @@ def aggregate_data(
         )
         df = df.assign(id_array=fps)
     elif compound_equality == "connectivity":
+
+        def _strip_stereo(smi):
+            mol = Chem.MolFromSmiles(smi)
+            if mol is None:
+                return smi
+            Chem.RemoveStereochemistry(mol)
+            return Chem.MolToSmiles(mol)
+
+        if chirality:
+            logger.warning(
+                "Connectivity-based compound equality merges stereoisomers!!!"
+                "Stripping stereochemistry from standard_smiles to avoid "
+                "retaining an arbitrary enantiomer's SMILES in the output."
+            )
+        df["standard_smiles"] = df["standard_smiles"].apply(_strip_stereo)
         connectivities = connectivity_writer(df["standard_smiles"].tolist())
         df = df.assign(id_array=connectivities)
         # Store connectivity before censored modification so we can reuse it after aggregation
