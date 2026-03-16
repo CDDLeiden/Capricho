@@ -84,15 +84,15 @@ capricho --install-completion
 
 ## 📖 Documentation
 
-For comprehensive documentation including detailed CLI options, advanced usage, tutorials, and API reference, visit our [full documentation](docs/).
+For comprehensive documentation including detailed CLI options, advanced usage, tutorials, and API reference, visit our [full documentation](https://capricho.readthedocs.io/en/latest/).
 
 **Quick Links:**
-- [Installation Guide](docs/source/installation.md)
-- [Quick Start](docs/source/quickstart.md)
-- [CLI Reference](docs/source/cli-reference.md)
-- [Key Concepts](docs/source/concepts.md)
-- [ADMET Data Guide](docs/source/guides/admet-data.md)
-- [API Reference](docs/source/api/index.md)
+- [Installation Guide](https://capricho.readthedocs.io/en/latest/installation.html)
+- [Quick Start](https://capricho.readthedocs.io/en/latest/quickstart.html)
+- [CLI Reference](https://capricho.readthedocs.io/en/latest/cli-reference.html)
+- [Key Concepts](https://capricho.readthedocs.io/en/latest/concepts.html)
+- [ADMET Data Guide](https://capricho.readthedocs.io/en/latest/guides/admet-data.html)
+- [API Reference](https://capricho.readthedocs.io/en/latest/api/index.html)
 
 ## License
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

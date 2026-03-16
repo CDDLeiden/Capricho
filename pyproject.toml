@@ -49,7 +49,7 @@ docs = [
 [project.urls]
 homepage = "https://github.com/David-Araripe/Capricho"
 repository = "https://github.com/David-Araripe/Capricho"
-# documentation = "https://readthedocs.org" TODO
+documentation = "https://capricho.readthedocs.io/en/latest/"
 
 [project.scripts]
 capricho = "Capricho.cli.main:app"
