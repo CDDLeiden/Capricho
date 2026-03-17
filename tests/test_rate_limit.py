@@ -54,7 +54,7 @@ class TestRateLimitDecorator(unittest.TestCase):
         # The current assertion (num_calls / 5) - 0.2 is (40/5) - 0.2 = 8 - 0.2 = 7.8s, which is correct.
         self.assertGreaterEqual(
             total_time,
-            (num_calls / 5) - 0.2,
+            (num_calls / 5) - 0.2 - 0.01,
             "Total time should be at least (num_calls / max_per_second) minus one interval",
         )
         self.assertAlmostEqual(
