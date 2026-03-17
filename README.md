@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="logo.svg" alt="" width=240>
+  <img src="https://raw.githubusercontent.com/David-Araripe/CompoundMapper/master/logo.svg" alt="CAPRICHO logo" width=240>
   <p><strong>The ChEMBL data curator that flags issues instead of silently dropping them.</strong></p>
 
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
