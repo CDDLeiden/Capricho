@@ -66,6 +66,9 @@ target-version = "py39"
 fix = true
 ignore = ['E501'] # sometimes it goes longer on the docstrings...
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.isort]
 profile = "black"
 

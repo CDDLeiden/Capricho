@@ -18,7 +18,7 @@ CAPRICHO (**C**hEMBL **A**ggregation **P**ackage with **R**obust **I**nspection 
 
 The development of CAPRICHO is guided by two core principles:
 - **Transparency Above All**: Data curation should never be a black box. Removed data points should be saved to be scrutinized by the user and the original data should be always preserved to ensure data integrity.
-- **Flexibility by Design**: Every modeling project is unique. The tool must support flexible data collection and aggregation, allowing the incorporation of any ChEMBL metadata column to be incorporated into same-compound bioactivity values.
+- **Flexibility by Design**: Every modeling project is unique. Aggregation should be stratified by ChEMBL metadata columns, aggregating repeated compound measurements only within the scope you define as comparable.
 
 ## ✨ Features:
 
