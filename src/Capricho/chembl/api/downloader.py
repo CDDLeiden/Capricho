@@ -274,7 +274,7 @@ def get_assay_table_sql(
 
     where_clauses = []
     if assay_chembl_ids:
-        where_clauses.append[f"a.chembl_id IN ({assay_placeholders})"]
+        where_clauses.append(f"a.chembl_id IN ({assay_placeholders})")
     where_clauses.append(f"a.confidence_score IN ({confidence_placeholders})")
 
     if assay_types:
