@@ -109,8 +109,7 @@ def get_document_table_sql(
     where_clauses.extend(_get_kwargs_where_clauses(**kwargs))
     where_clause = " AND ".join(where_clauses)
 
-    query_str = dedent(
-        f"""\
+    query_str = dedent(f"""\
         SELECT 
             chembl_id AS document_chembl_id,
             doc_type,
@@ -124,8 +123,7 @@ def get_document_table_sql(
         FROM docs
         WHERE
             {where_clause}
-        """
-    )
+        """)
 
     logger.debug(f"Generated SQL query for documents:\n{query_str}")
 
@@ -171,8 +169,7 @@ def get_compound_table_sql(
     where_clauses.extend(_get_kwargs_where_clauses(**kwargs))
     where_clause = " AND ".join(where_clauses)
 
-    query_str = dedent(
-        f"""\
+    query_str = dedent(f"""\
         SELECT
             md.chembl_id AS molecule_chembl_id,
             cs.canonical_smiles,
@@ -193,8 +190,7 @@ def get_compound_table_sql(
             {where_clause}
         ORDER BY
             md.chembl_id
-        """
-    )
+        """)
 
     logger.debug(f"Generated SQL query for compounds:\n{query_str}")
 
@@ -210,8 +206,7 @@ def get_compound_table_sql(
     # Process parent molecule relationships if needed
     parent_molregnos = result["parent_molregno"].dropna().unique().tolist()
     if parent_molregnos:
-        parent_query = dedent(
-            f"""\
+        parent_query = dedent(f"""\
             SELECT
                 mh.parent_molregno,
                 md.chembl_id AS parent_chembl_id,
@@ -221,8 +216,7 @@ def get_compound_table_sql(
             JOIN compound_structures cs ON md.molregno = cs.molregno
             WHERE
                 mh.parent_molregno IN ({', '.join(map(str, parent_molregnos))})
-            """
-        )
+            """)
 
         parent_data = query(
             parent_query,
@@ -284,8 +278,7 @@ def get_assay_table_sql(
     where_clauses.extend(_get_kwargs_where_clauses(**kwargs))
     where_clause = " AND ".join(where_clauses)
 
-    query_str = dedent(
-        f"""\
+    query_str = dedent(f"""\
         SELECT
             a.chembl_id AS assay_chembl_id,
             a.description AS assay_description,
@@ -310,8 +303,7 @@ def get_assay_table_sql(
         LEFT JOIN variant_sequences vs ON a.variant_id = vs.variant_id
         WHERE
             {where_clause}
-        """
-    )
+        """)
 
     logger.debug(f"Generated SQL query for assays:\n{query_str}")
 
@@ -403,8 +395,7 @@ def get_activity_table_sql(
     where_conditions.append("act.standard_value IS NOT NULL")
     where_clause = " AND ".join(where_conditions)
 
-    query_str = dedent(
-        f"""\
+    query_str = dedent(f"""\
         SELECT
             act.activity_id,
             a.chembl_id AS assay_chembl_id,
@@ -440,8 +431,7 @@ def get_activity_table_sql(
             {where_clause}
         ORDER BY
             md.chembl_id, act.activity_id
-        """
-    )
+        """)
 
     logger.debug(f"Generated SQL query for activities:\n{query_str}")
 
@@ -629,8 +619,7 @@ def get_full_activity_data_sql(
         " AND\n            ".join(where_conditions_main) if where_conditions_main else "1=1"
     )
 
-    query_str = dedent(
-        f"""\
+    query_str = dedent(f"""\
         SELECT
             {fields_clause_str}
         FROM
@@ -639,8 +628,7 @@ def get_full_activity_data_sql(
             {where_clause_main_str}
         ORDER BY
             md.chembl_id, act.activity_id, act.standard_value
-    """
-    )
+    """)
 
     logger.debug(f"Generated SQL query:\n{query_str}")
 
@@ -674,16 +662,14 @@ def get_target_names_sql(
     placeholders = ", ".join([f"'{id}'" for id in target_chembl_ids])
     where_clause = f"chembl_id IN ({placeholders})"
 
-    query_str = dedent(
-        f"""\
+    query_str = dedent(f"""\
         SELECT
             chembl_id,
             pref_name
         FROM target_dictionary
         WHERE
             {where_clause}
-        """
-    )
+        """)
 
     logger.debug(f"Generated SQL query for target names:\n{query_str}")
 
@@ -720,8 +706,7 @@ def get_assay_size_sql(
     placeholders = ", ".join([f"'{id}'" for id in ids])
     where_clause = f"a.chembl_id IN ({placeholders})"
 
-    query_str = dedent(
-        f"""\
+    query_str = dedent(f"""\
         SELECT
             a.chembl_id AS assay_chembl_id,
             COUNT(DISTINCT act.molregno) as assay_size
@@ -732,8 +717,7 @@ def get_assay_size_sql(
             {where_clause}
         GROUP BY
             a.chembl_id
-        """
-    )
+        """)
 
     logger.debug(f"Generated SQL query for assay size:\n{query_str}")
 
