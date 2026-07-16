@@ -165,7 +165,7 @@ Control how data is processed and aggregated:
 | Option | Description | Default |
 |---|---|---|
 | `-calc`, `--calculate-pchembl` | Calculate pChEMBL values if not reported. **Required when using censored data** (`--standard-relation` includes `<` or `>`). See [Standard Relations](concepts.md). | `False` |
-| `-agg-on`, `--aggregate-on` | Column to aggregate statistics on. Use `standard_value` for non-pChEMBL data (e.g., ADMET assays with % inhibition). See [Non-pChEMBL Aggregation](non-pchembl-aggregation). | `pchembl_value` |
+| `-vcol`, `--value-column` | Column holding the experimental measurement to summarize (mean/median/std). Use `standard_value` for non-pChEMBL data (e.g., ADMET assays with % inhibition). See [Non-pChEMBL Aggregation](non-pchembl-aggregation). | `pchembl_value` |
 | `-conu`, `--convert-units` | Convert units to standard formats before aggregation. See [Unit Conversion](unit-conversion). | `False` |
 | `-chiral`, `--chirality` | Consider chirality during fingerprint calculation | `False` |
 | `-duchi`, `--drop-unassigned-chiral` | Drop entries with unassigned chiral centers | `False` |
@@ -174,7 +174,7 @@ Control how data is processed and aggregated:
 | `-smr`, `--strict-mutant-removal` | Flag assays with mutant-related keywords for removal | `False` |
 | `-cpd-eq`, `--compound-equality` | Method for compound equality determination | `connectivity` |
 | `-mcols`, `--metadata-columns` | Extra metadata columns to keep, comma-separated | `[]` |
-| `-idcols`, `--id-columns` | Extra ID columns for aggregation, comma-separated | `[]` |
+| `-idcols`, `--id-columns` | Additional columns to append to the aggregation key (compound + task), comma-separated. E.g. `assay_chembl_id` keeps measurements from different assays separate. | `[]` |
 
 #### Aggregation Column Options
 - **pchembl_value**: (Default) Aggregate on pChEMBL values (-log10 molar potency). Uses geometric mean.
@@ -236,7 +236,7 @@ capricho get \
   --assay-ids CHEMBL1112933,CHEMBL3529279,CHEMBL3529278 \
   --assay-types A \
   --confidence-scores 0,1,2,3,4,5,6,7,8,9 \
-  --aggregate-on standard_value \
+  --value-column standard_value \
   --convert-units \
   --id-columns standard_units,assay_cell_type \
   --drop-unassigned-chiral \
@@ -296,8 +296,8 @@ These options control the optional multitask activity matrix output:
 | `--task-col` | Column to use as task identifier | `target_chembl_id` |
 | `--compound-col` | Column for compound identity (`connectivity` or `smiles`) | `connectivity` |
 | `--smiles-col` | Column containing SMILES strings | `smiles` |
-| `-agg-on`, `--aggregate-on` | Column that was aggregated on during `capricho get`. Derives the value column as `{aggregate_on}_mean`. | `pchembl_value` |
-| `--id-columns` | Extra columns to combine with `task_col` for composite task identifiers. Use the same columns passed to `capricho get --id-columns` during aggregation. | `None` |
+| `-vcol`, `--value-column` | Column holding the experimental measurement, as passed to `capricho get --value-column`. Statistics are read from `{value_column}_mean`. | `pchembl_value` |
+| `--id-columns` | Additional columns to combine with `task_col` for composite task identifiers. Use the same columns passed to `capricho get --id-columns` during aggregation. | `None` |
 
 ### Output Options
 

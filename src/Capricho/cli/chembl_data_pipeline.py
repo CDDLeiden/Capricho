@@ -569,8 +569,8 @@ def aggregate_data(
             `["assay_chembl_id"]` to this argument, for example, will only aggregate the data
             if the compound is the same and the assay is the same.
         extra_multival_cols: list of extra columns that you'd like to keep as aggregated
-            values in the final dataframe. Caveat: these columns will be displayes as (str)
-            separated by `;` in the final dataframe. Defaults to [].
+            values in the final dataframe. Caveat: these columns will be displayed as (str)
+            separated by `|` in the final dataframe. Defaults to [].
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data

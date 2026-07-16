@@ -52,7 +52,7 @@ DEFAULTS = {
     "min_assay_overlap": 0,
     "strict_mutant_removal": False,
     "compound_equality": "connectivity",
-    "aggregate_on": "pchembl_value",
+    "value_column": "pchembl_value",
 }
 
 DEFAULT_FALSE_ARGS = [
@@ -129,7 +129,7 @@ class CompoundIdColumn(str, Enum):
     smiles = "smiles"
 
 
-class AggregationColumn(str, Enum):
+class ValueColumn(str, Enum):
     pchembl_value = "pchembl_value"
     standard_value = "standard_value"
 
@@ -384,14 +384,15 @@ def get_data(
             help="Method for compound equality determination. mixed_fp uses combined ECFP4 and RDKit fingerprints.",
         ),
     ] = DEFAULTS["compound_equality"],
-    aggregate_on: Annotated[
-        AggregationColumn,
+    value_column: Annotated[
+        ValueColumn,
         typer.Option(
-            "-agg-on",
-            "--aggregate-on",
-            help="Column to aggregate statistics on. Use 'standard_value' for non-pChEMBL data (e.g., % inhibition).",
+            "-vcol",
+            "--value-column",
+            help="Column holding the experimental measurement to summarize (mean/median/std). "
+            "Use 'standard_value' for non-pChEMBL data (e.g., % inhibition).",
         ),
-    ] = DEFAULTS["aggregate_on"],
+    ] = DEFAULTS["value_column"],
     # --- Metadata & Aggregation ---
     metadata_columns: Annotated[
         str,
@@ -410,7 +411,8 @@ def get_data(
             "-idcols",
             "--id-columns",
             parser=csv_string,
-            help="Extra ID columns for aggregation, comma-separated. E.g.: 'assay_chembl_id'",
+            help="Additional columns to append to the aggregation key (compound + task), comma-separated. "
+            "E.g.: 'assay_chembl_id' keeps measurements from different assays separate.",
             show_default=False,
             metavar="col1,col2,...",
         ),
@@ -606,7 +608,7 @@ def get_data(
         max_assay_size=max_assay_size,
         min_assay_overlap=min_assay_overlap,
         strict_mutant_removal=strict_mutant_removal,
-        value_col=aggregate_on.value,
+        value_col=value_column.value,
         enable_unit_conversion=convert_units,
     )
     pre_agg_count = len(pre_agg_df)
@@ -619,7 +621,7 @@ def get_data(
         aggregate_mutants=aggregate_mutants,
         output_path=output_path,
         compound_equality=compound_equality.value,
-        value_col=aggregate_on.value,
+        value_col=value_column.value,
     )
 
     _log_pipeline_summary(pre_agg_df, pre_aggregation_count=pre_agg_count, post_aggregation_count=len(df))
@@ -876,14 +878,15 @@ def prepare_data(
             metavar="str",
         ),
     ] = "target_chembl_id",
-    aggregate_on: Annotated[
-        AggregationColumn,
+    value_column: Annotated[
+        ValueColumn,
         typer.Option(
-            "-agg-on",
-            "--aggregate-on",
-            help="Column that was aggregated on during 'capricho get'. Derives the value column as '{aggregate_on}_mean'.",
+            "-vcol",
+            "--value-column",
+            help="Column holding the experimental measurement, as passed to 'capricho get --value-column'. "
+            "Statistics are read from '{value_column}_mean'.",
         ),
-    ] = AggregationColumn.pchembl_value,
+    ] = ValueColumn.pchembl_value,
     compound_col: Annotated[
         CompoundIdColumn,
         typer.Option(
@@ -913,7 +916,7 @@ def prepare_data(
         typer.Option(
             "--id-columns",
             parser=csv_string,
-            help="Extra columns to combine with task_col for composite task identifiers. "
+            help="Additional columns to combine with task_col for composite task identifiers. "
             "Use the same columns passed to 'capricho get --id-columns' during aggregation.",
             metavar="col1,col2,...",
         ),
@@ -1063,8 +1066,7 @@ def prepare_data(
         flags_to_remove.append(DroppingComment.INSUFFICIENT_ASSAY_OVERLAP.value)
         flags_to_remove.append(DroppingComment.INSUFFICIENT_ASSAY_OVERLAP_WITH_METADATA.value)
 
-    # Derive value column from aggregate_on
-    value_col = aggregate_on.value
+    value_col = value_column.value
 
     # Clean data: deduplicate, resolve annotation errors, filter flags
     df = clean_data(
@@ -1076,7 +1078,7 @@ def prepare_data(
     )
 
     # Use mean column for the activity matrix
-    value_col_mean = f"{aggregate_on.value}_mean"
+    value_col_mean = f"{value_column.value}_mean"
 
     activity_matrix = prepare_multitask_data(
         df=df,

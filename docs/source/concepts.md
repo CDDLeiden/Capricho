@@ -197,13 +197,13 @@ By default, CAPRICHO aggregates bioactivity data using the `pchembl_value` colum
 - **Half-life** (e.g., hours)
 - **Solubility** (e.g., µg/mL)
 
-For these measurements, use `--aggregate-on standard_value`:
+For these measurements, use `--value-column standard_value`:
 
 ```bash
 capricho get \
   --assay-ids CHEMBL1112933,CHEMBL3529279 \
   --assay-types A \
-  --aggregate-on standard_value \
+  --value-column standard_value \
   --output-path permeability_data.csv
 ```
 
@@ -222,7 +222,7 @@ When aggregating on `standard_value`, ensure you don't inadvertently combine mea
 ```bash
 capricho get \
   --assay-ids CHEMBL1112933,CHEMBL3529279 \
-  --aggregate-on standard_value \
+  --value-column standard_value \
   --id-columns standard_units \
   --output-path permeability_data.csv
 ```
@@ -239,7 +239,7 @@ The `--convert-units` flag enables automatic unit conversion before aggregation:
 ```bash
 capricho get \
   --assay-ids CHEMBL1112933,CHEMBL3529279 \
-  --aggregate-on standard_value \
+  --value-column standard_value \
   --convert-units \
   --output-path permeability_data.csv
 ```
@@ -265,7 +265,7 @@ capricho get \
   --assay-ids CHEMBL1112933,CHEMBL3529279,CHEMBL3529278 \
   --assay-types A \
   --confidence-scores 0,1,2,3,4,5,6,7,8,9 \
-  --aggregate-on standard_value \
+  --value-column standard_value \
   --convert-units \
   --id-columns standard_units,assay_cell_type \
   --drop-unassigned-chiral \
@@ -488,7 +488,7 @@ Every run generates a JSON recipe file containing the full command and all param
   "assay_types": ["B", "F"],
   "chembl_version": "36",
   "compound_equality": "connectivity",
-  "aggregate_on": "pchembl_value"
+  "value_column": "pchembl_value"
 }
 ```
 
