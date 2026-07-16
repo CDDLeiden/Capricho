@@ -11,6 +11,8 @@ from loguru import logger as log
 from matplotlib import colormaps
 from scipy import stats
 
+from .chembl.unit_conversions import is_unit_annotation_error_diff
+
 def r2_score(y_true, y_pred):
     ss_res = np.sum((np.asarray(y_true) - np.asarray(y_pred)) ** 2)
     ss_tot = np.sum((np.asarray(y_true) - np.mean(y_true)) ** 2)
@@ -437,7 +439,7 @@ def resolve_annotation_errors(
                 if row_a[assay_id_col] == row_b[assay_id_col]:
                     continue
 
-                # Check if values differ by ~3.0 or ~6.0
+                # Check if values differ by an exact multiple of 3 log units (3.0, 6.0, 9.0, ...)
                 val_a = row_a["__value_numeric__"]
                 val_b = row_b["__value_numeric__"]
 
@@ -445,11 +447,7 @@ def resolve_annotation_errors(
                     continue
 
                 diff = abs(val_a - val_b)
-                is_annotation_error = np.isclose(diff, 3.0, rtol=1e-9, atol=1e-9) or np.isclose(
-                    diff, 6.0, rtol=1e-9, atol=1e-9
-                )
-
-                if not is_annotation_error:
+                if not bool(is_unit_annotation_error_diff(diff)):
                     continue
 
                 pairs_detected += 1

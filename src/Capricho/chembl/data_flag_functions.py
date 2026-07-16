@@ -22,6 +22,7 @@ from ..core.default_fields import (
 )
 from ..core.pandas_helper import add_comment, conflicting_duplicates
 from ..logger import logger
+from .unit_conversions import is_unit_annotation_error_diff
 
 
 ### Marking readouts that will be DROPPED by CompoundMapper ###
@@ -295,7 +296,7 @@ def flag_insufficient_assay_overlap(
     This function calculates overlap across ALL assays regardless of size flags, following
     CAPRICHO's principle of transparency. Overlap is only counted when:
     1. Compounds have DIFFERENT pChEMBL values across assays (same values indicate annotation errors)
-    2. The difference is not exactly 3.0 or 6.0 log units (likely censored/inactive measurements)
+    2. The difference is not an exact multiple of 3.0 log units (likely unit-annotation errors)
     3. Assays are from DIFFERENT documents (same-document overlaps are excluded)
 
     Args:
@@ -336,7 +337,7 @@ def flag_insufficient_assay_overlap(
     logger.info(
         "Calculating assay overlap with the following criteria:\n"
         "  - Only counting compounds with DIFFERENT pChEMBL values across assays\n"
-        "  - Excluding differences of exactly 3.0 or 6.0 log units (likely annotation errors)\n"
+        "  - Excluding differences that are exact multiples of 3.0 log units (likely annotation errors)\n"
         "  - Excluding overlaps within the same document"
     )
 
@@ -382,12 +383,12 @@ def flag_insufficient_assay_overlap(
         # 1. Different documents
         pairs = pairs[pairs["document_chembl_id_1"] != pairs["document_chembl_id_2"]]
 
-        # 2. Different pChEMBL values (excluding 3.0 and 6.0 log unit differences)
+        # 2. Different pChEMBL values, excluding differences that are exact multiples of 3 log
+        #    units (3.0, 6.0, 9.0, ...) since those are likely unit-annotation errors, not overlap.
         pchembl_diff = np.abs(pairs["pchembl_value_1"] - pairs["pchembl_value_2"])
         pairs = pairs[
             (pairs["pchembl_value_1"] != pairs["pchembl_value_2"])
-            & (pchembl_diff != 3.0)
-            & (pchembl_diff != 6.0)
+            & ~is_unit_annotation_error_diff(pchembl_diff)
         ]
 
         # Count overlapping compounds per assay pair

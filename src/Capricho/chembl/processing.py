@@ -15,6 +15,7 @@ from .data_flag_functions import (
     flag_with_data_validity_comment,
 )
 from .exceptions import BioactivitiesNotFoundError
+from .unit_conversions import is_unit_annotation_error_diff
 
 
 def convert_to_log10(df: pd.DataFrame) -> pd.DataFrame:
@@ -188,11 +189,9 @@ def curate_activity_pairs(
     # Calculate absolute difference in activity values
     valid_pairs["abs_diff"] = np.abs(valid_pairs[activity_col_L] - valid_pairs[activity_col_R])
 
-    # Check if the absolute difference is close to 3.0 and 6.0
-    # we use np.isclose to handle floating point precision issues (e.g.: 3.000000001)
-    error_in_exact_3 = np.isclose(valid_pairs["abs_diff"], 3.0, rtol=1e-9, atol=1e-9)
-    error_in_exact_6 = np.isclose(valid_pairs["abs_diff"], 6.0, rtol=1e-9, atol=1e-9)
-    problematic_pairs = valid_pairs[error_in_exact_3 | error_in_exact_6]
+    # Flag pairs whose difference is an exact multiple of 3 log units (3.0, 6.0, 9.0, ...),
+    # the signature of a metric-prefix unit-annotation error (e.g. nM reported as uM).
+    problematic_pairs = valid_pairs[is_unit_annotation_error_diff(valid_pairs["abs_diff"])]
 
     rows_to_flag_indices = set()
     if not problematic_pairs.empty:
@@ -206,7 +205,7 @@ def curate_activity_pairs(
                 f"Marking/flagging rows for molecule {row_pair[mol_id_col]} (indices: {row_pair[orig_idx_col_L]}, {row_pair[orig_idx_col_R]}), "
                 f"assays {row_pair[assay_col_L]} (value: {row_pair[activity_col_L]}) and "
                 f"{row_pair[assay_col_R]} (value: {row_pair[activity_col_R]}) "
-                f"due to activity value difference of 3.0 or 6.0."
+                f"due to activity value difference being an exact multiple of 3.0 log units."
             )
 
     if rows_to_flag_indices:
