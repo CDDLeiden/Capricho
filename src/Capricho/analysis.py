@@ -752,7 +752,7 @@ def format_axis_label(
     return " ".join(parts)
 
 
-def format_title_with_n(title: str, n_pairs: int) -> str:
+def format_title_with_n(title: str, n_pairs: int, sep: str = " ") -> str:
     """Append the number of pairwise assay comparisons to a plot title.
 
     Each point in a comparability scatter plot is one assay-versus-assay comparison
@@ -762,13 +762,39 @@ def format_title_with_n(title: str, n_pairs: int) -> str:
     Args:
         title: Plot title, possibly empty.
         n_pairs: Number of pairwise comparisons plotted.
+        sep: Separator between the title and the sample size. Pass "\\n" to keep long
+            multi-panel titles from overlapping their neighbours.
 
     Returns:
         Title with the sample size appended, e.g. "Cleaned Ki Data (n = 383 pairs)".
     """
     noun = "pair" if n_pairs == 1 else "pairs"
     sample_size = f"n = {n_pairs:,} {noun}"
-    return f"{title} ({sample_size})" if title else sample_size
+    return f"{title}{sep}({sample_size})" if title else sample_size
+
+
+def format_metrics_text(r2: float, rho: float, tau: float) -> str:
+    """Format the comparability metrics annotation, omitting undefined values.
+
+    Correlations are undefined for panels holding too few distinct points (a single
+    repeated comparison has zero variance). Printing "nan" there reads as a plotting
+    failure rather than as a property of the data, so undefined metrics are dropped
+    and the panel's sample size in the title carries the explanation.
+
+    Args:
+        r2: R² score.
+        rho: Spearman rho.
+        tau: Kendall tau.
+
+    Returns:
+        Newline-separated LaTeX annotation, empty when no metric is defined.
+    """
+    metrics = [
+        (r2, r"$R^2: {:.2f}$"),
+        (rho, r"Spearman $\rho: {:.2f}$"),
+        (tau, r"Kendall $\tau: {:.2f}$"),
+    ]
+    return "\n".join(template.format(value) for value, template in metrics if np.isfinite(value))
 
 
 def _log_comparability_metrics(
@@ -898,6 +924,7 @@ def plot_subset(
         alpha=alpha,
         edgecolors="none",
         color=color,
+        zorder=3,  # above the reference lines, which would otherwise hide points on y=x
     )
     ax.set_title(format_title_with_n(title, len(xp)) if show_n else title)
 
@@ -939,7 +966,7 @@ def plot_subset(
     ax.text(
         1.0,
         0.175,
-        rf"$R^2: {r2:.2f}$" + "\n" + rf"Spearman $\rho: {r:.2f}$" + "\n" + rf"Kendall $\tau: {tau:.2f}$",
+        format_metrics_text(r2, r, tau),
         transform=ax.transAxes,
         verticalalignment="top",
         horizontalalignment="right",
@@ -1195,9 +1222,13 @@ def plot_multi_panel_comparability(
             edgecolors="none",
             label=title_str,
             color=color,
+            zorder=3,  # above the reference lines, which would otherwise hide points on y=x
         )
         panel_title = f"{idx}. {title_str}"
-        ax.set_title(format_title_with_n(panel_title, len(xp)) if show_n else panel_title)
+        ax.set_title(
+            format_title_with_n(panel_title, len(xp), sep="\n") if show_n else panel_title,
+            fontsize="medium",
+        )
 
         # Add reference lines
         if reference_lines and (value_column == "pchembl_value" or log_transform):
@@ -1224,7 +1255,7 @@ def plot_multi_panel_comparability(
         ax.text(
             1.0,
             0.175,
-            rf"$R^2: {r2:.2f}$" + "\n" + rf"Spearman $\rho: {r:.2f}$" + "\n" + rf"Kendall $\tau: {tau:.2f}$",
+            format_metrics_text(r2, r, tau),
             transform=ax.transAxes,
             verticalalignment="top",
             horizontalalignment="right",
