@@ -752,6 +752,25 @@ def format_axis_label(
     return " ".join(parts)
 
 
+def format_title_with_n(title: str, n_pairs: int) -> str:
+    """Append the number of pairwise assay comparisons to a plot title.
+
+    Each point in a comparability scatter plot is one assay-versus-assay comparison
+    for a single compound, not a compound or a raw measurement. The unit is spelled
+    out so the count cannot be misread as a compound count.
+
+    Args:
+        title: Plot title, possibly empty.
+        n_pairs: Number of pairwise comparisons plotted.
+
+    Returns:
+        Title with the sample size appended, e.g. "Cleaned Ki Data (n = 383 pairs)".
+    """
+    noun = "pair" if n_pairs == 1 else "pairs"
+    sample_size = f"n = {n_pairs:,} {noun}"
+    return f"{title} ({sample_size})" if title else sample_size
+
+
 def _log_comparability_metrics(
     xp: np.ndarray,
     yp: np.ndarray,
@@ -819,12 +838,14 @@ def plot_subset(
     axis_limits: Optional[Tuple[float, float]] = None,
     reference_lines: bool = True,
     units: Optional[str] = None,
+    show_n: bool = True,
 ) -> Tuple[plt.Figure, plt.Axes]:
     """Create scatter plot comparing values across assays with correlation metrics.
 
     Args:
         subset: DataFrame with {value_column}_x and {value_column}_y columns.
-        title: Plot title.
+        title: Plot title. The number of plotted pairwise comparisons is appended
+            unless show_n is False.
         color: Color for scatter points.
         alpha: Transparency for scatter points.
         figsize: Figure size as (width, height) tuple.
@@ -844,6 +865,7 @@ def plot_subset(
             most meaningful for pChEMBL-scale data.
         units: Unit string for axis labels (e.g., "10^-6 cm/s"). Converted to LaTeX
             format automatically. Only used when axis_label is None.
+        show_n: If True, append the number of pairwise comparisons to the title.
 
     Returns:
         Tuple of (figure, axes) objects.
@@ -877,7 +899,7 @@ def plot_subset(
         edgecolors="none",
         color=color,
     )
-    ax.set_title(title)
+    ax.set_title(format_title_with_n(title, len(xp)) if show_n else title)
 
     # Determine axis limits
     if axis_limits is not None:
@@ -1043,7 +1065,8 @@ def plot_multi_panel_comparability(
     axis_limits: Optional[Tuple[float, float]] = None,
     reference_lines: bool = True,
     units: Optional[str] = None,
-    alpha: float = 0.3,
+    alpha: float = 0.5,
+    show_n: bool = True,
 ) -> Tuple[plt.Figure, np.ndarray]:
     """Create multi-panel plot showing comparability for different data quality flags.
 
@@ -1066,6 +1089,8 @@ def plot_multi_panel_comparability(
         reference_lines: If True, draw identity and ±1/±0.3 reference lines.
         units: Unit string for axis labels (e.g., "10^-6 cm/s"). Converted to LaTeX
             format automatically. Only used when axis_label is None.
+        alpha: Transparency for scatter points.
+        show_n: If True, append each panel's number of pairwise comparisons to its title.
 
     Returns:
         Tuple of (figure, axes array).
@@ -1091,7 +1116,10 @@ def plot_multi_panel_comparability(
         return fig, np.array([ax])
 
     nrows = int(np.ceil(len(comments_with_data) / ncols))
-    colors = [tuple([*col] + [1]) for col in colormaps["tab20"].colors]
+    # tab10 keeps every panel saturated. tab20 alternates dark/light pairs, tinting
+    # every even-numbered panel too faintly to read.
+    palette = colormaps["tab10"].colors
+    colors = [tuple([*palette[i % len(palette)]] + [1]) for i in range(len(comments_with_data))]
 
     fig, axs = plt.subplots(nrows, ncols, figsize=figsize)
     axs_flat = axs.flatten() if nrows > 1 else [axs] if ncols == 1 else axs
@@ -1168,7 +1196,8 @@ def plot_multi_panel_comparability(
             label=title_str,
             color=color,
         )
-        ax.set_title(f"{idx}. {title_str}")
+        panel_title = f"{idx}. {title_str}"
+        ax.set_title(format_title_with_n(panel_title, len(xp)) if show_n else panel_title)
 
         # Add reference lines
         if reference_lines and (value_column == "pchembl_value" or log_transform):

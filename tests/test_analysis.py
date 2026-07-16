@@ -2,6 +2,7 @@
 
 import unittest
 
+import numpy as np
 import pandas as pd
 
 from Capricho.analysis import (
@@ -954,6 +955,161 @@ class TestLogScaleTransformation(unittest.TestCase):
 
         import matplotlib.pyplot as plt
 
+        plt.close(fig)
+
+
+class TestFormatTitleWithN(unittest.TestCase):
+    """Tests for format_title_with_n function."""
+
+    def test_appends_pair_count(self):
+        """Test that the pairwise comparison count is appended to the title."""
+        from Capricho.analysis import format_title_with_n
+
+        self.assertEqual(format_title_with_n("Cleaned Ki Data", 383), "Cleaned Ki Data (n = 383 pairs)")
+
+    def test_thousands_separator(self):
+        """Test that large counts are formatted with a thousands separator."""
+        from Capricho.analysis import format_title_with_n
+
+        self.assertEqual(
+            format_title_with_n("pChEMBL Duplication Across Documents", 3360),
+            "pChEMBL Duplication Across Documents (n = 3,360 pairs)",
+        )
+
+    def test_single_pair_is_singular(self):
+        """Test that a single comparison uses the singular noun."""
+        from Capricho.analysis import format_title_with_n
+
+        self.assertEqual(format_title_with_n("Salt/solvent removed", 1), "Salt/solvent removed (n = 1 pair)")
+
+    def test_empty_title_reports_count_alone(self):
+        """Test that an empty title yields the count without stray whitespace."""
+        from Capricho.analysis import format_title_with_n
+
+        self.assertEqual(format_title_with_n("", 2), "n = 2 pairs")
+
+    def test_zero_pairs(self):
+        """Test that an empty subset is reported as zero pairs."""
+        from Capricho.analysis import format_title_with_n
+
+        self.assertEqual(format_title_with_n("Empty Flag", 0), "Empty Flag (n = 0 pairs)")
+
+
+class TestSampleSizeInPlotTitles(unittest.TestCase):
+    """Tests that plots report the number of pairwise comparisons in their titles."""
+
+    @staticmethod
+    def _exploded_fixture():
+        """Build a minimal exploded subset with two distinguishable flags."""
+        return pd.DataFrame(
+            {
+                "pchembl_value_x": ["7.0", "8.0", "6.5", "9.0"],
+                "pchembl_value_y": ["7.2", "8.4", "6.1", "9.3"],
+                "assay_chembl_id_x": ["CHEMBL1", "CHEMBL1", "CHEMBL3", "CHEMBL3"],
+                "assay_chembl_id_y": ["CHEMBL2", "CHEMBL2", "CHEMBL4", "CHEMBL4"],
+                "data_dropping_comment_x": [
+                    "Data Validity Comment Present",
+                    "Data Validity Comment Present",
+                    "Undefined Stereochemistry",
+                    "Undefined Stereochemistry",
+                ],
+                "data_dropping_comment_y": [
+                    "Data Validity Comment Present",
+                    "Data Validity Comment Present",
+                    "Undefined Stereochemistry",
+                    "Undefined Stereochemistry",
+                ],
+                "data_processing_comment_x": ["", "", "", ""],
+                "data_processing_comment_y": ["", "", "", ""],
+                "dropping_comment": [
+                    "Data Validity Comment Present",
+                    "Data Validity Comment Present",
+                    "Undefined Stereochemistry",
+                    "Undefined Stereochemistry",
+                ],
+                "processing_comment": ["", "", "", ""],
+            }
+        )
+
+    def test_plot_subset_reports_sample_size(self):
+        """Test that plot_subset appends the number of plotted pairs to the title."""
+        import matplotlib.pyplot as plt
+
+        from Capricho.analysis import plot_subset
+
+        df = pd.DataFrame(
+            {
+                "pchembl_value_x": [7.0, 8.0, 6.5],
+                "pchembl_value_y": [7.2, 8.4, 6.1],
+            }
+        )
+
+        fig, ax = plot_subset(df, title="Cleaned Ki Data")
+        self.assertEqual(ax.get_title(), "Cleaned Ki Data (n = 3 pairs)")
+        plt.close(fig)
+
+    def test_plot_subset_sample_size_can_be_disabled(self):
+        """Test that show_n=False restores the bare title."""
+        import matplotlib.pyplot as plt
+
+        from Capricho.analysis import plot_subset
+
+        df = pd.DataFrame(
+            {
+                "pchembl_value_x": [7.0, 8.0],
+                "pchembl_value_y": [7.2, 8.4],
+            }
+        )
+
+        fig, ax = plot_subset(df, title="Cleaned Ki Data", show_n=False)
+        self.assertEqual(ax.get_title(), "Cleaned Ki Data")
+        plt.close(fig)
+
+    def test_multi_panel_reports_per_panel_sample_size(self):
+        """Test that each panel title carries its own pair count."""
+        import matplotlib.pyplot as plt
+
+        from Capricho.analysis import DroppingComment, plot_multi_panel_comparability
+
+        fig, axs = plot_multi_panel_comparability(
+            self._exploded_fixture(),
+            [
+                DroppingComment.DATA_VALIDITY_COMMENT.value,
+                DroppingComment.UNDEFINED_STEREOCHEMISTRY.value,
+            ],
+            ncols=2,
+        )
+
+        titles = [ax.get_title() for ax in np.asarray(axs).flatten() if ax.get_visible()]
+        self.assertEqual(titles[0], "1. Data Validity Comment Present (n = 2 pairs)")
+        self.assertEqual(titles[1], "2. Undefined Stereochemistry (n = 2 pairs)")
+        plt.close(fig)
+
+    def test_multi_panel_uses_saturated_colors(self):
+        """Test that panels use tab10 colors, which have no washed-out light variants.
+
+        tab20 alternates dark/light pairs, so every even-numbered panel was rendered
+        in a light tint that reviewers found illegible.
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib import colormaps
+
+        from Capricho.analysis import DroppingComment, plot_multi_panel_comparability
+
+        fig, axs = plot_multi_panel_comparability(
+            self._exploded_fixture(),
+            [
+                DroppingComment.DATA_VALIDITY_COMMENT.value,
+                DroppingComment.UNDEFINED_STEREOCHEMISTRY.value,
+            ],
+            ncols=2,
+        )
+
+        tab10 = [tuple(c) for c in colormaps["tab10"].colors]
+        axs_flat = np.asarray(axs).flatten()
+        for idx in range(2):
+            facecolor = tuple(axs_flat[idx].collections[0].get_facecolor()[0][:3])
+            self.assertEqual(facecolor, tab10[idx], f"Panel {idx + 1} should use tab10 color {idx}")
         plt.close(fig)
 
 
