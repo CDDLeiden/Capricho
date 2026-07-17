@@ -549,7 +549,18 @@ def get_full_activity_data_sql(
         placeholders = ", ".join([f"'{atype}'" for atype in assay_types])
         where_conditions_main.append(f"a.assay_type IN ({placeholders})")
 
+    # docs.chembl_release_id was introduced in ChEMBL 33; earlier releases (e.g. the
+    # ChEMBL 32 that Landrum and Riniker used) lack the column, so selecting it errors.
+    records_release = int(str(downloader_configs["version"])) >= 33
+
     if chembl_release:
+        if not records_release:
+            raise ValueError(
+                f"ChEMBL {downloader_configs['version']} does not record which release a "
+                "document came from (docs.chembl_release_id was introduced in ChEMBL 33), so "
+                "chembl_release cannot be applied. Drop the release filter, or query ChEMBL 33 "
+                "or newer."
+            )
         where_conditions_main.append(
             f"(d.chembl_release_id IS NULL OR d.chembl_release_id <= {chembl_release})"
         )
@@ -599,7 +610,8 @@ def get_full_activity_data_sql(
         "d.title",
         "a.variant_id",
         "vs.mutation",
-        "d.chembl_release_id AS chembl_release",
+        # NULL keeps the chembl_release column that downstream aggregation requires.
+        "d.chembl_release_id AS chembl_release" if records_release else "NULL AS chembl_release",
     ]
     all_fields = base_fields + (additional_fields if additional_fields else [])
 
