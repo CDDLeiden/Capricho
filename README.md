@@ -59,6 +59,9 @@ python -m pip install git+https://github.com/David-Araripe/Capricho.git
 # Download ChEMBL database
 capricho download
 
+# ...or use a ChEMBL SQLite dump you already have, read where it lies
+capricho download --set-from-path /path/to/chembl_35.db
+
 # Get bioactivity data for EGFR
 capricho get --target-ids CHEMBL203 --output-path egfr_data.csv
 

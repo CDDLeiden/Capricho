@@ -182,9 +182,52 @@ def download(
             help="Custom pystow storage path. Defaults to None, saving to ~/.data/chembl/.",
         ),
     ] = None,
+    set_from_path: Annotated[
+        Optional[Path],
+        typer.Option(
+            "--set-from-path",
+            help=(
+                "Use a ChEMBL SQLite database you already have instead of downloading one. "
+                "Takes a chembl_<version>.db file or a directory holding one or more of them, "
+                "and registers every release found unless --version narrows it down."
+            ),
+        ),
+    ] = None,
+    unset_path: Annotated[
+        bool,
+        typer.Option(
+            "--unset-path",
+            help="Forget the database registered with --set-from-path for the given version.",
+        ),
+    ] = False,
 ):
-    """Download ChEMBL SQL database using chembl_downloader."""
-    from ..chembl.api.downloader import check_and_download_chembl_db
+    """Download ChEMBL SQL database using chembl_downloader.
+
+    Alternatively, point CAPRICHO at a database already on the system with --set-from-path;
+    every later command reads that file in place, with no download.
+    """
+    from ..chembl.api.downloader import (
+        check_and_download_chembl_db,
+        set_chembl_db_path,
+        unset_chembl_db_path,
+    )
+
+    if set_from_path is not None and unset_path:
+        raise typer.BadParameter("--set-from-path and --unset-path cannot be combined.")
+
+    if set_from_path is not None:
+        if prefix is not None:
+            raise typer.BadParameter(
+                "--prefix sets where CAPRICHO downloads to, so it does not apply to a database "
+                "registered with --set-from-path."
+            )
+        databases = set_chembl_db_path(set_from_path, version=version)
+        logger.info(f"Registered ChEMBL release(s): {', '.join(sorted(databases))}")
+        raise typer.Exit()
+
+    if unset_path:
+        unset_chembl_db_path(version=version)
+        raise typer.Exit()
 
     logger.info(f"Starting ChEMBL download command for version: {version or 'latest'}")
     check_and_download_chembl_db(prefix=prefix.split("/") if prefix else None, version=version)

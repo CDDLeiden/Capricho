@@ -16,6 +16,8 @@ capricho download [OPTIONS]
 |---|---|---|
 | `--version`, `-v` | ChEMBL version to download | latest |
 | `--prefix`, `-p` | Custom pystow storage path | `~/.data/chembl/` |
+| `--set-from-path` | Use a ChEMBL SQLite database already on the system instead of downloading | `None` |
+| `--unset-path` | Forget the database registered with `--set-from-path` | `False` |
 
 ### Examples
 
@@ -29,6 +31,38 @@ capricho download --version 33
 # Use custom storage location (this will install version 25 it on ~/.data/old-chembl)
 capricho download --version 25 --prefix old-chembl/
 ```
+
+### Using a database you already have
+
+If you keep your own ChEMBL SQLite dumps, point CAPRICHO at them instead of downloading a
+second copy. The database is read where it lies; nothing is moved or copied.
+
+```bash
+# Register a single release
+capricho download --set-from-path /data/chembl/chembl_35.db
+
+# Register every chembl_<version>.db found under a directory
+capricho download --set-from-path /data/chembl/
+
+# Register only one release out of a directory holding several
+capricho download --set-from-path /data/chembl/ --version 35
+
+# Go back to downloading that release
+capricho download --unset-path --version 35
+```
+
+The release is read from the `chembl_<version>.db` file name; pass `--version` explicitly when
+the file is named otherwise. Registration writes
+`~/.data/chembl/chembl_downloader_config_<version>.json`, which every later command honours, so
+`capricho get --chembl-version 35` and `capricho explore --version 35` read the registered file.
+
+Before registering, CAPRICHO checks that the file is a ChEMBL database and that the release it
+states for itself — every dump records this in its `version` table — is the release it is being
+registered under. Registering a ChEMBL 36 dump as ChEMBL 37, whether through a mistyped
+`--version` or a renamed file, is therefore refused rather than silently misreporting the
+provenance of every dataset drawn from it. A database that states no release is registered on
+the strength of its file name, with a warning. Each run reports the database it reads, and a
+registered database that is later moved or deleted fails with an actionable message.
 
 ## capricho explore
 
