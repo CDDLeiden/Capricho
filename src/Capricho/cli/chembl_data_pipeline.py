@@ -49,50 +49,33 @@ from ..logger import logger
 AGGREGATE_SAVE_SORTED_BY = ["target_chembl_id", "assay_chembl_id"]
 
 
-def _count_flags(df: pd.DataFrame, column: str) -> dict[str, int]:
-    """Count individual flags in an & -separated flag column.
-
-    Splits each cell by " & " and normalizes dynamic patterns (e.g., "Assay size < 20"
-    becomes "Assay size <") before counting.
-
-    Args:
-        df: DataFrame containing the flag column.
-        column: Name of the column to count flags from.
-
-    Returns:
-        Dict mapping normalized flag patterns to their counts.
-    """
-    from ..analysis import normalize_comment_pattern
-
-    counts: dict[str, int] = {}
-    for cell in df[column].fillna("").astype(str):
-        if not cell or cell == "nan":
-            continue
-        for flag in cell.split(" & "):
-            flag = flag.strip()
-            if not flag:
-                continue
-            normalized = normalize_comment_pattern(flag)
-            counts[normalized] = counts.get(normalized, 0) + 1
-    return counts
-
-
 def _log_pipeline_summary(
     df: pd.DataFrame,
+    aggregated_df: pd.DataFrame,
     pre_aggregation_count: int,
-    post_aggregation_count: int,
 ) -> None:
     """Log a structured summary of the pipeline run.
 
+    Reports how much data carries each quality flag, how much would be omitted if every
+    flag were dropped, and how much of the aggregated data is measured in more than one
+    assay and can therefore be compared across assays.
+
     Args:
         df: The pre-aggregation DataFrame (one row per measurement).
-        pre_aggregation_count: Total rows fetched before any processing.
-        post_aggregation_count: Rows after aggregation.
+        aggregated_df: The aggregated DataFrame (one row per compound-target readout).
+        pre_aggregation_count: Rows carried into aggregation.
     """
+    from ..flag_report import (
+        format_cross_assay_coverage,
+        format_flag_summary,
+        summarize_cross_assay_coverage,
+        summarize_flags,
+    )
+
     lines = ["", "PIPELINE SUMMARY"]
 
-    lines.append(f"  Rows fetched:              {pre_aggregation_count:>8,}")
-    lines.append(f"  Rows after aggregation:    {post_aggregation_count:>8,}")
+    lines.append(f"  Measurements before aggregation: {pre_aggregation_count:>8,}")
+    lines.append(f"  Aggregated datapoints:           {len(aggregated_df):>8,}")
 
     if len(df) > 0:
         # Pre-aggregation df uses molecule_chembl_id; post-aggregation uses connectivity
@@ -100,35 +83,42 @@ def _log_pipeline_summary(
         n_compounds = df[cpd_col].nunique() if cpd_col in df.columns else 0
         n_targets = df[TARGET_ID].nunique() if TARGET_ID in df.columns else 0
         n_assays = df[ASSAY_ID].nunique() if ASSAY_ID in df.columns else 0
-        lines.append(f"  Unique compounds:          {n_compounds:>8,}")
-        lines.append(f"  Unique targets:            {n_targets:>8,}")
-        lines.append(f"  Unique assays:             {n_assays:>8,}")
+        lines.append(f"  Unique compounds:                {n_compounds:>8,}")
+        lines.append(f"  Unique targets:                  {n_targets:>8,}")
+        lines.append(f"  Unique assays:                   {n_assays:>8,}")
 
     total = len(df)
 
-    # Quality flags (data_dropping_comment)
-    if DATA_DROPPING_COMMENT in df.columns and total > 0:
-        drop_counts = _count_flags(df, DATA_DROPPING_COMMENT)
+    if ASSAY_ID in aggregated_df.columns and len(aggregated_df) > 0:
+        coverage = summarize_cross_assay_coverage(aggregated_df, n_retrieved=total or None)
         lines.append("")
-        lines.append("  QUALITY FLAGS (data_dropping_comment)")
-        if drop_counts:
-            for flag, count in sorted(drop_counts.items(), key=lambda x: -x[1]):
-                pct = count / total * 100
-                lines.append(f"    {flag + ':':<45s} {count:>6,}  ({pct:5.1f}%)")
-        else:
-            lines.append("    (none)")
+        lines.append(format_cross_assay_coverage(coverage))
 
-    # Processing flags (data_processing_comment)
-    if DATA_PROCESSING_COMMENT in df.columns and total > 0:
-        proc_counts = _count_flags(df, DATA_PROCESSING_COMMENT)
+    # Quality flags: the union is the data omitted if every flag is dropped.
+    if DATA_DROPPING_COMMENT in df.columns and total > 0:
         lines.append("")
-        lines.append("  PROCESSING FLAGS (data_processing_comment)")
-        if proc_counts:
-            for flag, count in sorted(proc_counts.items(), key=lambda x: -x[1]):
-                pct = count / total * 100
-                lines.append(f"    {flag + ':':<45s} {count:>6,}  ({pct:5.1f}%)")
-        else:
-            lines.append("    (none)")
+        lines.append(
+            format_flag_summary(
+                summarize_flags(df, comment_column=DATA_DROPPING_COMMENT),
+                title=(
+                    f"QUALITY FLAGS ({DATA_DROPPING_COMMENT}) "
+                    f"— share of {total:,} measurements before aggregation"
+                ),
+            )
+        )
+
+    # Processing flags record what was changed, not what would be removed.
+    if DATA_PROCESSING_COMMENT in df.columns and total > 0:
+        lines.append("")
+        lines.append(
+            format_flag_summary(
+                summarize_flags(df, comment_column=DATA_PROCESSING_COMMENT),
+                title=(
+                    f"PROCESSING FLAGS ({DATA_PROCESSING_COMMENT}) "
+                    f"— share of {total:,} measurements before aggregation"
+                ),
+            )
+        )
 
     logger.info("\n".join(lines))
 

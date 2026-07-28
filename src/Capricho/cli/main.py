@@ -667,7 +667,7 @@ def get_data(
         value_col=value_column.value,
     )
 
-    _log_pipeline_summary(pre_agg_df, pre_aggregation_count=pre_agg_count, post_aggregation_count=len(df))
+    _log_pipeline_summary(pre_agg_df, aggregated_df=df, pre_aggregation_count=pre_agg_count)
 
     if not skip_recipe:
         output_name = output_path.stem.split(".")[0]
