@@ -10,6 +10,7 @@ used to annotate processing steps that occurred during the data processing pipel
 
 """
 
+import re
 from typing import Optional
 
 import pandas as pd
@@ -22,6 +23,19 @@ from ..core.default_fields import (
 )
 from ..core.pandas_helper import add_comment, conflicting_duplicates
 from ..logger import logger
+
+
+CENSORED_ACTIVITY_KEYWORDS = [
+    "not active",
+    "inactive",
+    "inconclusive",
+    "not tested",
+    "not determined",
+    "below threshold",
+    "below detection",
+    "no activity",
+]
+CENSORED_ACTIVITY_PATTERN = "|".join(re.escape(keyword) for keyword in CENSORED_ACTIVITY_KEYWORDS)
 
 
 ### Marking readouts that will be DROPPED by CompoundMapper ###
@@ -459,25 +473,11 @@ def flag_censored_activity_comment(df: pd.DataFrame) -> pd.DataFrame:
         logger.warning("Column 'standard_relation' not found. Cannot correct censored activity comments.")
         return df
 
-    # Keywords indicating censored/inactive data (case-insensitive)
-    censored_keywords = [
-        "not active",
-        "inactive",
-        "inconclusive",
-        "not tested",
-        "not determined",
-        "nd",
-        "below threshold",
-        "below detection",
-        "no activity",
-    ]
-
-    # Build pattern for case-insensitive matching
-    pattern = "|".join([f"(?i){keyword}" for keyword in censored_keywords])
-
     mask = (  # Find rows with problematic activity_comment and standard_relation='='
         df["activity_comment"].notna()
-        & df["activity_comment"].astype(str).str.contains(pattern, regex=True, na=False)
+        & df["activity_comment"]
+        .astype(str)
+        .str.contains(CENSORED_ACTIVITY_PATTERN, case=False, regex=True, na=False)
         & (df["standard_relation"] == "=")
     )
 

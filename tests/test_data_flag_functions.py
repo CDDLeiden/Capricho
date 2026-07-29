@@ -1,10 +1,12 @@
 """Tests for data_flag_functions module."""
 
+import re
 import unittest
 
 import pandas as pd
 
 from Capricho.chembl.data_flag_functions import (
+    CENSORED_ACTIVITY_PATTERN,
     flag_censored_activity_comment,
     flag_incompatible_units,
     flag_insufficient_assay_overlap,
@@ -14,6 +16,10 @@ from Capricho.chembl.data_flag_functions import (
 
 
 class TestFlagCensoredActivityComment(unittest.TestCase):
+    def test_pattern_compiles_with_python_re(self):
+        """Test that the pattern is valid for pandas backends using Python's re engine."""
+        re.compile(CENSORED_ACTIVITY_PATTERN)
+
     def test_flag_inconclusive_comment(self):
         """Test that 'Inconclusive' activity_comment with '=' relation is corrected to '<'."""
         df = pd.DataFrame(
@@ -134,6 +140,31 @@ class TestFlagCensoredActivityComment(unittest.TestCase):
         self.assertEqual(result.loc[0, "standard_relation"], "<")
         self.assertEqual(result.loc[1, "standard_relation"], "<")
         self.assertEqual(result.loc[2, "standard_relation"], "<")
+
+    def test_nd_is_not_treated_as_censored(self):
+        """Test that ambiguous 'nd' abbreviations and substrings do not cause false positives."""
+        comments = [
+            "ND",
+            "N.D.",
+            "nd at 10 uM",
+            "Ligand efficiency reported",
+            "Standard compound",
+            "Bound to target",
+            "No inhibition found",
+            "Interpretation: Specific Binding",
+            "See Activity_Supp For Individual Animal Data",
+        ]
+        df = pd.DataFrame(
+            {
+                "standard_relation": ["="] * len(comments),
+                "activity_comment": comments,
+                "data_processing_comment": [None] * len(comments),
+            }
+        )
+
+        result = flag_censored_activity_comment(df)
+
+        self.assertEqual(result["standard_relation"].tolist(), ["="] * len(comments))
 
     def test_batch_correction(self):
         """Test that multiple rows are corrected in a single call."""
