@@ -1,10 +1,12 @@
 """Tests for data_flag_functions module."""
 
+import re
 import unittest
 
 import pandas as pd
 
 from Capricho.chembl.data_flag_functions import (
+    CENSORED_ACTIVITY_PATTERN,
     flag_censored_activity_comment,
     flag_incompatible_units,
     flag_insufficient_assay_overlap,
@@ -14,6 +16,10 @@ from Capricho.chembl.data_flag_functions import (
 
 
 class TestFlagCensoredActivityComment(unittest.TestCase):
+    def test_pattern_compiles_with_python_re(self):
+        """Test that the pattern is valid for pandas backends using Python's re engine."""
+        re.compile(CENSORED_ACTIVITY_PATTERN)
+
     def test_flag_inconclusive_comment(self):
         """Test that 'Inconclusive' activity_comment with '=' relation is corrected to '<'."""
         df = pd.DataFrame(
