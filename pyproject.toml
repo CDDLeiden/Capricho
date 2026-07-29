@@ -25,7 +25,7 @@ dependencies = [
   "chembl_webresource_client",
   "chembl_downloader",
   "tabulate",
-  "pandas",
+  "pandas >= 2.2.3",
   "numpy",
   "loguru",
   "scipy",
