@@ -31,7 +31,6 @@ CENSORED_ACTIVITY_KEYWORDS = [
     "inconclusive",
     "not tested",
     "not determined",
-    "nd",
     "below threshold",
     "below detection",
     "no activity",

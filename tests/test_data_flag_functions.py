@@ -141,6 +141,31 @@ class TestFlagCensoredActivityComment(unittest.TestCase):
         self.assertEqual(result.loc[1, "standard_relation"], "<")
         self.assertEqual(result.loc[2, "standard_relation"], "<")
 
+    def test_nd_is_not_treated_as_censored(self):
+        """Test that ambiguous 'nd' abbreviations and substrings do not cause false positives."""
+        comments = [
+            "ND",
+            "N.D.",
+            "nd at 10 uM",
+            "Ligand efficiency reported",
+            "Standard compound",
+            "Bound to target",
+            "No inhibition found",
+            "Interpretation: Specific Binding",
+            "See Activity_Supp For Individual Animal Data",
+        ]
+        df = pd.DataFrame(
+            {
+                "standard_relation": ["="] * len(comments),
+                "activity_comment": comments,
+                "data_processing_comment": [None] * len(comments),
+            }
+        )
+
+        result = flag_censored_activity_comment(df)
+
+        self.assertEqual(result["standard_relation"].tolist(), ["="] * len(comments))
+
     def test_batch_correction(self):
         """Test that multiple rows are corrected in a single call."""
         df = pd.DataFrame(
