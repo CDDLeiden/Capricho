@@ -16,6 +16,7 @@ def clean_data(
     deduplicate: bool = False,
     value_col: str = "pchembl_value",
     resolve_annotation_error: Optional[str] = None,
+    compound_col: str = "connectivity",
 ) -> pd.DataFrame:
     """Clean aggregated bioactivity data by deduplicating, resolving errors, and filtering flags.
 
@@ -28,7 +29,7 @@ def clean_data(
     3. Drop flags: removes individual flagged measurements from aggregated rows
        and recalculates statistics; rows where all measurements are flagged are
        removed entirely. Non-aggregated data is filtered at the row level.
-    4. Recalculate duplicate-aggregation group labels after any row removal.
+    4. Recalculate shared-identifier group labels after any row removal.
 
     Appropriate flags for dropping include unit errors, undefined stereochemistry,
     assay size issues, and mixtures. For potential duplicates, prefer using
@@ -53,6 +54,8 @@ def clean_data(
         resolve_annotation_error: Resolution strategy for unit annotation errors.
             Currently only "first" is supported (keep earliest document).
             Cannot be used together with dropping "Unit Annotation Error" flags.
+        compound_col: Column defining compound identity for re-aggregation and
+            ``shared_identifier_group``. Defaults to ``connectivity``.
 
     Returns:
         Cleaned DataFrame.
@@ -124,12 +127,17 @@ def clean_data(
         # Re-aggregate the data
         from .chembl_data_pipeline import re_aggregate_data
 
-        # Detect extra_id_cols from columns between connectivity and smiles
+        # Detect extra ID columns placed between compound identifiers and SMILES.
         cols = list(df.columns)
         if "connectivity" in cols and "smiles" in cols:
-            conn_idx = cols.index("connectivity")
+            connectivity_idx = cols.index("connectivity")
             smiles_idx = cols.index("smiles")
-            detected_id_cols = cols[conn_idx + 1 : smiles_idx]
+            identifier_columns = {"connectivity", compound_col, "smiles"}
+            detected_id_cols = [
+                column
+                for column in cols[connectivity_idx + 1 : smiles_idx]
+                if column not in identifier_columns
+            ]
             logger.info(f"Detected id_columns for re-aggregation: {detected_id_cols}")
         else:
             detected_id_cols = []
@@ -138,7 +146,7 @@ def clean_data(
             resolved,
             chirality=False,
             extra_id_cols=detected_id_cols,
-            compound_equality="connectivity",
+            compound_equality=compound_col,
         )
         logger.info(f"Re-aggregated to {len(df)} rows")
         rows_after_annotation = len(df)
@@ -180,8 +188,9 @@ def clean_data(
         )
     logger.info("\n".join(lines))
 
-    if {"connectivity", "target_chembl_id"}.issubset(df.columns):
-        df = assign_shared_identifier_groups(df)
+    shared_key = (compound_col, "target_chembl_id")
+    if set(shared_key).issubset(df.columns):
+        df = assign_shared_identifier_groups(df, key_columns=shared_key)
     return df
 
 
@@ -214,7 +223,8 @@ def prepare_multitask_data(
         df: Aggregated DataFrame from aggregate_data() with bioactivity statistics.
         task_col: Column to use as task identifier (e.g., "target_chembl_id").
         value_col: Column containing values to pivot (e.g., "pchembl_value_mean").
-        compound_col: Column for compound identity (e.g., "connectivity" or "smiles").
+        compound_col: Column defining compound identity (for example, ``connectivity``,
+            ``inchi``, ``inchikey``, or ``smiles``).
         smiles_col: Column containing SMILES strings.
         id_columns: List of additional columns to combine with task_col for creating
             composite task identifiers. Use this when data was aggregated with

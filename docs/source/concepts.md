@@ -28,6 +28,40 @@ Because the connectivity layer does not encode stereochemistry, stereoisomers (e
 - Stereochemistry information is unreliable or inconsistent across sources
 - You want to combine data from different stereoisomers and tautomers into a single entry
 
+### InChI-Based
+
+The `inchi` method uses the complete standard InChI generated from each standardized SMILES:
+
+```bash
+capricho get --target-ids CHEMBL203 --compound-equality inchi
+```
+
+Unlike the connectivity layer alone, a full InChI preserves specified stereochemistry and other
+InChI layers. The output includes an `inchi` column that can also be selected in downstream
+commands such as `capricho prepare --compound-col inchi`.
+
+**Use When:**
+- Specified stereochemistry must remain part of compound identity
+- You want a transparent, non-hashed standard identifier
+
+### InChIKey-Based
+
+The `inchikey` method uses the complete 27-character hash of the standard InChI:
+
+```bash
+capricho get --target-ids CHEMBL203 --compound-equality inchikey
+```
+
+It preserves the distinctions encoded by the full InChI—including specified stereochemistry—in
+a compact identifier. The output includes an `inchikey` column. Because an InChIKey is a hash,
+collisions are theoretically possible, although very unlikely for ordinary chemical datasets.
+CAPRICHO retains `connectivity` in every aggregated output for backward compatibility and adds
+`inchi` or `inchikey` when that full identifier is selected.
+
+**Use When:**
+- You need stereo-aware identity in a compact, database-friendly form
+- You want to exchange identifiers with systems that use full InChIKeys
+
 ### Fingerprint-Based
 
 The `mixed_fp` method uses a concatenation of ECFP4 (Morgan, radius 2) and RDKit path-based fingerprints to determine compound identity:
@@ -178,9 +212,11 @@ This is useful when you want to study the target in general rather than specific
 
 ### Repeated downstream activity identifiers
 
-Rows kept separate by mutation or `--id-columns` can still share the simpler downstream
-identifier `connectivity + target_chembl_id`. CAPRICHO labels every member of such a group
-in the `shared_identifier_group` output column. The label is a group identifier, not a quality
+Rows kept separate by mutation or `--id-columns` can still share the selected compound
+identifier and `target_chembl_id`. CAPRICHO labels every member of such a group in the
+`shared_identifier_group` output column. With the default method, the compound identifier is
+`connectivity`; `inchi`, `inchikey`, and `smiles` are used when those equality methods are
+selected. The label is a group identifier, not a quality
 flag: the rows may represent valid, scientifically distinct readouts. Singleton rows contain
 a missing value.
 

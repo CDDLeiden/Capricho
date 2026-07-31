@@ -212,15 +212,23 @@ Control how data is processed and aggregated:
 
 #### Aggregated output diagnostics
 
-The aggregated output includes `shared_identifier_group`. Rows sharing the **same** compound identifier (e.g. connectivity) and target_chembl_id recieve an interger label to help the user diagnose which measurements share `connectivity` and `target_chembl_id` but were kept separate by mutation `--id-columns`, or another preserved readout field. It does not indicate a source-data quality failure. `data.shared_identifier_group.value_counts()` reports the size of each group; inspect these groups before using compound + target alone as a downstream identifier.
+The aggregated output includes `shared_identifier_group`. Rows sharing the selected
+compound identifier and `target_chembl_id` receive the same label when they were kept
+separate by mutation, `--id-columns`, or another preserved readout field; all other rows
+contain `NaN`. The column is diagnostic metadata, not a source-data quality flag.
+`data.shared_identifier_group.value_counts()` reports each group's size. With the default
+compound-equality method the identifier is `connectivity`; the message and grouping use `inchi`,
+`inchikey`, or `smiles` when one of those methods is selected.
 
 #### Aggregation Column Options
 - **pchembl_value**: (Default) Aggregate on pChEMBL values (-log10 molar potency). Uses geometric mean.
 - **standard_value**: Aggregate on raw standard_value column. Uses arithmetic mean. Useful for ADMET data with non-molar units (%, permeability, etc.).
 
 #### Compound Equality Methods
-- **connectivity**: (Default) Based on molecular connectivity (InChI key first block), ignoring stereochemistry
-- **mixed_fp**: Uses ECFP4 and RDKit fingerprints (each with 2048 bits) for similarity determination
+- **connectivity**: (Default) Uses the first InChIKey block, ignoring stereochemistry
+- **inchi**: Uses the complete standard InChI, including specified stereochemistry
+- **inchikey**: Uses the complete 27-character InChIKey
+- **mixed_fp**: Uses ECFP4 and RDKit fingerprints (each with 2048 bits) for identity determination
 - **smiles**: Uses standardized SMILES strings directly for exact string matching
 
 #### Useful Metadata Columns
@@ -333,10 +341,14 @@ These options control the optional multitask activity matrix output:
 | Option | Description | Default |
 |---|---|---|
 | `--task-col` | Column to use as task identifier | `target_chembl_id` |
-| `--compound-col` | Column for compound identity (`connectivity` or `smiles`) | `connectivity` |
+| `--compound-col` | Compound identifier column (`connectivity`, `inchi`, `inchikey`, or `smiles`) | `connectivity` |
 | `--smiles-col` | Column containing SMILES strings | `smiles` |
 | `-vcol`, `--value-column` | Column holding the experimental measurement, as passed to `capricho get --value-column`. Statistics are read from `{value_column}_mean`. | `pchembl_value` |
 | `--id-columns` | Additional columns to combine with `task_col` for composite task identifiers. Use the same columns passed to `capricho get --id-columns` during aggregation. | `None` |
+
+Use the compound identifier selected during aggregation when creating the matrix. For example,
+a dataset retrieved with `--compound-equality inchikey` should normally be prepared with
+`--compound-col inchikey`.
 
 ### Output Options
 
@@ -517,18 +529,23 @@ Use `-rp` / `--conflict-report-path` to save a JSON report with:
 
 #### Compound Identifiers for Conflict Detection
 
-By default, conflicts are detected using the `connectivity` column (InChI key connectivity layer), which groups compounds by their molecular graph ignoring stereochemistry. You can use a different identifier:
+By default, conflicts are detected using the `connectivity` column, which groups compounds by
+their molecular graph while ignoring stereochemistry. You can instead select any compound
+identifier present in the aggregated output:
 
-- **`connectivity`** (default): Groups by connectivity layer, ignoring stereochemistry
-- **`smiles`**: Groups by standardized SMILES, which may be more or less permissive depending on your aggregation settings
+- **`connectivity`** (default): First InChIKey block; ignores stereochemistry
+- **`inchi`**: Complete standard InChI
+- **`inchikey`**: Complete 27-character InChIKey
+- **`smiles`**: Standardized SMILES
 
-To use SMILES for conflict detection, specify `-cid smiles`:
+For example, use full InChIKey identity with:
 
 ```bash
-capricho binarize -i data.csv -o output.csv -cid smiles
+capricho binarize -i data.csv -o output.csv -cid inchikey
 ```
 
-This allows you to check for inconsistencies at different levels of molecular identity (e.g., detecting conflicts between stereoisomers when using SMILES, or treating stereoisomers as the same compound when using connectivity).
+Use the same identity level chosen for aggregation unless you deliberately want to inspect
+conflicts at a broader or narrower level.
 
 ### Examples
 

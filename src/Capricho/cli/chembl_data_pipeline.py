@@ -35,8 +35,8 @@ from ..core.default_fields import (
     ASSAY_ID,
     DATA_DROPPING_COMMENT,
     DATA_PROCESSING_COMMENT,
-    SHARED_IDENTIFIER_GROUP,
     MOLECULE_ID,
+    SHARED_IDENTIFIER_GROUP,
     TARGET_ID,
 )
 from ..core.fp_utils import calculate_mixed_FPs
@@ -46,8 +46,99 @@ from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_s
 from ..core.stereo import find_undefined_stereocenters
 from ..logger import logger
 
+CompoundEqualityMethod = Literal["mixed_fp", "connectivity", "inchi", "inchikey", "smiles"]
+InChIIdentifier = Literal["connectivity", "inchi", "inchikey"]
+FULL_INCHI_IDENTIFIERS = {"inchi", "inchikey"}
+INCHI_IDENTIFIERS = {"connectivity", *FULL_INCHI_IDENTIFIERS}
+STEREO_SENSITIVE_EQUALITY_METHODS = {"smiles", *FULL_INCHI_IDENTIFIERS}
+
 # when aggregated, some `activity_id` values will be strings and sorting won't work properly
 AGGREGATE_SAVE_SORTED_BY = ["target_chembl_id", "assay_chembl_id"]
+
+
+def _compound_identifier_column(compound_equality: CompoundEqualityMethod) -> str:
+    """Return the output column representing the selected compound identity."""
+    # Fingerprints are not persisted in tabular output, so mixed_fp continues to use
+    # connectivity as its inspectable downstream identifier.
+    return "connectivity" if compound_equality == "mixed_fp" else compound_equality
+
+
+def _convert_smiles_to_identifier(
+    smiles: list,
+    identifier: InChIIdentifier,
+    *,
+    n_jobs: int = 4,
+    progress: bool = True,
+    chunk_size: Optional[int] = None,
+) -> list:
+    """Convert SMILES to an InChI-derived identifier with chemFilters."""
+    if not smiles:
+        return []
+    converter = InchiHandling(
+        convert_to=identifier,
+        n_jobs=n_jobs,
+        progress=progress,
+        from_smi=True,
+        chunk_size=chunk_size,
+    )
+    return converter(smiles)
+
+
+def _assign_output_compound_identifiers(
+    df: pd.DataFrame,
+    compound_equality: CompoundEqualityMethod,
+    connectivity_by_smiles: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Add inspectable compound identifiers to aggregated output."""
+    result = df.copy()
+    if connectivity_by_smiles is not None:
+        result["connectivity"] = result["smiles"].map(connectivity_by_smiles)
+        missing_mask = result["connectivity"].isna()
+        if missing_mask.any():
+            result.loc[missing_mask, "connectivity"] = _convert_smiles_to_identifier(
+                result.loc[missing_mask, "smiles"].tolist(), "connectivity"
+            )
+    else:
+        result["connectivity"] = _convert_smiles_to_identifier(
+            result["smiles"].tolist(), "connectivity", n_jobs=8, chunk_size=50
+        )
+
+    if compound_equality in FULL_INCHI_IDENTIFIERS:
+        result[compound_equality] = _convert_smiles_to_identifier(
+            result["smiles"].tolist(), compound_equality, n_jobs=8, chunk_size=50
+        )
+    return result
+
+
+def _finalize_aggregated_output(
+    df: pd.DataFrame,
+    compound_equality: CompoundEqualityMethod,
+    extra_id_cols: list[str],
+    connectivity_by_smiles: Optional[dict] = None,
+) -> pd.DataFrame:
+    """Add identifiers, order output columns, and assign shared-identifier groups."""
+    comment_columns = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
+    for column in comment_columns:
+        if column not in df.columns:
+            raise ValueError(
+                f"Column '{column}' is required in the DataFrame but is missing. "
+                "Please ensure that the DataFrame contains all necessary columns."
+            )
+    result = _assign_output_compound_identifiers(
+        df,
+        compound_equality,
+        connectivity_by_smiles=connectivity_by_smiles,
+    )
+    identifier_columns = [
+        "connectivity",
+        *([compound_equality] if compound_equality in FULL_INCHI_IDENTIFIERS else []),
+    ]
+    first_columns = [*identifier_columns, *extra_id_cols, "smiles"]
+    last_columns = result.columns.difference(first_columns + comment_columns).tolist() + comment_columns
+    result = result[[*first_columns, *last_columns]]
+    result = result.sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
+    selected_identifier = _compound_identifier_column(compound_equality)
+    return assign_shared_identifier_groups(result, key_columns=(selected_identifier, "target_chembl_id"))
 
 
 def _log_pipeline_summary(
@@ -134,7 +225,7 @@ def _warn_info_post_aggregation_repeats(
     extra_id_cols: list[str],
     aggregate_mutants: bool = False,
     value_col: str = "pchembl_value",
-    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
+    compound_equality: CompoundEqualityMethod = "connectivity",
     _limit: int = 30,
     _sample_rows: int = 5,
 ) -> None:
@@ -167,15 +258,21 @@ def _warn_info_post_aggregation_repeats(
         truncated = len(sample) > _sample_rows
         return sample.head(_sample_rows), truncated
 
-    if SHARED_IDENTIFIER_GROUP not in df.columns:
-        df = assign_shared_identifier_groups(df)
+    selected_identifier = _compound_identifier_column(compound_equality)
+    shared_key = (selected_identifier, "target_chembl_id")
+    df = assign_shared_identifier_groups(df, key_columns=shared_key)
 
-    compound_key = "connectivity" if compound_equality == "connectivity" else "smiles"
+    aggregation_compound_key = "smiles" if compound_equality == "mixed_fp" else selected_identifier
     if aggregate_mutants:
-        aggregation_key = [compound_key, "target_chembl_id", *extra_id_cols, "standard_relation"]
+        aggregation_key = [
+            aggregation_compound_key,
+            "target_chembl_id",
+            *extra_id_cols,
+            "standard_relation",
+        ]
     else:
         aggregation_key = [
-            compound_key,
+            aggregation_compound_key,
             "mutation",
             "target_chembl_id",
             *extra_id_cols,
@@ -188,9 +285,9 @@ def _warn_info_post_aggregation_repeats(
         dict.fromkeys(
             [
                 SHARED_IDENTIFIER_GROUP,
-                "connectivity",
+                selected_identifier,
                 "target_chembl_id",
-                *([] if compound_equality == "connectivity" else ["smiles"]),
+                *([] if selected_identifier == "smiles" else ["smiles"]),
                 *([] if aggregate_mutants else ["mutation"]),
                 *extra_id_cols,
                 "standard_relation",
@@ -214,7 +311,7 @@ def _warn_info_post_aggregation_repeats(
         unexpected = df.loc[unexpected_mask, display_columns].sort_values(
             by=[
                 column
-                for column in ["target_chembl_id", "connectivity", value_mean_col]
+                for column in ["target_chembl_id", selected_identifier, value_mean_col]
                 if column in df.columns
             ],
             ascending=True,
@@ -257,12 +354,17 @@ def _warn_info_post_aggregation_repeats(
         action = f"add `--id-columns {','.join(prepare_fields)}` to `capricho prepare`"
     else:
         action = "include the relevant distinguishing fields in the downstream task ID"
+    compound_action = (
+        f" Use `--compound-col {selected_identifier}` in `capricho prepare` to retain this compound identity."
+        if selected_identifier != "connectivity"
+        else ""
+    )
 
     shared_display_columns = list(
         dict.fromkeys(
             [
                 SHARED_IDENTIFIER_GROUP,
-                "connectivity",
+                selected_identifier,
                 "target_chembl_id",
                 *varying_fields,
                 value_mean_col,
@@ -285,10 +387,10 @@ def _warn_info_post_aggregation_repeats(
     truncation_note = " (the displayed group is truncated)" if sample_truncated else ""
     logger.info(
         f"CAPRICHO found {len(shared_rows):,} separate activity rows with {n_groups:,} repeated "
-        f"`connectivity` + `target_chembl_id` {combination_word}; varying fields: {varying_text}. "
+        f"`{selected_identifier}` + `target_chembl_id` {combination_word}; varying fields: {varying_text}. "
         f"These may be valid distinct readouts. `{SHARED_IDENTIFIER_GROUP}` labels rows sharing a combination "
         f"(NaN otherwise); group sizes: data.{SHARED_IDENTIFIER_GROUP}.value_counts(). If downstream tasks use "
-        f"target only, {action} or resolve these combinations first. Sample"
+        f"target only, {action} or resolve these combinations first.{compound_action} Sample"
         f"{truncation_note}:\n{_truncate_dataframe(shared_sample, _limit).to_string(index=False)}"
     )
 
@@ -636,7 +738,7 @@ def aggregate_data(
     extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
     output_path: Optional[Union[str, Path]] = None,
-    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
+    compound_equality: CompoundEqualityMethod = "connectivity",
     value_col: str = "pchembl_value",
 ):
     """Aggregate the data obtained from ChEMBL by:
@@ -660,10 +762,10 @@ def aggregate_data(
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data
-        compound_equality: How to identify same compounds in the dataset. If "mixed_fp", uses
-            mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
-            uses the first part of the InChI key (connectivity) to identify same compounds.
-            If "smiles", uses standardized SMILES strings directly. Defaults to "connectivity".
+        compound_equality: How to identify compounds in the dataset. ``connectivity`` uses
+            the first InChIKey block; ``inchi`` and ``inchikey`` use the complete standard
+            InChI representation or its hashed key; ``smiles`` uses standardized SMILES;
+            and ``mixed_fp`` uses combined ECFP4 and RDKit fingerprints.
         value_col: Column name containing the values to aggregate statistics on.
             Defaults to "pchembl_value". Use "standard_value" for non-pChEMBL data (e.g., % inhibition).
 
@@ -672,44 +774,41 @@ def aggregate_data(
     """
     current_extra_id_cols = list(extra_id_cols)  # mutable copy
 
-    connectivity_writer = InchiHandling(
-        convert_to="connectivity", n_jobs=4, progress=True, from_smi=True, chunk_size=None
-    )
-
-    # Track whether we pre-computed connectivity to avoid recalculating after aggregation
-    precomputed_connectivity = None
+    connectivity_by_smiles = None
 
     if compound_equality == "mixed_fp":
         fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
             df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}, chunk_size=50
         )
         df = df.assign(id_array=fps)
-    elif compound_equality == "connectivity":
+    elif compound_equality in INCHI_IDENTIFIERS:
+        if compound_equality == "connectivity":
 
-        def _strip_stereo(smi):
-            mol = Chem.MolFromSmiles(smi)
-            if mol is None:
-                return smi
-            Chem.RemoveStereochemistry(mol)
-            return Chem.MolToSmiles(mol)
+            def _strip_stereo(smi):
+                mol = Chem.MolFromSmiles(smi)
+                if mol is None:
+                    return smi
+                Chem.RemoveStereochemistry(mol)
+                return Chem.MolToSmiles(mol)
 
-        if chirality:
-            logger.warning(
-                "Connectivity-based compound equality merges stereoisomers!!!"
-                "Stripping stereochemistry from standard_smiles to avoid "
-                "retaining an arbitrary enantiomer's SMILES in the output."
-            )
-        df["standard_smiles"] = df["standard_smiles"].apply(_strip_stereo)
-        connectivities = connectivity_writer(df["standard_smiles"].tolist())
-        df = df.assign(id_array=connectivities)
-        # Store connectivity before censored modification so we can reuse it after aggregation
-        precomputed_connectivity = pd.Series(connectivities, index=df.index)
+            if chirality:
+                logger.warning(
+                    "Connectivity-based compound equality merges stereoisomers!!!"
+                    "Stripping stereochemistry from standard_smiles to avoid "
+                    "retaining an arbitrary enantiomer's SMILES in the output."
+                )
+            df["standard_smiles"] = df["standard_smiles"].apply(_strip_stereo)
+
+        identifiers = _convert_smiles_to_identifier(df["standard_smiles"].tolist(), compound_equality)
+        df = df.assign(id_array=identifiers)
+        if compound_equality == "connectivity":
+            connectivity_by_smiles = dict(zip(df["standard_smiles"], identifiers))
     elif compound_equality == "smiles":
         df = df.assign(id_array=df["standard_smiles"].values)
     else:
         raise ValueError(
             f"Invalid compound_equality value: {compound_equality}. "
-            "Expected 'mixed_fp', 'connectivity', or 'smiles'."
+            "Expected 'mixed_fp', 'connectivity', 'inchi', 'inchikey', or 'smiles'."
         )
 
     # For censored measurements (!=), include relation and value in the compound identifier
@@ -743,11 +842,6 @@ def aggregate_data(
     # get aggregated (e.g.: same target ID, same `extra_id_cols`, etc) is done in `process_repeat_mols`.
     repeats_idxs = repeated_indices_from_array_series(df["id_array"])
 
-    # Build mapping from standard_smiles to connectivity before aggregation
-    # (used to avoid recalculating connectivity after aggregation)
-    if precomputed_connectivity is not None:
-        smiles_to_connectivity = dict(zip(df["standard_smiles"], precomputed_connectivity))
-
     if "activity_comment" in df.columns:
         df["activity_comment"] = df["activity_comment"].fillna("")
 
@@ -763,37 +857,24 @@ def aggregate_data(
         DATA_PROCESSING_COMMENT,
     ]
 
+    preserve_stereo = chirality or compound_equality in STEREO_SENSITIVE_EQUALITY_METHODS
     final_data = process_repeat_mols(
         df,
         repeats_idxs,
         solve_strat="keep",
         extra_id_cols=current_extra_id_cols,
-        chirality=chirality,
+        chirality=preserve_stereo,
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
         value_col=value_col,
     )
 
-    # Assign connectivity column - reuse precomputed values when available.
-    # The mapping may miss molecules whose SMILES changed during canonicalization
-    # (e.g., stereochemistry stripped when chirality=False), so recompute for any misses.
-    if precomputed_connectivity is not None:
-        final_data = final_data.assign(connectivity=final_data["smiles"].map(smiles_to_connectivity))
-        missing_mask = final_data["connectivity"].isna()
-        if missing_mask.any():
-            recomputed = connectivity_writer(final_data.loc[missing_mask, "smiles"].tolist())
-            final_data.loc[missing_mask, "connectivity"] = recomputed
-    else:
-        final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
-
-    # reorder the columns so that connectivity comes first and processing & dropping comes last
-    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
-    first_columns = ["connectivity", *current_extra_id_cols, "smiles"]
-    last_columns = final_data.columns.difference(first_columns + xtra_cols).tolist() + xtra_cols
-    cols = ["connectivity", *current_extra_id_cols, "smiles", *last_columns]
-
-    final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
-    final_data = assign_shared_identifier_groups(final_data)
+    final_data = _finalize_aggregated_output(
+        final_data,
+        compound_equality,
+        current_extra_id_cols,
+        connectivity_by_smiles=connectivity_by_smiles,
+    )
 
     _warn_info_post_aggregation_repeats(
         final_data,
@@ -816,7 +897,7 @@ def re_aggregate_data(
     extra_multival_cols: list[str] = [],
     aggregate_mutants: bool = False,
     output_path: Optional[Union[str, Path]] = None,
-    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
+    compound_equality: CompoundEqualityMethod = "connectivity",
 ) -> pd.DataFrame:
     """Re-aggregate the data obtained from the `aggregate_data` method after dataset
     explosion. Useful for exploring the effect of different `extra_id_cols` and other
@@ -834,18 +915,16 @@ def re_aggregate_data(
         aggregate_mutants: if true, will aggregate data solely based on the target_chembl_id,
             regardless of the mutation flag in ChEMBL. Defaults to False.
         output_path: path to save the aggregated data
-        compound_equality: How to identify same compounds in the dataset. If "mixed_fp",
-            uses mixed fingerprints (ECFP4 + RDKitFP) to identify same compounds. If "connectivity",
-            uses the first part of the InChI key (connectivity) to identify same compounds.
-            If "smiles", uses standardized SMILES strings directly. Defaults to "connectivity".
+        compound_equality: How to identify compounds in the dataset. ``connectivity`` uses
+            the first InChIKey block; ``inchi`` and ``inchikey`` use the complete standard
+            InChI representation or its hashed key; ``smiles`` uses standardized SMILES;
+            and ``mixed_fp`` uses combined ECFP4 and RDKit fingerprints.
 
     Returns:
         pd.DataFrame: the re-aggregated data
     """
     if "processed_smiles" in df.columns:
         df = df.rename(columns={"processed_smiles": "standard_smiles"})
-    if compound_equality == "connectivity" and "connectivity" not in df.columns:
-        raise ValueError("Input DataFrame must contain a 'connectivity' column.")
     if "standard_smiles" not in df.columns:
         raise ValueError("Input DataFrame must contain a 'standard_smiles' column.")
     if "smiles" not in df.columns:
@@ -858,14 +937,17 @@ def re_aggregate_data(
             df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}
         )
         id_array = pd.Series(fps, index=df.index)
-    elif compound_equality == "connectivity":
-        id_array = df["connectivity"]
+    elif compound_equality in INCHI_IDENTIFIERS:
+        id_array = pd.Series(
+            _convert_smiles_to_identifier(df["standard_smiles"].tolist(), compound_equality),
+            index=df.index,
+        )
     elif compound_equality == "smiles":
         id_array = df["standard_smiles"]
     else:
         raise ValueError(
             f"Invalid compound_equality value: {compound_equality}. "
-            "Expected 'mixed_fp', 'connectivity', or 'smiles'."
+            "Expected 'mixed_fp', 'connectivity', 'inchi', 'inchikey', or 'smiles'."
         )
 
     # For censored measurements (!=), include relation and pchembl_value in the compound identifier
@@ -914,36 +996,21 @@ def re_aggregate_data(
                 "Please ensure that the DataFrame contains all necessary columns."
             )
 
+    preserve_stereo = chirality or compound_equality in STEREO_SENSITIVE_EQUALITY_METHODS
     final_data = process_repeat_mols(  # recalculate the stats given new conditions
         df,
         repeats_idxs,
         solve_strat="keep",
         extra_id_cols=extra_id_cols,
-        chirality=chirality,
+        chirality=preserve_stereo,
         extra_multival_cols=include_metadata,
         aggregate_mutants=aggregate_mutants,
     )
-    connectivity_writer = InchiHandling(
-        convert_to="connectivity", n_jobs=8, progress=True, from_smi=True, chunk_size=50
+    final_data = _finalize_aggregated_output(
+        final_data,
+        compound_equality,
+        extra_id_cols,
     )
-    final_data = final_data.assign(connectivity=lambda x: connectivity_writer(x["smiles"].tolist()))
-
-    # Reorder columns as in the original aggregate_data function
-    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
-    for col in xtra_cols:
-        if col not in final_data.columns:
-            raise ValueError(
-                f"Column '{col}' is required in the DataFrame but is missing. "
-                "Please ensure that the DataFrame contains all necessary columns."
-            )
-
-    # reorder the columns so that connectivity comes first and processing & dropping comes last
-    xtra_cols = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
-    first_columns = ["connectivity", *extra_id_cols, "smiles"]
-    last_columns = final_data.columns.difference(first_columns + xtra_cols).tolist() + xtra_cols
-    cols = ["connectivity", *extra_id_cols, "smiles", *last_columns]
-    final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
-    final_data = assign_shared_identifier_groups(final_data)
 
     _warn_info_post_aggregation_repeats(
         final_data,

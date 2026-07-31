@@ -117,6 +117,23 @@ def test_post_aggregation_message_describes_admet_id_columns():
     assert "mutation" not in message
 
 
+def test_clean_data_uses_selected_compound_identifier():
+    data = pd.DataFrame(
+        {
+            "connectivity": ["SAME", "SAME"],
+            "inchikey": ["KEY1", "KEY2"],
+            "target_chembl_id": ["TARGET1", "TARGET1"],
+            "smiles": ["C[C@H](O)Cl", "C[C@@H](O)Cl"],
+            "pchembl_value": [6.0, 7.0],
+            "data_dropping_comment": ["", ""],
+        }
+    )
+
+    cleaned = clean_data(data, compound_col="inchikey")
+
+    assert cleaned["shared_identifier_group"].isna().all()
+
+
 def test_clean_data_recalculates_groups_after_removing_a_row():
     data = pd.DataFrame(
         {

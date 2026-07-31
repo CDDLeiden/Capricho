@@ -121,11 +121,15 @@ class ChemblBackend(str, Enum):
 class CompoundEquality(str, Enum):
     mixed_fp = "mixed_fp"
     connectivity = "connectivity"
+    inchi = "inchi"
+    inchikey = "inchikey"
     smiles = "smiles"
 
 
 class CompoundIdColumn(str, Enum):
     connectivity = "connectivity"
+    inchi = "inchi"
+    inchikey = "inchikey"
     smiles = "smiles"
 
 
@@ -424,7 +428,7 @@ def get_data(
         typer.Option(
             "-cpd-eq",
             "--compound-equality",
-            help="Method for compound equality determination. mixed_fp uses combined ECFP4 and RDKit fingerprints.",
+            help="Method used to identify equivalent compounds during aggregation.",
         ),
     ] = DEFAULTS["compound_equality"],
     value_column: Annotated[
@@ -759,7 +763,7 @@ def binarize_data(
         typer.Option(
             "-cid",
             "--compound-id-col",
-            help="Column name for compound identifiers (connectivity or smiles).",
+            help="Column used as the compound identifier.",
         ),
     ] = CompoundIdColumn.connectivity,
     target_id_col: Annotated[
@@ -934,7 +938,7 @@ def prepare_data(
         CompoundIdColumn,
         typer.Option(
             "--compound-col",
-            help="Column for compound identity (connectivity or smiles).",
+            help="Column used as the compound identifier.",
         ),
     ] = CompoundIdColumn.connectivity,
     smiles_col: Annotated[
@@ -1129,6 +1133,7 @@ def prepare_data(
         value_col=value_col,
         resolve_annotation_error=resolve_annotation_error,
         drop_flags=flags_to_remove if flags_to_remove else None,
+        compound_col=compound_col.value,
     )
 
     # Use mean column for the activity matrix
