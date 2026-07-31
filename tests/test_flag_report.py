@@ -5,16 +5,28 @@ import pytest
 
 from Capricho.analysis import DroppingComment
 from Capricho.flag_report import (
+    AGGREGATED_LEVEL,
     ANY_FLAG_LABEL,
     ANY_SELECTED_LABEL,
+    ASSAY_LEVEL,
+    ASSAY_OVERLAP_LABEL,
+    COMPARISON_LEVEL,
+    COVERAGE_COLUMN_LABELS,
+    NO_ASSAY_OVERLAP_LABEL,
     RETAINED_LABEL,
+    RETRIEVED_LEVEL,
     TOTAL_LABEL,
     UNFLAGGED_LABEL,
+    coverage_table,
     flags_in_comment,
+    format_coverage_table,
     format_cross_assay_coverage,
+    format_curation_summary,
     format_flag_summary,
     measurement_comments,
     summarize_cross_assay_coverage,
+    summarize_curation,
+    summarize_curation_by_group,
     summarize_flags,
 )
 
@@ -133,7 +145,7 @@ class TestSummarizeFlags:
         assert count_of(summary, "Assay size <") == 1
 
     def test_overlapping_flag_names_are_not_double_counted(self):
-        """"Insufficient assay overlap" is a prefix of the metadata-matching variant."""
+        """ "Insufficient assay overlap" is a prefix of the metadata-matching variant."""
         data = pd.DataFrame(
             {
                 "data_dropping_comment": [
@@ -275,9 +287,7 @@ class TestCrossAssayCoverage:
     @pytest.fixture
     def aggregated(self):
         """Three compounds; only the first two were measured in more than one assay."""
-        return pd.DataFrame(
-            {"assay_chembl_id": ["CHEMBL1|CHEMBL2|CHEMBL3", "CHEMBL1|CHEMBL2", "CHEMBL1"]}
-        )
+        return pd.DataFrame({"assay_chembl_id": ["CHEMBL1|CHEMBL2|CHEMBL3", "CHEMBL1|CHEMBL2", "CHEMBL4"]})
 
     def test_counts_datapoints_reachable_by_cross_assay_comparison(self, aggregated):
         coverage = summarize_cross_assay_coverage(aggregated)
@@ -291,6 +301,14 @@ class TestCrossAssayCoverage:
 
         assert coverage["measurements_in_comparable"] == 5
 
+    def test_counts_assays_with_and_without_cross_assay_overlap(self, aggregated):
+        coverage = summarize_cross_assay_coverage(aggregated)
+
+        assert coverage["represented_assays"] == 4
+        assert coverage["assays_with_overlap"] == 3
+        assert coverage["pct_assays_with_overlap"] == 75.0
+        assert coverage["assays_without_overlap"] == 1
+
     def test_share_of_retrieved_measurements_when_known(self, aggregated):
         coverage = summarize_cross_assay_coverage(aggregated, n_retrieved=10)
 
@@ -300,10 +318,15 @@ class TestCrossAssayCoverage:
         assert "pct_measurements_in_comparable" not in summarize_cross_assay_coverage(aggregated)
 
     def test_single_assay_dataset_has_no_coverage(self):
-        coverage = summarize_cross_assay_coverage(pd.DataFrame({"assay_chembl_id": ["CHEMBL1"]}))
+        data = pd.DataFrame({"assay_chembl_id": ["CHEMBL1", "CHEMBL1|CHEMBL1"]})
+
+        coverage = summarize_cross_assay_coverage(data)
 
         assert coverage["comparable_datapoints"] == 0
         assert coverage["pct_comparable_datapoints"] == 0.0
+        assert coverage["represented_assays"] == 1
+        assert coverage["assays_with_overlap"] == 0
+        assert coverage["assays_without_overlap"] == 1
 
     def test_missing_column_is_an_error(self):
         with pytest.raises(ValueError, match="not found in DataFrame"):
@@ -315,3 +338,254 @@ class TestCrossAssayCoverage:
         assert "Measured in >1 assay:" in text
         assert "66.7%" in text
         assert "50.0% of retrieved" in text
+        assert "Has cross-assay overlap:" in text
+        assert "75.0%" in text
+        assert "No cross-assay overlap:" in text
+
+
+class TestSummarizeCuration:
+    @pytest.fixture
+    def retrieved(self):
+        """Four retrieved measurements, one of them flagged."""
+        return pd.DataFrame({"data_dropping_comment": ["Undefined Stereochemistry", "", "", ""]})
+
+    @pytest.fixture
+    def aggregated(self):
+        """Three datapoints pooling the four measurements; only the first is comparable."""
+        return pd.DataFrame(
+            {
+                "assay_chembl_id": ["CHEMBL1|CHEMBL2", "CHEMBL1", "CHEMBL3"],
+                "data_dropping_comment": ["Undefined Stereochemistry|", "", ""],
+            }
+        )
+
+    @pytest.fixture
+    def comparisons(self):
+        """The single pair the comparable datapoint contributes."""
+        return pd.DataFrame({"dropping_comment": ["Undefined Stereochemistry"]})
+
+    def test_each_level_keeps_its_own_denominator(self, retrieved, aggregated, comparisons):
+        summary = summarize_curation(
+            "Caco-2 A2B", retrieved=retrieved, aggregated=aggregated, comparisons=comparisons
+        )
+
+        totals = summary[summary["flag"] == TOTAL_LABEL].set_index("level")["n"]
+        assert totals[RETRIEVED_LEVEL] == 4
+        assert totals[AGGREGATED_LEVEL] == 3
+        assert totals[COMPARISON_LEVEL] == 1
+        assert totals[ASSAY_LEVEL] == 3
+
+    def test_omission_is_reported_per_level(self, retrieved, aggregated, comparisons):
+        summary = summarize_curation(
+            "Caco-2 A2B",
+            retrieved=retrieved,
+            aggregated=aggregated,
+            comparisons=comparisons,
+            drop_flags=[DroppingComment.UNDEFINED_STEREOCHEMISTRY.value],
+        )
+
+        omitted = summary[summary["flag"] == ANY_SELECTED_LABEL].set_index("level")
+        assert omitted.loc[RETRIEVED_LEVEL, "n"] == 1
+        assert omitted.loc[RETRIEVED_LEVEL, "pct"] == 25.0
+        assert omitted.loc[AGGREGATED_LEVEL, "n"] == 1
+        assert omitted.loc[AGGREGATED_LEVEL, "pct"] == pytest.approx(33.33, abs=0.01)
+        assert omitted.loc[COMPARISON_LEVEL, "pct"] == 100.0
+
+    def test_reports_the_share_reachable_by_cross_assay_comparison(self, retrieved, aggregated):
+        summary = summarize_curation("Caco-2 A2B", retrieved=retrieved, aggregated=aggregated)
+
+        coverage = summary[(summary["kind"] == "coverage") & (summary["level"] == AGGREGATED_LEVEL)]
+        assert coverage["n"].iloc[0] == 1
+        assert coverage["pct"].iloc[0] == pytest.approx(33.33, abs=0.01)
+
+    def test_reports_assays_with_and_without_overlap(self, aggregated):
+        summary = summarize_curation("Caco-2 A2B", aggregated=aggregated)
+        assay_coverage = summary[summary["level"] == ASSAY_LEVEL].set_index("flag")
+
+        assert assay_coverage.loc[ASSAY_OVERLAP_LABEL, "n"] == 2
+        assert assay_coverage.loc[ASSAY_OVERLAP_LABEL, "pct"] == pytest.approx(66.67, abs=0.01)
+        assert assay_coverage.loc[NO_ASSAY_OVERLAP_LABEL, "n"] == 1
+        assert assay_coverage.loc[NO_ASSAY_OVERLAP_LABEL, "pct"] == pytest.approx(33.33, abs=0.01)
+        assert assay_coverage.loc[TOTAL_LABEL, "n"] == 3
+
+    def test_dataset_name_allows_concatenating_several_datasets(self, retrieved):
+        combined = pd.concat(
+            [
+                summarize_curation("A2B", retrieved=retrieved),
+                summarize_curation("B2A", retrieved=retrieved),
+            ]
+        )
+
+        assert set(combined["dataset"]) == {"A2B", "B2A"}
+
+    def test_levels_left_out_are_absent(self, retrieved):
+        summary = summarize_curation("A2B", retrieved=retrieved)
+
+        assert set(summary["level"]) == {RETRIEVED_LEVEL}
+
+    def test_no_level_given_is_an_error(self):
+        with pytest.raises(ValueError, match="at least one"):
+            summarize_curation("A2B")
+
+    def test_formats_one_block_per_level(self, retrieved, aggregated, comparisons):
+        text = format_curation_summary(
+            summarize_curation(
+                "Caco-2 A2B", retrieved=retrieved, aggregated=aggregated, comparisons=comparisons
+            )
+        )
+
+        assert text.splitlines()[0] == "Caco-2 A2B"
+        assert RETRIEVED_LEVEL in text
+        assert AGGREGATED_LEVEL in text
+        assert COMPARISON_LEVEL in text
+        assert ASSAY_LEVEL in text
+        assert "Measured in >1 assay:" in text
+        assert ASSAY_OVERLAP_LABEL in text
+        assert NO_ASSAY_OVERLAP_LABEL in text
+
+
+class TestSummarizeCurationByGroup:
+    """Tests for splitting a multi-target dataset into one reported dataset per group."""
+
+    @pytest.fixture
+    def retrieved(self):
+        """Five measurements over two targets; the flagged one belongs to T1."""
+        return pd.DataFrame(
+            {
+                "target_chembl_id": ["T1", "T1", "T1", "T2", "T2"],
+                "data_dropping_comment": ["Undefined Stereochemistry", "", "", "", ""],
+            }
+        )
+
+    @pytest.fixture
+    def aggregated(self):
+        """Four datapoints, two per target; one of each target's is comparable."""
+        return pd.DataFrame(
+            {
+                "target_chembl_id": ["T1", "T1", "T2", "T2"],
+                "assay_chembl_id": ["CHEMBL1|CHEMBL2", "CHEMBL1", "CHEMBL3|CHEMBL4", "CHEMBL5"],
+                "data_dropping_comment": ["Undefined Stereochemistry|", "", "", ""],
+            }
+        )
+
+    def test_reports_one_dataset_per_group(self, retrieved, aggregated):
+        summary = summarize_curation_by_group("target_chembl_id", retrieved, aggregated)
+
+        assert list(dict.fromkeys(summary["dataset"])) == ["T1", "T2"]
+
+    def test_labels_rename_the_reported_groups(self, retrieved, aggregated):
+        summary = summarize_curation_by_group(
+            "target_chembl_id", retrieved, aggregated, labels={"T1": "CYP 3A4"}
+        )
+
+        # T2 has no entry, so it keeps the group value it was split on.
+        assert list(dict.fromkeys(summary["dataset"])) == ["CYP 3A4", "T2"]
+
+    def test_groups_partition_every_level(self, retrieved, aggregated):
+        summary = summarize_curation_by_group("target_chembl_id", retrieved, aggregated)
+        totals = summary[summary["flag"] == TOTAL_LABEL].set_index(["dataset", "level"])["n"]
+
+        assert totals[("T1", RETRIEVED_LEVEL)] == 3
+        assert totals[("T2", RETRIEVED_LEVEL)] == 2
+        assert totals[("T1", AGGREGATED_LEVEL)] == 2
+        assert totals[("T2", AGGREGATED_LEVEL)] == 2
+
+    def test_coverage_is_computed_within_each_group(self, retrieved, aggregated):
+        summary = summarize_curation_by_group("target_chembl_id", retrieved, aggregated)
+        assays = summary[summary["level"] == ASSAY_LEVEL].set_index(["dataset", "flag"])["n"]
+
+        # T2's CHEMBL5 is isolated, so only two of its three assays overlap.
+        assert assays[("T1", TOTAL_LABEL)] == 2
+        assert assays[("T1", ASSAY_OVERLAP_LABEL)] == 2
+        assert assays[("T2", TOTAL_LABEL)] == 3
+        assert assays[("T2", ASSAY_OVERLAP_LABEL)] == 2
+
+    def test_flags_are_counted_against_the_group_denominator(self, retrieved, aggregated):
+        summary = summarize_curation_by_group(
+            "target_chembl_id",
+            retrieved,
+            aggregated,
+            drop_flags=[DroppingComment.UNDEFINED_STEREOCHEMISTRY.value],
+        )
+        omitted = summary[
+            (summary["flag"] == ANY_SELECTED_LABEL) & (summary["level"] == RETRIEVED_LEVEL)
+        ].set_index("dataset")
+
+        # One of T1's three measurements, not one of the five in the whole dataset.
+        assert omitted.loc["T1", "n"] == 1
+        assert omitted.loc["T1", "pct"] == pytest.approx(33.33, abs=0.01)
+        assert omitted.loc["T2", "n"] == 0
+
+    def test_frame_without_the_group_column_is_an_error(self, aggregated):
+        retrieved = pd.DataFrame({"data_dropping_comment": [""]})
+
+        with pytest.raises(ValueError, match="retrieved"):
+            summarize_curation_by_group("target_chembl_id", retrieved, aggregated)
+
+    def test_no_level_given_is_an_error(self):
+        with pytest.raises(ValueError, match="at least one"):
+            summarize_curation_by_group("target_chembl_id")
+
+
+class TestCoverageTable:
+    """Tests for reshaping the coverage rows into one row per dataset."""
+
+    @pytest.fixture
+    def aggregated(self):
+        """Three datapoints; only the first is measured in more than one assay."""
+        return pd.DataFrame(
+            {
+                "assay_chembl_id": ["CHEMBL1|CHEMBL2", "CHEMBL1", "CHEMBL3"],
+                "data_dropping_comment": ["", "", ""],
+            }
+        )
+
+    @pytest.fixture
+    def summary(self, aggregated):
+        """Two datasets, the second holding half of the first."""
+        return pd.concat(
+            [
+                summarize_curation("A2B", aggregated=aggregated),
+                summarize_curation("B2A", aggregated=aggregated.head(2)),
+            ],
+            ignore_index=True,
+        )
+
+    def test_reports_one_row_per_dataset_in_order(self, summary):
+        assert list(coverage_table(summary)["dataset"]) == ["A2B", "B2A"]
+
+    def test_datapoint_overlap_matches_the_long_form(self, summary, aggregated):
+        table = coverage_table(summary).set_index("dataset")
+
+        assert table.loc["A2B", "comparable_datapoints"] == 1
+        assert table.loc["A2B", "aggregated_datapoints"] == 3
+        assert table.loc["A2B", "datapoint_overlap_pct"] == pytest.approx(33.33, abs=0.01)
+
+    def test_assay_overlap_keeps_its_own_denominator(self, summary):
+        table = coverage_table(summary).set_index("dataset")
+
+        # Two of the three assay identifiers overlap; the datapoint denominator is also 3,
+        # so a wrong denominator would go unnoticed on A2B but not on B2A.
+        assert table.loc["A2B", "assays_with_overlap"] == 2
+        assert table.loc["A2B", "represented_assays"] == 3
+        assert table.loc["B2A", "assays_with_overlap"] == 2
+        assert table.loc["B2A", "represented_assays"] == 2
+        assert table.loc["B2A", "assay_overlap_pct"] == 100.0
+
+    def test_columns_are_the_documented_ones(self, summary):
+        """The wide schema is the contract `plot_cross_assay_coverage` reads."""
+        assert list(coverage_table(summary).columns) == ["dataset", *COVERAGE_COLUMN_LABELS]
+
+    def test_display_headers_are_readable(self, summary):
+        """Every column reaches the reader with a prose header and no index."""
+        rendered = format_coverage_table(coverage_table(summary), dataset_label="Endpoint").to_html()
+
+        assert "Endpoint" in rendered
+        for label in COVERAGE_COLUMN_LABELS.values():
+            assert label in rendered
+
+    def test_summary_without_coverage_rows_is_an_error(self):
+        summary = summarize_curation("A2B", comparisons=pd.DataFrame({"dropping_comment": [""]}))
+
+        with pytest.raises(ValueError, match="Measured in >1 assay"):
+            coverage_table(summary)

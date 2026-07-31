@@ -1030,7 +1030,9 @@ class TestFormatMetricsText(unittest.TestCase):
         """Test that defined metrics survive when others are undefined."""
         from Capricho.analysis import format_metrics_text
 
-        self.assertEqual(format_metrics_text(np.nan, 0.85, 0.72), "Spearman $\\rho: 0.85$\nKendall $\\tau: 0.72$")
+        self.assertEqual(
+            format_metrics_text(np.nan, 0.85, 0.72), "Spearman $\\rho: 0.85$\nKendall $\\tau: 0.72$"
+        )
 
     def test_negative_r2_is_kept(self):
         """Test that a negative R2 is a real value and must not be dropped."""
@@ -1137,7 +1139,11 @@ class TestSampleSizeInPlotTitles(unittest.TestCase):
         """
         import matplotlib.pyplot as plt
 
-        from Capricho.analysis import DroppingComment, plot_multi_panel_comparability, plot_subset
+        from Capricho.analysis import (
+            DroppingComment,
+            plot_multi_panel_comparability,
+            plot_subset,
+        )
 
         df = pd.DataFrame({"pchembl_value_x": [7.57, 8.0], "pchembl_value_y": [7.57, 8.0]})
         fig, ax = plot_subset(df, title="On identity line")
@@ -1185,6 +1191,127 @@ class TestSampleSizeInPlotTitles(unittest.TestCase):
         for idx in range(2):
             facecolor = tuple(axs_flat[idx].collections[0].get_facecolor()[0][:3])
             self.assertEqual(facecolor, tab10[idx], f"Panel {idx + 1} should use tab10 color {idx}")
+        plt.close(fig)
+
+
+class TestPlotCrossAssayCoverage(unittest.TestCase):
+    """Tests that the coverage plot adapts to the number of datasets it is given."""
+
+    @staticmethod
+    def _coverage_fixture(n_datasets=2):
+        """Coverage table with one low-overlap and one high-overlap dataset per repeat."""
+        import pandas as pd
+
+        rows = []
+        for idx in range(n_datasets):
+            overlap = 41.2 if idx % 2 else 5.6
+            assay_overlap = 80.0 if idx % 2 else 7.5
+            rows.append(
+                {
+                    "dataset": f"d{idx}",
+                    "comparable_datapoints": 1234,
+                    "aggregated_datapoints": 2995,
+                    "datapoint_overlap_pct": overlap,
+                    "assays_with_overlap": 80,
+                    "represented_assays": 100,
+                    "assay_overlap_pct": assay_overlap,
+                }
+            )
+        return pd.DataFrame(rows)
+
+    def test_draws_one_panel_per_denominator(self):
+        """Test that the two overlap denominators get one panel each."""
+        import matplotlib.pyplot as plt
+
+        from Capricho.analysis import plot_cross_assay_coverage
+
+        fig, axes = plot_cross_assay_coverage(self._coverage_fixture())
+
+        self.assertEqual(len(axes), 2)
+        # A full-width track plus the filled share, for each dataset.
+        for ax in axes:
+            self.assertEqual(len(ax.patches), 4)
+        plt.close(fig)
+
+    def test_labels_rename_the_axis_ticks(self):
+        """Test that dataset names are shown, and mapped through `labels` when given."""
+        import matplotlib.pyplot as plt
+
+        from Capricho.analysis import plot_cross_assay_coverage
+
+        fig, axes = plot_cross_assay_coverage(self._coverage_fixture(), labels={"d0": r"IC$_{50}$"})
+
+        self.assertEqual([t.get_text() for t in axes[0].get_yticklabels()], [r"IC$_{50}$", "d1"])
+        plt.close(fig)
+
+    def test_height_grows_with_the_number_of_datasets(self):
+        """Test that 14 datasets are not squeezed into the height used for 2."""
+        import matplotlib.pyplot as plt
+
+        from Capricho.analysis import plot_cross_assay_coverage
+
+        fig_small, _ = plot_cross_assay_coverage(self._coverage_fixture(2))
+        fig_large, _ = plot_cross_assay_coverage(self._coverage_fixture(14))
+
+        small_height = fig_small.get_size_inches()[1]
+        large_height = fig_large.get_size_inches()[1]
+        self.assertGreater(large_height, small_height)
+        # Row pitch must stay wide enough for the two-line in-bar label.
+        self.assertGreater((large_height - small_height) / 12, 0.45)
+        plt.close(fig_small)
+        plt.close(fig_large)
+
+    def test_color_can_be_set_per_dataset(self):
+        """Test that a dict of colors is applied row by row, as case 3 does per direction."""
+        import matplotlib.colors as mcolors
+        import matplotlib.pyplot as plt
+
+        from Capricho.analysis import plot_cross_assay_coverage
+
+        fig, axes = plot_cross_assay_coverage(
+            self._coverage_fixture(), color={"d0": "darkorange", "d1": "purple"}
+        )
+
+        # The first two patches are the tracks; the filled bars follow in row order.
+        filled = axes[0].patches[2:]
+        self.assertEqual(filled[0].get_facecolor()[:3], mcolors.to_rgb("darkorange"))
+        self.assertEqual(filled[1].get_facecolor()[:3], mcolors.to_rgb("purple"))
+        plt.close(fig)
+
+    def test_empty_coverage_is_an_error(self):
+        """Test that an empty table is refused rather than drawn as a blank figure."""
+        import pandas as pd
+
+        from Capricho.analysis import plot_cross_assay_coverage
+
+        with self.assertRaisesRegex(ValueError, "no rows"):
+            plot_cross_assay_coverage(pd.DataFrame(columns=["dataset"]))
+
+    def test_plots_what_summarize_curation_reports(self):
+        """Test the whole seam, so the plot cannot drift from the table that feeds it.
+
+        The fixture above hand-builds the wide table; only this test proves the columns
+        `coverage_table` actually produces are the ones the panels read.
+        """
+        import matplotlib.pyplot as plt
+        import pandas as pd
+
+        from Capricho.analysis import plot_cross_assay_coverage
+        from Capricho.flag_report import coverage_table, summarize_curation
+
+        aggregated = pd.DataFrame(
+            {
+                "assay_chembl_id": ["CHEMBL1|CHEMBL2", "CHEMBL1", "CHEMBL3"],
+                "data_dropping_comment": ["", "", ""],
+            }
+        )
+        coverage = coverage_table(summarize_curation("A2B", aggregated=aggregated))
+
+        fig, axes = plot_cross_assay_coverage(coverage)
+
+        # 1 of 3 datapoints is comparable, and 2 of 3 assay IDs overlap.
+        self.assertIn("(1/3)", axes[0].texts[0].get_text())
+        self.assertIn("(2/3)", axes[1].texts[0].get_text())
         plt.close(fig)
 
 

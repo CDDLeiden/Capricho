@@ -149,7 +149,6 @@ def clean_data(
     if drop_flags:
         omission_summary = summarize_flags(df, flags=drop_flags, per_measurement=True)
         df = filter_aggregated_dropping_flags(df, drop_flags, value_column=value_col)
-    measurements_after_flags = _count_measurements(df, value_col)
 
     # Log consolidated summary
     lines = ["", "PREPARATION SUMMARY"]
@@ -178,15 +177,6 @@ def clean_data(
                 ),
             )
         )
-        lines.append("")
-        lines.append(
-            _removal_line(
-                "Measurements removed:", measurements_before_flags - measurements_after_flags, measurements_before_flags
-            )
-        )
-        lines.append(
-            _removal_line("Rows removed entirely:", rows_before_flags - len(df), rows_before_flags)
-        )
     logger.info("\n".join(lines))
 
     return df
@@ -197,12 +187,6 @@ def _count_measurements(df: pd.DataFrame, value_col: str, sep_str: str = "|") ->
     if value_col not in df.columns or len(df) == 0:
         return len(df)
     return int(df[value_col].apply(lambda x: len(str(x).split(sep_str)) if pd.notna(x) else 0).sum())
-
-
-def _removal_line(label: str, removed: int, total: int) -> str:
-    """Format one absolute-and-percentage removal line for the preparation summary."""
-    pct = removed / total * 100 if total else 0.0
-    return f"  {label:<26s} {removed:>8,} / {total:,}  ({pct:5.1f}%)"
 
 
 def prepare_multitask_data(
