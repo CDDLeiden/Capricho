@@ -3,9 +3,11 @@ from pathlib import Path
 from typing import Literal, Optional, Union
 
 import pandas as pd
-from chemFilters.chem.standardizers import ChemStandardizer, InchiHandling
+from chemFilters.chem.standardizers import ChemStandardizer
 from job_tqdflex import ParallelApplier
 from rdkit import Chem
+from rdkit.Chem import inchi
+from tqdm.auto import tqdm
 
 from ..chembl.data_flag_functions import (
     flag_censored_activity_comment,
@@ -15,7 +17,6 @@ from ..chembl.data_flag_functions import (
     flag_min_assay_size,
     flag_missing_canonical_smiles,
     flag_missing_document_date,
-    flag_missing_standard_smiles,
     flag_salt_or_solvent_removal,
     flag_strict_mutant_assays,
     flag_to_remove_mixture_compounds,
@@ -67,45 +68,72 @@ def _convert_smiles_to_identifier(
     smiles: list,
     identifier: InChIIdentifier,
     *,
-    n_jobs: int = 4,
     progress: bool = True,
-    chunk_size: Optional[int] = None,
 ) -> list:
-    """Convert SMILES to an InChI-derived identifier with chemFilters."""
-    if not smiles:
-        return []
-    converter = InchiHandling(
-        convert_to=identifier,
-        n_jobs=n_jobs,
-        progress=progress,
-        from_smi=True,
-        chunk_size=chunk_size,
-    )
-    return converter(smiles)
+    """Convert SMILES without serializing RDKit molecules to worker processes.
+
+    InChI generation is implemented in C++ and is fast enough that joblib's process and
+    RDKit-molecule pickling overhead dominates for the dataset sizes used by CAPRICHO.
+    """
+    if identifier not in INCHI_IDENTIFIERS:
+        raise ValueError(f"Invalid InChI identifier: {identifier}")
+
+    values = tqdm(smiles, desc=f"Converting to {identifier}") if progress else smiles
+    identifiers = []
+    for smiles_value in values:
+        if smiles_value is None:
+            identifiers.append(None)
+            continue
+        mol = Chem.MolFromSmiles(smiles_value)
+        if mol is None:
+            identifiers.append(None)
+        elif identifier == "inchi":
+            identifiers.append(inchi.MolToInchi(mol))
+        else:
+            inchikey = Chem.MolToInchiKey(mol)
+            identifiers.append(inchikey if identifier == "inchikey" else inchikey.split("-")[0])
+    return identifiers
+
+
+def _identifier_map(smiles: pd.Series, identifier: InChIIdentifier) -> dict:
+    """Calculate an identifier once per distinct SMILES string."""
+    unique_smiles = smiles.drop_duplicates().tolist()
+    identifiers = _convert_smiles_to_identifier(unique_smiles, identifier)
+    return dict(zip(unique_smiles, identifiers))
+
+
+def _connectivity_from_identifier(identifier, identifier_type: InChIIdentifier):
+    """Derive connectivity without parsing the molecule again."""
+    if identifier is None or pd.isna(identifier):
+        return None
+    if identifier_type == "inchi":
+        return inchi.InchiToInchiKey(identifier).split("-")[0]
+    if identifier_type == "inchikey":
+        return identifier.split("-")[0]
+    return identifier
 
 
 def _assign_output_compound_identifiers(
     df: pd.DataFrame,
     compound_equality: CompoundEqualityMethod,
-    connectivity_by_smiles: Optional[dict] = None,
+    identifier_by_smiles: Optional[dict] = None,
 ) -> pd.DataFrame:
-    """Add inspectable compound identifiers to aggregated output."""
+    """Add inspectable compound identifiers without recalculating cached values."""
     result = df.copy()
-    if connectivity_by_smiles is not None:
-        result["connectivity"] = result["smiles"].map(connectivity_by_smiles)
-        missing_mask = result["connectivity"].isna()
-        if missing_mask.any():
-            result.loc[missing_mask, "connectivity"] = _convert_smiles_to_identifier(
-                result.loc[missing_mask, "smiles"].tolist(), "connectivity"
-            )
-    else:
-        result["connectivity"] = _convert_smiles_to_identifier(
-            result["smiles"].tolist(), "connectivity", n_jobs=8, chunk_size=50
-        )
+    selected_identifier = compound_equality if compound_equality in INCHI_IDENTIFIERS else "connectivity"
 
-    if compound_equality in FULL_INCHI_IDENTIFIERS:
-        result[compound_equality] = _convert_smiles_to_identifier(
-            result["smiles"].tolist(), compound_equality, n_jobs=8, chunk_size=50
+    if identifier_by_smiles is None:
+        identifier_by_smiles = {}
+    result[selected_identifier] = result["smiles"].map(identifier_by_smiles).astype(object)
+    missing_mask = result[selected_identifier].isna()
+    if missing_mask.any():
+        missing_smiles = result.loc[missing_mask, "smiles"]
+        missing_identifiers = _identifier_map(missing_smiles, selected_identifier)
+        result.loc[missing_mask, selected_identifier] = missing_smiles.map(missing_identifiers)
+
+    if selected_identifier in FULL_INCHI_IDENTIFIERS:
+        result["connectivity"] = result[selected_identifier].map(
+            lambda value: _connectivity_from_identifier(value, selected_identifier)
         )
     return result
 
@@ -114,7 +142,7 @@ def _finalize_aggregated_output(
     df: pd.DataFrame,
     compound_equality: CompoundEqualityMethod,
     extra_id_cols: list[str],
-    connectivity_by_smiles: Optional[dict] = None,
+    identifier_by_smiles: Optional[dict] = None,
 ) -> pd.DataFrame:
     """Add identifiers, order output columns, and assign shared-identifier groups."""
     comment_columns = [DATA_PROCESSING_COMMENT, DATA_DROPPING_COMMENT]
@@ -127,7 +155,7 @@ def _finalize_aggregated_output(
     result = _assign_output_compound_identifiers(
         df,
         compound_equality,
-        connectivity_by_smiles=connectivity_by_smiles,
+        identifier_by_smiles=identifier_by_smiles,
     )
     identifier_columns = [
         "connectivity",
@@ -624,11 +652,16 @@ def get_standardize_and_clean_workflow(
     else:
         df = full_df.copy()
 
+    # A compound can have many activity rows. Standardization is deterministic, so run
+    # the expensive ChEMBL pipeline once per distinct source structure and map it back.
+    unique_canonical_smiles = df["canonical_smiles"].drop_duplicates().tolist()
+    standardized_by_smiles = dict(zip(unique_canonical_smiles, stdzer(unique_canonical_smiles)))
+
     df = (
         df
         # standardize the smiles & clean possible solvents & salts from the string
         .pipe(flag_missing_canonical_smiles)
-        .assign(standard_smiles=lambda x: stdzer(x["canonical_smiles"]))
+        .assign(standard_smiles=lambda x: x["canonical_smiles"].map(standardized_by_smiles))
         .dropna(subset=["standard_smiles"])  # drop if no structure is found
         .pipe(flag_salt_or_solvent_removal)
         .assign(final_smiles=lambda x: x["standard_smiles"].apply(clean_mixtures))
@@ -661,21 +694,28 @@ def get_standardize_and_clean_workflow(
 
     # Search for undefined stereocenters within the remaining data
     if drop_unassigned_chiral:  # here we have the problem with the "." SMILES
-        # Use parallel processing for finding undefined stereocenters
-        logger.debug(f"Finding undefined stereocenters in {len(df)} SMILES strings using parallel processing")
+        # Pass SMILES (not pickled RDKit molecules) to workers and process each distinct
+        # structure once. Activity datasets commonly contain the same compound many times.
+        unique_smiles = df["standard_smiles"].drop_duplicates().tolist()
+        logger.debug(
+            f"Finding undefined stereocenters in {len(unique_smiles)} distinct SMILES "
+            f"({len(df)} activity rows)"
+        )
         applier = ParallelApplier(
             find_undefined_stereocenters,
-            df["standard_smiles"].tolist(),
-            n_jobs=8,  # Use 8 cores by default
+            unique_smiles,
+            n_jobs=8,
             backend="loky",
             custom_desc="Find undefined stereocenters",
             logger=logger,
             chunk_size=200,
         )
-        undefined_stereo_lists = applier()
-        undefined_stereo_counts = [len(x) for x in undefined_stereo_lists]
+        undefined_stereo_counts = [len(value) for value in applier()]
+        undefined_stereo_by_smiles = dict(zip(unique_smiles, undefined_stereo_counts))
 
-        df = df.assign(undefined_stereocenters=undefined_stereo_counts).pipe(flag_undefined_stereochemistry)
+        df = df.assign(
+            undefined_stereocenters=lambda x: x["standard_smiles"].map(undefined_stereo_by_smiles)
+        ).pipe(flag_undefined_stereochemistry)
         logger.trace(f'Unassigned stereocenters: {df["undefined_stereocenters"].unique().tolist()}')
         undefined_stereo_mask = df["undefined_stereocenters"] > 0
         if undefined_stereo_mask.any():
@@ -774,13 +814,16 @@ def aggregate_data(
     """
     current_extra_id_cols = list(extra_id_cols)  # mutable copy
 
-    connectivity_by_smiles = None
+    identifier_by_smiles = None
 
     if compound_equality == "mixed_fp":
-        fps = calculate_mixed_FPs(  # Fingerprints are calculated to identify same molecules in the dataset
-            df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}, chunk_size=50
+        # Exact duplicate SMILES necessarily have identical fingerprints.
+        unique_smiles = df["standard_smiles"].drop_duplicates().tolist()
+        unique_fps = calculate_mixed_FPs(
+            unique_smiles, n_jobs=8, morgan_kwargs={"useChirality": chirality}, chunk_size=50
         )
-        df = df.assign(id_array=fps)
+        fp_by_smiles = dict(zip(unique_smiles, unique_fps))
+        df = df.assign(id_array=[fp_by_smiles[value] for value in df["standard_smiles"]])
     elif compound_equality in INCHI_IDENTIFIERS:
         if compound_equality == "connectivity":
 
@@ -797,12 +840,12 @@ def aggregate_data(
                     "Stripping stereochemistry from standard_smiles to avoid "
                     "retaining an arbitrary enantiomer's SMILES in the output."
                 )
-            df["standard_smiles"] = df["standard_smiles"].apply(_strip_stereo)
+            unique_smiles = df["standard_smiles"].drop_duplicates()
+            stripped_by_smiles = dict(zip(unique_smiles, unique_smiles.apply(_strip_stereo)))
+            df["standard_smiles"] = df["standard_smiles"].map(stripped_by_smiles)
 
-        identifiers = _convert_smiles_to_identifier(df["standard_smiles"].tolist(), compound_equality)
-        df = df.assign(id_array=identifiers)
-        if compound_equality == "connectivity":
-            connectivity_by_smiles = dict(zip(df["standard_smiles"], identifiers))
+        identifier_by_smiles = _identifier_map(df["standard_smiles"], compound_equality)
+        df = df.assign(id_array=df["standard_smiles"].map(identifier_by_smiles))
     elif compound_equality == "smiles":
         df = df.assign(id_array=df["standard_smiles"].values)
     else:
@@ -873,7 +916,7 @@ def aggregate_data(
         final_data,
         compound_equality,
         current_extra_id_cols,
-        connectivity_by_smiles=connectivity_by_smiles,
+        identifier_by_smiles=identifier_by_smiles,
     )
 
     _warn_info_post_aggregation_repeats(
@@ -932,16 +975,18 @@ def re_aggregate_data(
             "This method expects the output from CompoundMapper's CLI, which includes a 'smiles' column."
         )
 
+    identifier_by_smiles = None
     if compound_equality == "mixed_fp":
-        fps = calculate_mixed_FPs(
-            df["standard_smiles"].tolist(), n_jobs=8, morgan_kwargs={"useChirality": chirality}
-        )
-        id_array = pd.Series(fps, index=df.index)
+        unique_smiles = df["standard_smiles"].drop_duplicates().tolist()
+        unique_fps = calculate_mixed_FPs(unique_smiles, n_jobs=8, morgan_kwargs={"useChirality": chirality})
+        fp_by_smiles = dict(zip(unique_smiles, unique_fps))
+        id_array = pd.Series([fp_by_smiles[value] for value in df["standard_smiles"]], index=df.index)
     elif compound_equality in INCHI_IDENTIFIERS:
-        id_array = pd.Series(
-            _convert_smiles_to_identifier(df["standard_smiles"].tolist(), compound_equality),
-            index=df.index,
-        )
+        if compound_equality in df.columns and df[compound_equality].notna().all():
+            identifier_by_smiles = dict(zip(df["standard_smiles"], df[compound_equality]))
+        else:
+            identifier_by_smiles = _identifier_map(df["standard_smiles"], compound_equality)
+        id_array = df["standard_smiles"].map(identifier_by_smiles)
     elif compound_equality == "smiles":
         id_array = df["standard_smiles"]
     else:
@@ -1010,6 +1055,7 @@ def re_aggregate_data(
         final_data,
         compound_equality,
         extra_id_cols,
+        identifier_by_smiles=identifier_by_smiles,
     )
 
     _warn_info_post_aggregation_repeats(

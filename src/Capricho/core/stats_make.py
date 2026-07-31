@@ -227,7 +227,9 @@ def process_repeat_mols(
         lambda smi: smi if pd.isna(smi) or "|" not in smi else smi.split("|")[0]
     )
     logger.info("Canonicalizing smiles...")
-    df = df.assign(smiles=smiles_canonizer(smiles))
+    unique_smiles = smiles.drop_duplicates().tolist()
+    canonical_by_smiles = dict(zip(unique_smiles, smiles_canonizer(unique_smiles)))
+    df = df.assign(smiles=smiles.map(canonical_by_smiles))
 
     stats_cols = [f"{value_col}{suffix}" for suffix in ["_mean", "_std", "_median", "_counts"]]
     final_cols = [*id_cols, "smiles", *multival_cols, "might_rancemic", *stats_cols]

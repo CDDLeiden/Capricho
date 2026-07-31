@@ -5,6 +5,7 @@ import pandas as pd
 import pytest
 
 from Capricho.analysis import deaggregate_data
+from Capricho.cli import chembl_data_pipeline
 from Capricho.cli.chembl_data_pipeline import (
     _warn_info_post_aggregation_repeats,
     aggregate_data,
@@ -60,6 +61,27 @@ def test_connectivity_equality_merges_stereoisomers():
     result = aggregate_data(_stereoisomer_source(), chirality=False, compound_equality="connectivity")
 
     assert len(result) == 1
+
+
+@pytest.mark.parametrize("identifier", ["connectivity", "inchi", "inchikey"])
+def test_identifier_is_calculated_once_per_distinct_smiles(monkeypatch, identifier):
+    source = _stereoisomer_source()
+    source["standard_smiles"] = "CCO"
+    source["canonical_smiles"] = "CCO"
+    calls = []
+    convert = chembl_data_pipeline._convert_smiles_to_identifier
+
+    def recording_convert(smiles, identifier, **kwargs):
+        calls.append((list(smiles), identifier))
+        return convert(smiles, identifier, **kwargs)
+
+    monkeypatch.setattr(chembl_data_pipeline, "_convert_smiles_to_identifier", recording_convert)
+
+    result = aggregate_data(source, chirality=False, compound_equality=identifier)
+
+    assert len(result) == 1
+    assert calls == [(["CCO"], identifier)]
+    assert result["connectivity"].iloc[0] == "LFQSCWFLJHTTHZ"
 
 
 def test_shared_identifier_message_uses_selected_inchi_column():
