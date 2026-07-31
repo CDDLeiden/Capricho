@@ -310,6 +310,7 @@ These flags remove entries with specific quality concerns. Each flag corresponds
 | `--drop-data-validity` | Drop entries with data validity comments from ChEMBL | `False` |
 | `--drop-unit-error` | Drop entries with unit annotation errors (3.0 or 6.0 log unit differences) | `False` |
 | `--drop-mixture` | Drop entries containing mixtures in SMILES | `False` |
+| `--drop-activity-comment` | Drop entries whose `activity_comment` reports inactivity while the source `standard_relation` is `=` | `False` |
 | `--drop-assay-size` | Drop entries outside assay size bounds (both too small and too large) | `False` |
 | `--drop-insufficient-overlap` | Drop entries from assays with insufficient compound overlap | `False` |
 | `--remove-flags` | Custom quality flags to remove, comma-separated. Rows with these flags in `data_dropping_comment` will be filtered out. | `None` |
@@ -348,6 +349,7 @@ Quality flags are added to the `data_dropping_comment` column during `capricho g
 - **Data validity comment**: ChEMBL's own data quality annotations
 - **Unit annotation error**: Measurements differing by exactly 3.0 or 6.0 log units (suggesting unit conversion errors)
 - **Mixture in SMILES**: SMILES containing multiple components (`.` separator)
+- **Activity with exact standard relation and inactivity-like comment**: An inactivity-like `activity_comment` occurs with `standard_relation = '='`. CAPRICHO flags the combination for review while preserving the source comment, relation, and value.
 - **Assay size too small/large**: Assays outside the specified size bounds
 - **Insufficient assay overlap**: Assays without enough shared compounds for reliable comparison
 

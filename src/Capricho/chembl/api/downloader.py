@@ -671,6 +671,7 @@ def get_activity_table_sql(
             td.chembl_id AS target_chembl_id,
             td.organism AS target_organism,
             act.data_validity_comment,
+            act.activity_comment,
             act.potential_duplicate,
             d.chembl_id AS document_chembl_id
         FROM activities act
@@ -846,6 +847,7 @@ def get_full_activity_data_sql(
         "cs.canonical_smiles",
         "cs.standard_inchi_key",
         "act.data_validity_comment AS data_validity_comment",
+        "act.activity_comment",
         "act.potential_duplicate",
         "d.chembl_id AS document_chembl_id",
         "d.doc_type",

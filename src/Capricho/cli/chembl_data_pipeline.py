@@ -311,7 +311,6 @@ def get_standardize_and_clean_workflow(
     # Note: if require_doc_date=True, these will be hard-filtered in process_bioactivities
     full_df = flag_missing_document_date(full_df)
 
-    # Correct censored activity comments (inactive/inconclusive) with incorrect standard_relation='='
     full_df = flag_censored_activity_comment(full_df)
 
     # Convert units if requested
@@ -353,8 +352,7 @@ def get_standardize_and_clean_workflow(
         )
         full_df = flag_unit_conversion(full_df)
 
-    # Filter out activities with standard_relation not in the user-selected values
-    # This is important because flag_censored_activity_comment may change '=' to '<'
+    # Filter on the unchanged source relation.
     if "standard_relation" in full_df.columns and standard_relation is not None:
         excluded_relations = ~full_df["standard_relation"].isin(standard_relation)
         num_excluded = excluded_relations.sum()
@@ -652,12 +650,16 @@ def aggregate_data(
     if precomputed_connectivity is not None:
         smiles_to_connectivity = dict(zip(df["standard_smiles"], precomputed_connectivity))
 
+    if "activity_comment" in df.columns:
+        df["activity_comment"] = df["activity_comment"].fillna("")
+
     include_metadata = [
         "doc_type",
         "doi",
         "journal",
         "year",
         "chembl_release",
+        *(["activity_comment"] if "activity_comment" in df.columns else []),
         *extra_multival_cols,
         DATA_DROPPING_COMMENT,
         DATA_PROCESSING_COMMENT,
@@ -787,12 +789,16 @@ def re_aggregate_data(
 
     repeats_idxs = repeated_indices_from_array_series(id_array)
 
+    if "activity_comment" in df.columns:
+        df["activity_comment"] = df["activity_comment"].fillna("")
+
     include_metadata = [
         "doc_type",
         "doi",
         "journal",
         "year",
         "chembl_release",
+        *(["activity_comment"] if "activity_comment" in df.columns else []),
         *extra_multival_cols,
         DATA_DROPPING_COMMENT,
         DATA_PROCESSING_COMMENT,

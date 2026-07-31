@@ -32,7 +32,6 @@ class ProcessingComment(str, Enum):
     CALCULATED_PCHEMBL = "Calculated pChEMBL"
     SALT_SOLVENT_REMOVED = "Salt/solvent removed"
     PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS = "pChEMBL Duplication Across Documents"
-    CORRECTED_STANDARD_RELATION = "Corrected standard_relation from = to < (censored activity_comment)"
     UNIT_CONVERTED = "Unit converted to"  # Example: "Unit converted to nM from uM"
 
 
@@ -52,6 +51,7 @@ class DroppingComment(str, Enum):
     UNIT_ANNOTATION_ERROR = "Unit Annotation Error"
     MISSING_DOCUMENT_DATE = "Missing document date"
     MIXTURE_IN_SMILES = "Mixture in SMILES"
+    ACTIVITY_COMMENT_REVIEW = "Activity with exact standard relation and inactivity-like comment"
     INSUFFICIENT_ASSAY_OVERLAP = (
         "Insufficient assay overlap"  # Example: "Insufficient assay overlap (min_overlap=5)"
     )
@@ -125,9 +125,9 @@ def get_all_comments() -> list[str]:
         DroppingComment.UNIT_ANNOTATION_ERROR.value,
         DroppingComment.MISSING_DOCUMENT_DATE.value,
         DroppingComment.MIXTURE_IN_SMILES.value,
+        DroppingComment.ACTIVITY_COMMENT_REVIEW.value,
         ProcessingComment.SALT_SOLVENT_REMOVED.value,
         ProcessingComment.CALCULATED_PCHEMBL.value,
-        ProcessingComment.CORRECTED_STANDARD_RELATION.value,
         ProcessingComment.PCHEMBL_DUPLICATION_ACROSS_DOCUMENTS.value,
         ProcessingComment.UNIT_CONVERTED.value,
     ]
@@ -1199,10 +1199,7 @@ def build_query_string(comment: str, value_column: str = "pchembl_value") -> str
         return "processing_comment.str.contains('Calculated pChEMBL', regex=False) & (dropping_comment == '')"
 
     # For other processing comments (uses combined processing_comment column)
-    if comment in [
-        ProcessingComment.SALT_SOLVENT_REMOVED.value,
-        ProcessingComment.CORRECTED_STANDARD_RELATION.value,
-    ]:
+    if comment == ProcessingComment.SALT_SOLVENT_REMOVED.value:
         return f"processing_comment.str.contains('{comment}', regex=False) & dropping_comment == ''"
 
     # Special handling for unit conversion (pattern-based, uses combined processing_comment column)
@@ -1297,8 +1294,6 @@ def plot_multi_panel_comparability(
     comments_with_data = []  # only display the comments that have data
     n_data = []  # debugging info only
     for comment in comments:
-        if comment == "Corrected standard_relation from = to < (censored activity_comment)":
-            continue  # skip this comment as it contains discrete data only
         query_str = build_query_string(comment, value_column=value_column)
         subset = exploded_subset.query(query_str)
         if len(subset) > 0:

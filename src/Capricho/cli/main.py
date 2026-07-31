@@ -1005,6 +1005,15 @@ def prepare_data(
             is_flag=True,
         ),
     ] = False,
+    drop_activity_comment: Annotated[
+        bool,
+        typer.Option(
+            "--drop-activity-comment/--keep-activity-comment",
+            help="Drop entries whose activity_comment reports inactivity while the source "
+            "standard_relation is '='.",
+            is_flag=True,
+        ),
+    ] = False,
     drop_assay_size: Annotated[
         bool,
         typer.Option(
@@ -1102,6 +1111,8 @@ def prepare_data(
         flags_to_remove.append(DroppingComment.UNIT_ANNOTATION_ERROR.value)
     if drop_mixture:
         flags_to_remove.append(DroppingComment.MIXTURE_IN_SMILES.value)
+    if drop_activity_comment:
+        flags_to_remove.append(DroppingComment.ACTIVITY_COMMENT_REVIEW.value)
     if drop_assay_size:
         flags_to_remove.append(DroppingComment.ASSAY_SIZE_TOO_SMALL.value)
         flags_to_remove.append(DroppingComment.ASSAY_SIZE_TOO_LARGE.value)

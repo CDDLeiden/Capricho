@@ -39,6 +39,7 @@ SCHEMA = {
         "standard_value REAL",
         "pchembl_value REAL",
         "data_validity_comment TEXT",
+        "activity_comment TEXT",
         "potential_duplicate INTEGER",
     ],
     "assays": [
@@ -90,7 +91,8 @@ def build_chembl_db(path: Path, with_release_column: bool) -> None:
     )
     con.execute("INSERT INTO compound_structures VALUES (1, 'CC(=O)Oc1ccccc1C(=O)O', 'BSYNRYMUTXBXSQ')")
     con.execute(
-        "INSERT INTO activities VALUES (10, 1, 100, 1000, 1, '=', 'Ki', 'nM', 5.0, 8.3, NULL, 0)"
+        "INSERT INTO activities VALUES "
+        "(10, 1, 100, 1000, 1, '=', 'Ki', 'nM', 5.0, 8.3, NULL, 'Not Active', 0)"
     )
     con.execute(
         "INSERT INTO assays VALUES (100, 'CHEMBL1', 'test assay', 'D', 'B', 'Homo sapiens', "
@@ -210,6 +212,48 @@ class TestChembl36Schema(ChemblSchemaTestCase):
             target_chembl_ids=["CHEMBL205"], chembl_release=29, version=self.version
         )
         self.assertEqual(len(dropped), 0)
+
+
+class TestActivityCommentRetrieval(ChemblSchemaTestCase):
+    def test_sql_retrieval_exposes_the_comment_to_flagging(self):
+        from Capricho.analysis import DroppingComment
+        from Capricho.chembl.api.downloader import get_full_activity_data_sql
+        from Capricho.chembl.data_flag_functions import flag_censored_activity_comment
+        from Capricho.core.default_fields import DATA_DROPPING_COMMENT
+
+        df = get_full_activity_data_sql(target_chembl_ids=["CHEMBL205"], version=self.version)
+        result = flag_censored_activity_comment(df)
+
+        self.assertEqual(result.iloc[0]["activity_comment"], "Not Active")
+        self.assertEqual(result.iloc[0]["standard_relation"], "=")
+        self.assertIn(
+            DroppingComment.ACTIVITY_COMMENT_REVIEW.value,
+            str(result.iloc[0][DATA_DROPPING_COMMENT]),
+        )
+
+
+class TestWebresourceActivityCommentRequested(unittest.TestCase):
+    def test_only_selection_includes_activity_comment(self):
+        from unittest import mock
+
+        import Capricho.chembl.api.webresource as webresource
+
+        query = mock.Mock()
+        query.only.return_value = [
+            {
+                "activity_id": 10,
+                "molecule_chembl_id": "CHEMBL25",
+                "standard_relation": "=",
+                "activity_comment": "Not Active",
+            }
+        ]
+
+        with mock.patch.object(webresource, "new_client") as client:
+            client.activity.filter.return_value = query
+            df, _ = webresource.get_activity_table(target_chembl_ids=["CHEMBL205"])
+
+        self.assertIn("activity_comment", query.only.call_args.args)
+        self.assertEqual(df.iloc[0]["activity_comment"], "Not Active")
 
 
 if __name__ == "__main__":
