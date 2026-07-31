@@ -79,6 +79,12 @@ class TestFlagActivityCommentReview(unittest.TestCase):
             "ND",
             "N.D.",
             "nd at 10 uM",
+            "Ligand efficiency reported",
+            "Standard compound",
+            "Bound to target",
+            "No inhibition found",
+            "Interpretation: Specific Binding",
+            "See Activity_Supp For Individual Animal Data",
         ]
         for comment in comments:
             with self.subTest(comment=comment):
