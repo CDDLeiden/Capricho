@@ -176,6 +176,25 @@ capricho get --target-ids CHEMBL203 --aggregate-mutants
 
 This is useful when you want to study the target in general rather than specific mutations.
 
+### Repeated downstream activity identifiers
+
+Rows kept separate by mutation or `--id-columns` can still share the simpler downstream
+identifier `connectivity + target_chembl_id`. CAPRICHO labels every member of such a group
+in the `shared_identifier_group` output column. The label is a group identifier, not a quality
+flag: the rows may represent valid, scientifically distinct readouts. Singleton rows contain
+a missing value.
+
+```python
+# Each index is a group label and each value is that group's number of rows.
+data.shared_identifier_group.value_counts()
+```
+
+Before pivoting or modeling on compound and target alone, inspect these groups. Preserve the
+distinction by including the relevant fields in the downstream task identifier—for example,
+`capricho prepare --id-columns mutation`—or deliberately filter or combine the group when
+that is scientifically appropriate. CAPRICHO's INFO message reports the fields that vary and
+shows all members of its sampled groups where the display limit permits.
+
 ### Metadata Columns
 
 Include additional metadata in your analysis:

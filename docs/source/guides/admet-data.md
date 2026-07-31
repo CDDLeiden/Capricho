@@ -159,6 +159,36 @@ When using `--value-column standard_value`, the output columns include:
 | `standard_value_n` | Number of measurements aggregated |
 | `standard_units` | Unit of measurement (converted if `--convert-units` used) |
 
+### Repeated activity identifiers in ADMET data
+
+Different ADMET conditions can produce separate output rows with the same compound and task
+identifiers. CAPRICHO keeps those rows separate when an ID column differs. With the current
+default identity method, the concrete identifier columns are `connectivity` and
+`target_chembl_id`.
+
+In the MDCK-MDR1 A→B permeability example, a current run reports:
+
+```text
+CAPRICHO found 10 separate activity rows with 5 repeated `connectivity` +
+`target_chembl_id` combinations; varying fields: `standard_units`,
+`assay_cell_type`.
+```
+
+One combination differs by reported unit (`10'-6/cm` versus `10^-6 cm/s`); the other four
+differ by cell type (for example, `MDCK` versus `MDCK-MDR1`). The directional Caco-2 outputs
+do not contain repeated combinations and therefore do not emit this message.
+
+Inspect the affected rows and group sizes with:
+
+```python
+data[data["shared_identifier_group"].notna()]
+data["shared_identifier_group"].value_counts()
+```
+
+If these conditions should remain separate downstream, use the fields named by the message—for
+this example, `capricho prepare --id-columns standard_units,assay_cell_type`. Otherwise, resolve
+the combinations deliberately before modeling.
+
 ## Working with Percent Inhibition Data
 
 For percent inhibition assays (e.g., plasma protein binding):

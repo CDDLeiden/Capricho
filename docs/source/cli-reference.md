@@ -210,6 +210,10 @@ Control how data is processed and aggregated:
 | `-mcols`, `--metadata-columns` | Extra metadata columns to keep, comma-separated | `[]` |
 | `-idcols`, `--id-columns` | Additional columns to append to the aggregation key (compound + task), comma-separated. E.g. `assay_chembl_id` keeps measurements from different assays separate. | `[]` |
 
+#### Aggregated output diagnostics
+
+The aggregated output includes `shared_identifier_group`. Rows sharing the **same** compound identifier (e.g. connectivity) and target_chembl_id recieve an interger label to help the user diagnose which measurements share `connectivity` and `target_chembl_id` but were kept separate by mutation `--id-columns`, or another preserved readout field. It does not indicate a source-data quality failure. `data.shared_identifier_group.value_counts()` reports the size of each group; inspect these groups before using compound + target alone as a downstream identifier.
+
 #### Aggregation Column Options
 - **pchembl_value**: (Default) Aggregate on pChEMBL values (-log10 molar potency). Uses geometric mean.
 - **standard_value**: Aggregate on raw standard_value column. Uses arithmetic mean. Useful for ADMET data with non-molar units (%, permeability, etc.).

@@ -6,7 +6,7 @@ from typing import List, Optional
 
 import pandas as pd
 
-from ..core.pandas_helper import assign_stats
+from ..core.pandas_helper import assign_shared_identifier_groups, assign_stats
 from ..logger import logger
 
 
@@ -28,6 +28,7 @@ def clean_data(
     3. Drop flags: removes individual flagged measurements from aggregated rows
        and recalculates statistics; rows where all measurements are flagged are
        removed entirely. Non-aggregated data is filtered at the row level.
+    4. Recalculate duplicate-aggregation group labels after any row removal.
 
     Appropriate flags for dropping include unit errors, undefined stereochemistry,
     assay size issues, and mixtures. For potential duplicates, prefer using
@@ -179,6 +180,8 @@ def clean_data(
         )
     logger.info("\n".join(lines))
 
+    if {"connectivity", "target_chembl_id"}.issubset(df.columns):
+        df = assign_shared_identifier_groups(df)
     return df
 
 
@@ -252,8 +255,9 @@ def prepare_multitask_data(
         n_extra_rows = duplicates.sum() - n_dup_pairs
         logger.warning(
             f"Found {n_dup_pairs} compound-task pairs with multiple values ({n_extra_rows} extra rows). "
-            f"Only the first value will be kept. "
-            f"If your data was aggregated with --id-columns, use the same columns here via --id-columns."
+            "Only the first value will be kept. If the rows were kept separate by mutation or "
+            "--id-columns during aggregation, include those distinguishing columns here via --id-columns. "
+            "Inspect shared_identifier_group in CAPRICHO output to identify the affected groups."
         )
 
     # Pivot the data to create activity matrix

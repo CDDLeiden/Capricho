@@ -35,11 +35,12 @@ from ..core.default_fields import (
     ASSAY_ID,
     DATA_DROPPING_COMMENT,
     DATA_PROCESSING_COMMENT,
+    SHARED_IDENTIFIER_GROUP,
     MOLECULE_ID,
     TARGET_ID,
 )
 from ..core.fp_utils import calculate_mixed_FPs
-from ..core.pandas_helper import save_dataframe
+from ..core.pandas_helper import assign_shared_identifier_groups, save_dataframe
 from ..core.smiles_utils import clean_mixtures
 from ..core.stats_make import process_repeat_mols, repeated_indices_from_array_series
 from ..core.stereo import find_undefined_stereocenters
@@ -133,66 +134,163 @@ def _warn_info_post_aggregation_repeats(
     extra_id_cols: list[str],
     aggregate_mutants: bool = False,
     value_col: str = "pchembl_value",
-    _limit: int = 15,  # limit in the string length for the warning/info logging
+    compound_equality: Literal["mixed_fp", "connectivity", "smiles"] = "connectivity",
+    _limit: int = 30,
+    _sample_rows: int = 5,
 ) -> None:
-    def _truncate_dataframe(df: pd.DataFrame, limit: int) -> pd.DataFrame:
-        """Truncate DataFrame values to a specified length."""
-        if pd.__version__ > "2.1.0":  # applymap got deprecated in 2.1.0
-            return df.map(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
-        else:
-            return df.applymap(lambda x: str(x)[:limit] + "..." if len(str(x)) > limit else str(x))
+    """Report unexpected full-key duplicates and intentionally shared downstream IDs."""
 
+    def _truncate_dataframe(data: pd.DataFrame, limit: int) -> pd.DataFrame:
+        """Truncate DataFrame values to a specified length."""
+
+        def truncate(value):
+            text = str(value)
+            return text[:limit] + "..." if len(text) > limit else text
+
+        if pd.__version__ > "2.1.0":  # applymap got deprecated in 2.1.0
+            return data.map(truncate)
+        return data.applymap(truncate)
+
+    def _sample_complete_groups(data: pd.DataFrame) -> tuple[pd.DataFrame, bool]:
+        """Return complete repeated-identifier groups up to the row limit when possible."""
+        group_sizes = data[SHARED_IDENTIFIER_GROUP].value_counts(sort=False)
+        selected_groups = []
+        selected_rows = 0
+        for group_id, group_size in group_sizes.items():
+            if selected_groups and selected_rows + group_size > _sample_rows:
+                break
+            selected_groups.append(group_id)
+            selected_rows += group_size
+            if selected_rows >= _sample_rows:
+                break
+        sample = data[data[SHARED_IDENTIFIER_GROUP].isin(selected_groups)]
+        truncated = len(sample) > _sample_rows
+        return sample.head(_sample_rows), truncated
+
+    if SHARED_IDENTIFIER_GROUP not in df.columns:
+        df = assign_shared_identifier_groups(df)
+
+    compound_key = "connectivity" if compound_equality == "connectivity" else "smiles"
     if aggregate_mutants:
-        col_subset_dupli_warning = ["connectivity", "target_chembl_id", *extra_id_cols]
+        aggregation_key = [compound_key, "target_chembl_id", *extra_id_cols, "standard_relation"]
     else:
-        col_subset_dupli_warning = ["connectivity", "mutation", "target_chembl_id", *extra_id_cols]
+        aggregation_key = [
+            compound_key,
+            "mutation",
+            "target_chembl_id",
+            *extra_id_cols,
+            "standard_relation",
+        ]
+    aggregation_key = list(dict.fromkeys(column for column in aggregation_key if column in df.columns))
 
     value_mean_col = f"{value_col}_mean"
-    logging_subset = [  # subset of columns to be displayed on the warning/info logging
-        *col_subset_dupli_warning,
-        "molecule_chembl_id",
-        "assay_chembl_id",
-        value_mean_col,
-    ]
-
-    # Based on the ID columns, we shouldn't have any duplicates. This warning is a safeguard
-    duplics_for_warning = df.duplicated(subset=col_subset_dupli_warning)
-    if duplics_for_warning.any():
-        dupli_subset = (
-            df[duplics_for_warning]
-            .loc[:, logging_subset]
-            .sort_values(
-                by=["target_chembl_id", "connectivity", value_mean_col],
-                ascending=[True, True, False],
-            )
+    display_columns = list(
+        dict.fromkeys(
+            [
+                SHARED_IDENTIFIER_GROUP,
+                "connectivity",
+                "target_chembl_id",
+                *([] if compound_equality == "connectivity" else ["smiles"]),
+                *([] if aggregate_mutants else ["mutation"]),
+                *extra_id_cols,
+                "standard_relation",
+                "molecule_chembl_id",
+                "assay_chembl_id",
+                value_mean_col,
+            ]
         )
-        truncated_df = _truncate_dataframe(dupli_subset, _limit)
+    )
+    display_columns = [column for column in display_columns if column in df.columns]
+
+    # Rows should not remain repeated after applying CAPRICHO's configured aggregation key.
+    # A censored value is itself part of that key; exact measurements aggregate regardless
+    # of value and therefore share one sentinel here.
+    aggregation_ids = df.loc[:, aggregation_key].copy()
+    if "standard_relation" in df.columns and value_mean_col in df.columns:
+        is_censored = df["standard_relation"].fillna("=").ne("=")
+        aggregation_ids["_censored_value"] = df[value_mean_col].where(is_censored, "__exact__")
+    unexpected_mask = aggregation_ids.duplicated(keep=False)
+    if unexpected_mask.any():
+        unexpected = df.loc[unexpected_mask, display_columns].sort_values(
+            by=[
+                column
+                for column in ["target_chembl_id", "connectivity", value_mean_col]
+                if column in df.columns
+            ],
+            ascending=True,
+        )
         logger.warning(
-            f"There two or more compounds matching the ID columns {col_subset_dupli_warning} "
-            "This is not intentional, please further inspect the collected dataset. Here's a sample "
-            "of the repeated entries:\n"
-            f"{truncated_df.head(10).to_string(index=False)}"
+            f"Unexpectedly found {unexpected_mask.sum():,} rows sharing CAPRICHO's aggregation key "
+            f"{aggregation_key} (and censored value where applicable). These rows should normally have been "
+            "combined; please inspect the dataset. "
+            "Sample rows (including every member where the display limit permits):\n"
+            f"{_truncate_dataframe(unexpected.head(_sample_rows), _limit).to_string(index=False)}"
         )
 
-    # Additional safeguard to ensure proper handling of the output by the user prior to modeling
-    target_cpd_col_subset = ["target_chembl_id", "connectivity"]
-    duplics_for_info = df.duplicated(subset=target_cpd_col_subset)
-    if duplics_for_info.any():
-        dupli_subset = (
-            df[duplics_for_info]
-            .loc[:, logging_subset]
-            .sort_values(by=target_cpd_col_subset + [value_mean_col], ascending=[True, True, False])
-        )
-        truncated_df = _truncate_dataframe(dupli_subset, _limit)
-        logger.info(
-            "There are two or more repeated compound-target readouts (based on `connectivity` & `target_chembl_id`) "
-            "without considering other ID columns. This is a result of your aggregation criteria. Make "
-            "sure to differ these data points in your modeling pipeline by including information of your other id_columns, "
-            "or resolve these compound-target repeats prior to modeling. Here's a sample of the repeated entries:\n"
-            f"{truncated_df.head(10).to_string(index=False)}"
-        )
+    shared_mask = df[SHARED_IDENTIFIER_GROUP].notna()
+    if not shared_mask.any():
+        return
 
-    return
+    shared_rows = df.loc[shared_mask]
+    n_groups = shared_rows[SHARED_IDENTIFIER_GROUP].nunique()
+    combination_word = "combination" if n_groups == 1 else "combinations"
+    key_candidates = [
+        *([] if aggregate_mutants else ["mutation"]),
+        *extra_id_cols,
+        "standard_relation",
+    ]
+    key_candidates = list(dict.fromkeys(column for column in key_candidates if column in shared_rows.columns))
+    grouped = shared_rows.groupby(SHARED_IDENTIFIER_GROUP, dropna=False)
+    varying_fields = [
+        column for column in key_candidates if grouped[column].nunique(dropna=False).gt(1).any()
+    ]
+    if not varying_fields:
+        fallback_candidates = [
+            column for column in ["smiles", value_mean_col] if column in shared_rows.columns
+        ]
+        varying_fields = [
+            column for column in fallback_candidates if grouped[column].nunique(dropna=False).gt(1).any()
+        ]
+    varying_text = ", ".join(f"`{column}`" for column in varying_fields) or "preserved readout fields"
+    prepare_fields = [column for column in varying_fields if column in key_candidates]
+    if prepare_fields:
+        action = f"add `--id-columns {','.join(prepare_fields)}` to `capricho prepare`"
+    else:
+        action = "include the relevant distinguishing fields in the downstream task ID"
+
+    shared_display_columns = list(
+        dict.fromkeys(
+            [
+                SHARED_IDENTIFIER_GROUP,
+                "connectivity",
+                "target_chembl_id",
+                *varying_fields,
+                value_mean_col,
+            ]
+        )
+    )
+    shared_display_columns = [column for column in shared_display_columns if column in shared_rows.columns]
+    shared_sample = shared_rows.loc[:, shared_display_columns].copy()
+    if value_mean_col in shared_sample.columns:
+        shared_sample[value_mean_col] = shared_sample[value_mean_col].round(3)
+    shared_sample = shared_sample.sort_values(
+        by=(
+            [SHARED_IDENTIFIER_GROUP, value_mean_col]
+            if value_mean_col in shared_rows.columns
+            else [SHARED_IDENTIFIER_GROUP]
+        ),
+        ascending=True,
+    )
+    shared_sample, sample_truncated = _sample_complete_groups(shared_sample)
+    truncation_note = " (the displayed group is truncated)" if sample_truncated else ""
+    logger.info(
+        f"CAPRICHO found {len(shared_rows):,} separate activity rows with {n_groups:,} repeated "
+        f"`connectivity` + `target_chembl_id` {combination_word}; varying fields: {varying_text}. "
+        f"These may be valid distinct readouts. `{SHARED_IDENTIFIER_GROUP}` labels rows sharing a combination "
+        f"(NaN otherwise); group sizes: data.{SHARED_IDENTIFIER_GROUP}.value_counts(). If downstream tasks use "
+        f"target only, {action} or resolve these combinations first. Sample"
+        f"{truncation_note}:\n{_truncate_dataframe(shared_sample, _limit).to_string(index=False)}"
+    )
 
 
 def get_standardize_and_clean_workflow(
@@ -695,9 +793,14 @@ def aggregate_data(
     cols = ["connectivity", *current_extra_id_cols, "smiles", *last_columns]
 
     final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
+    final_data = assign_shared_identifier_groups(final_data)
 
     _warn_info_post_aggregation_repeats(
-        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants, value_col=value_col
+        final_data,
+        extra_id_cols=extra_id_cols,
+        aggregate_mutants=aggregate_mutants,
+        value_col=value_col,
+        compound_equality=compound_equality,
     )
 
     if output_path is not None:
@@ -840,9 +943,13 @@ def re_aggregate_data(
     last_columns = final_data.columns.difference(first_columns + xtra_cols).tolist() + xtra_cols
     cols = ["connectivity", *extra_id_cols, "smiles", *last_columns]
     final_data = final_data[cols].sort_values(AGGREGATE_SAVE_SORTED_BY).reset_index(drop=True)
+    final_data = assign_shared_identifier_groups(final_data)
 
     _warn_info_post_aggregation_repeats(
-        final_data, extra_id_cols=extra_id_cols, aggregate_mutants=aggregate_mutants
+        final_data,
+        extra_id_cols=extra_id_cols,
+        aggregate_mutants=aggregate_mutants,
+        compound_equality=compound_equality,
     )
 
     if output_path is not None:
