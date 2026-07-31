@@ -469,9 +469,9 @@ def flag_censored_activity_comment(df: pd.DataFrame) -> pd.DataFrame:
         re.IGNORECASE,
     )
 
-    mask = df["activity_comment"].str.contains(review_comment_pattern, na=False) & df["standard_relation"].eq(
-        "="
-    )
+    # An all-NULL SQL result can be inferred as float rather than string.
+    activity_comments = df["activity_comment"].astype("string")
+    mask = activity_comments.str.contains(review_comment_pattern, na=False) & df["standard_relation"].eq("=")
     if not mask.any():
         logger.debug("No exact relations with inactivity-like activity comments found.")
         return df

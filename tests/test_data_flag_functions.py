@@ -87,6 +87,15 @@ class TestFlagActivityCommentReview(unittest.TestCase):
                 self.assertEqual(result.loc[0, "standard_relation"], "=")
                 self.assert_not_flagged(result)
 
+    def test_all_null_non_string_comment_column_is_accepted(self):
+        df = self._row(activity_comment=float("nan"))
+        self.assertTrue(pd.api.types.is_float_dtype(df["activity_comment"]))
+
+        result = flag_censored_activity_comment(df)
+
+        self.assertTrue(result["activity_comment"].isna().all())
+        self.assert_not_flagged(result)
+
     def test_non_exact_relations_are_not_flagged(self):
         """Rows already carrying a bound are not an exact-relation conflict."""
         for relation in ["<", ">", "<=", ">="]:
