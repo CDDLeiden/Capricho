@@ -71,10 +71,7 @@ def convert_to_log10(df: pd.DataFrame) -> pd.DataFrame:
     if convertible_df.shape[0] > 0:  # Calculate pChEMBL for convertible units
         convertible_df = convertible_df.pipe(flag_calculated_pchembl)
         convertible_df = convertible_df.assign(pchembl_value=lambda x: x.apply(compute_log, axis=1))
-        with pd.option_context("future.no_silent_downcasting", True):
-            pchembl_inf_or_nan = convertible_df.replace([np.inf, -np.inf], np.nan).query(
-                "pchembl_value.isna()"
-            )
+        pchembl_inf_or_nan = convertible_df.loc[~np.isfinite(convertible_df["pchembl_value"])]
         if not pchembl_inf_or_nan.empty:
             debug_cols = [
                 "target_chembl_id",
@@ -254,8 +251,11 @@ def process_bioactivities(
         pd.DataFrame: the processed bioactivities DataFrame.
     """
     bioactivities_df = bioactivities_df.astype({"standard_value": "float32", "pchembl_value": "float32"})
-    with pd.option_context("future.no_silent_downcasting", True):
-        bioactivities_df = bioactivities_df.replace({None: np.nan}).infer_objects(copy=False)
+    if int(pd.__version__.split(".", maxsplit=1)[0]) < 3:
+        with pd.option_context("future.no_silent_downcasting", True):
+            bioactivities_df = bioactivities_df.replace({None: np.nan}).infer_objects(copy=False)
+    else:
+        bioactivities_df = bioactivities_df.replace({None: np.nan}).infer_objects()
     bioactivities_df = (
         bioactivities_df.pipe(flag_with_data_validity_comment)
         # .query("data_validity_comment.isna()")
