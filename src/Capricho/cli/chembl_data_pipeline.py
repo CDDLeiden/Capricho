@@ -836,7 +836,7 @@ def aggregate_data(
 
             if chirality:
                 logger.warning(
-                    "Connectivity-based compound equality merges stereoisomers!!!"
+                    "Connectivity-based compound equality merges stereoisomers!!! "
                     "Stripping stereochemistry from standard_smiles to avoid "
                     "retaining an arbitrary enantiomer's SMILES in the output."
                 )
