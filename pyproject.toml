@@ -35,6 +35,7 @@ dependencies = [
   "pyarrow",
   "typer",
   "job-tqdflex",
+  "jinja2",
   ]
 
 [project.optional-dependencies]
