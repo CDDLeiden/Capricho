@@ -350,7 +350,7 @@ def flag_insufficient_assay_overlap(
     logger.info(
         "Calculating assay overlap with the following criteria:\n"
         "  - Only counting compounds with DIFFERENT pChEMBL values across assays\n"
-        "  - Excluding differences that are exact multiples of 3.0 log units (likely annotation errors)\n"
+        "  - Excluding differences that are exact multiples of 3.0 log units (likely unit annotation errors)\n"
         "  - Excluding overlaps within the same document"
     )
 
